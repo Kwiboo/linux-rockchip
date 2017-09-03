@@ -114,6 +114,11 @@
 		status = "okay";
 	};
 
+	dummy_codec: dummy-codec {
+		compatible = "linux,snd-soc-dummy";
+		#sound-dai-cells = <0>;
+	};
+
 	hdmi-sound {
 		compatible = "simple-audio-card";
 		simple-audio-card,format = "i2s";
@@ -129,14 +134,25 @@
 
 	sound {
 		compatible = "simple-audio-card";
-		simple-audio-card,format = "i2s";
 		simple-audio-card,mclk-fs = <256>;
 		simple-audio-card,name = "I2S";
-		simple-audio-card,cpu {
-			sound-dai = <&i2s1>;
+		simple-audio-card,dai-link@0 {
+			format = "i2s";
+			cpu {
+				sound-dai = <&i2s1>;
+			};
+			codec {
+				sound-dai = <&codec>;
+			};
 		};
-		simple-audio-card,codec {
-			sound-dai = <&codec>;
+		simple-audio-card,dai-link@1 {
+			format = "i2s";
+			cpu {
+				sound-dai = <&i2s1>;
+			};
+			codec {
+				sound-dai = <&dummy_codec>;
+			};
 		};
 	};
 
