@@ -545,15 +545,16 @@
 };
 
 &u3phy {
-	phy-supply = <&vcc_host_5v>;
 	status = "okay";
 };
 
 &u3phy_utmi {
+	phy-supply = <&vcc_host_5v>;
 	status = "okay";
 };
 
 &u3phy_pipe {
+	phy-supply = <&vcc_host_5v>;
 	status = "okay";
 };
 
