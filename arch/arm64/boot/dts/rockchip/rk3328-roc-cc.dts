@@ -75,8 +75,6 @@
 		gpios = <&gpio0 RK_PD1 GPIO_ACTIVE_HIGH>;
 		states = <1800000 0x1
 			  3300000 0x0>;
-		pinctrl-names = "default";
-		pinctrl-0 = <&sd_pwr_1800_sel>;
 		regulator-name = "vccio_sd";
 		regulator-type = "voltage";
 		regulator-min-microvolt = <1800000>;
@@ -411,12 +409,6 @@
 		};
 	};
 
-	sd-pwerset {
-		sd_pwr_1800_sel: sd-pwr-1800-sel {
-			rockchip,pins = <0 RK_PD1 RK_FUNC_GPIO &pcfg_pull_none>;
-		};
-	};
-
 	pmic {
 		pmic_int_l: pmic-int-l {
 			rockchip,pins = <1 RK_PD0 RK_FUNC_GPIO &pcfg_pull_up>;
@@ -444,13 +436,11 @@
 	cap-mmc-highspeed;
 	cap-sd-highspeed;
 	disable-wp;
-	max-frequency = <100000000>;
+	max-frequency = <150000000>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&sdmmc0_clk &sdmmc0_cmd &sdmmc0_dectn &sdmmc0_bus4>;
-	sd-uhs-sdr104;
 	supports-sd;
 	vmmc-supply = <&vcc_sd>;
-	vqmmc-supply = <&vccio_sd>;
 	status = "okay";
 };
 
