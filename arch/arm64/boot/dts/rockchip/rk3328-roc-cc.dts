@@ -44,8 +44,8 @@
 #include "rk3328.dtsi"
 
 / {
-	model = "Firefly ROC-RK3328-CC";
-	compatible = "firefly,rk3328-roc-cc", "rockchip,rk3328";
+	model = "Firefly ROC-RK3328-CC Board";
+	compatible = "firefly,roc-rk3328-cc", "rockchip,rk3328";
 
 	chosen {
 		bootargs = "rockchip_jtag earlyprintk=uart8250-32bit,0xff130000";
@@ -106,14 +106,20 @@
 	leds {
 		compatible = "gpio-leds";
 
-		led1 {
-			gpios = <&rk805 0 GPIO_ACTIVE_LOW>;
-			linux,default-trigger = "mmc0";
+		power {
+			label = "firefly:red:power";
+			linux,default-trigger = "ir-power-click";
+			gpios = <&rk805 1 GPIO_ACTIVE_LOW>;
+			default-state = "on";
+			mode = <0x23>;
 		};
 
-		led2 {
-			gpios = <&rk805 1 GPIO_ACTIVE_LOW>;
-			linux,default-trigger = "heartbeat";
+		user {
+			label = "firefly:yellow:user";
+			linux,default-trigger = "ir-user-click";
+			gpios = <&rk805 0 GPIO_ACTIVE_LOW>;
+			default-state = "off";
+			mode = <0x05>;
 		};
 	};
 
@@ -152,6 +158,7 @@
 	};
 
 	spdif-sound {
+		status = "disabled";
 		compatible = "simple-audio-card";
 		simple-audio-card,name = "SPDIF";
 		simple-audio-card,cpu {
@@ -163,6 +170,7 @@
 	};
 
 	spdif_out: spdif-out {
+		status = "disabled";
 		compatible = "linux,spdif-dit";
 		#sound-dai-cells = <0>;
 	};
@@ -450,12 +458,15 @@
 	bus-width = <4>;
 	cap-mmc-highspeed;
 	cap-sd-highspeed;
+	num-slots = <1>;
+	sd-uhs-sdr104;
+	supports-sd;
 	disable-wp;
-	max-frequency = <150000000>;
+	clock-freq-min-max = <400000 100000000>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&sdmmc0_clk &sdmmc0_cmd &sdmmc0_dectn &sdmmc0_bus4>;
-	supports-sd;
 	vmmc-supply = <&vcc_sd>;
+	vqmmc-supply = <&vccio_sd>;
 	status = "okay";
 };
 
@@ -463,7 +474,7 @@
 	#sound-dai-cells = <0>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&spdifm0_tx>;
-	status = "okay";
+	status = "disabled";
 };
 
 &tsadc {
