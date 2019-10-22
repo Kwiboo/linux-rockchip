@@ -126,6 +126,7 @@ struct usb_hcd {
 #define HCD_FLAG_DEAD			6	/* controller has died? */
 #define HCD_FLAG_INTF_AUTHORIZED	7	/* authorize interfaces? */
 #define HCD_FLAG_DEFER_RH_REGISTER	8	/* Defer roothub registration */
+#define HCD_FLAG_POWER_ON		9	/* power on */
 
 	/* The flags can be tested using these macros; they are likely to
 	 * be slightly faster than test_bit().
@@ -137,6 +138,7 @@ struct usb_hcd {
 #define HCD_RH_RUNNING(hcd)	((hcd)->flags & (1U << HCD_FLAG_RH_RUNNING))
 #define HCD_DEAD(hcd)		((hcd)->flags & (1U << HCD_FLAG_DEAD))
 #define HCD_DEFER_RH_REGISTER(hcd) ((hcd)->flags & (1U << HCD_FLAG_DEFER_RH_REGISTER))
+#define HCD_POWER_ON(hcd)	((hcd)->flags & (1U << HCD_FLAG_POWER_ON))
 
 	/*
 	 * Specifies if interfaces are authorized by default
