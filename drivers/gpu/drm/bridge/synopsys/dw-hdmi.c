@@ -1773,6 +1773,7 @@ static void hdmi_config_AVI(struct dw_hdmi *hdmi,
 			    const struct drm_connector *connector,
 			    const struct drm_display_mode *mode)
 {
+	const struct drm_connector_state *conn_state = connector->state;
 	struct hdmi_avi_infoframe frame;
 	u8 val;
 
@@ -1829,6 +1830,8 @@ static void hdmi_config_AVI(struct dw_hdmi *hdmi,
 		frame.extended_colorimetry =
 			HDMI_EXTENDED_COLORIMETRY_XV_YCC_601;
 	}
+
+	drm_hdmi_avi_infoframe_content_type(&frame, conn_state);
 
 	/*
 	 * The Designware IP uses a different byte format from standard
@@ -2534,7 +2537,8 @@ static int dw_hdmi_connector_atomic_check(struct drm_connector *connector,
 	if (!crtc)
 		return 0;
 
-	if (!drm_connector_atomic_hdr_metadata_equal(old_state, new_state)) {
+	if (!drm_connector_atomic_hdr_metadata_equal(old_state, new_state) ||
+	    old_state->content_type != new_state->content_type) {
 		crtc_state = drm_atomic_get_crtc_state(state, crtc);
 		if (IS_ERR(crtc_state))
 			return PTR_ERR(crtc_state);
@@ -2601,6 +2605,8 @@ static int dw_hdmi_connector_create(struct dw_hdmi *hdmi)
 	drm_atomic_helper_connector_reset(connector);
 
 	drm_connector_attach_max_bpc_property(connector, 8, 16);
+
+	drm_connector_attach_content_type_property(connector);
 
 	if (hdmi->version >= 0x200a && hdmi->plat_data->use_drm_infoframe)
 		drm_connector_attach_hdr_output_metadata_property(connector);
