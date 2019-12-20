@@ -125,10 +125,16 @@ struct vop_common {
 	struct vop_reg dma_stop;
 	struct vop_reg out_mode;
 	struct vop_reg standby;
+
+	struct vop_reg overlay_mode;
+	struct vop_reg dsp_data_swap;
+	struct vop_reg dsp_out_yuv;
+	struct vop_reg dsp_background;
 };
 
 struct vop_misc {
 	struct vop_reg global_regdone_en;
+	struct vop_reg win_channel[4];
 };
 
 struct vop_intr {
