@@ -127,6 +127,7 @@ struct vop_common {
 	struct vop_reg standby;
 
 	struct vop_reg overlay_mode;
+	struct vop_reg dclk_ddr;
 	struct vop_reg dsp_data_swap;
 	struct vop_reg dsp_out_yuv;
 	struct vop_reg dsp_background;
