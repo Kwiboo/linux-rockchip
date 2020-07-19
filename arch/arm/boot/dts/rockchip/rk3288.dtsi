@@ -1089,11 +1089,6 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 
-			vopl_out_hdmi: endpoint@0 {
-				reg = <0>;
-				remote-endpoint = <&hdmi_in_vopl>;
-			};
-
 			vopl_out_edp: endpoint@1 {
 				reg = <1>;
 				remote-endpoint = <&edp_in_vopl>;
@@ -1259,11 +1254,6 @@
 				hdmi_in_vopb: endpoint@0 {
 					reg = <0>;
 					remote-endpoint = <&vopb_out_hdmi>;
-				};
-
-				hdmi_in_vopl: endpoint@1 {
-					reg = <1>;
-					remote-endpoint = <&vopl_out_hdmi>;
 				};
 			};
 
