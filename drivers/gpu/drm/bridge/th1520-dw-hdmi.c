@@ -87,7 +87,8 @@ static void th1520_hdmi_phy_set_params(struct dw_hdmi *hdmi,
 }
 
 static int th1520_hdmi_phy_configure(struct dw_hdmi *hdmi, void *data,
-				     unsigned long mpixelclock)
+				     unsigned long mpixelclock,
+				     unsigned long mtmdsclock)
 {
 	unsigned int i;
 
