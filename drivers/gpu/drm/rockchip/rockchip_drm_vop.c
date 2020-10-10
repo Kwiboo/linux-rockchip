@@ -1896,6 +1896,20 @@ out:
 	return ret;
 }
 
+static bool plane_supports_yuv_format(const struct drm_plane *plane)
+{
+	const struct drm_format_info *info;
+	int i;
+
+	for (i = 0; i < plane->format_count; i++) {
+		info = drm_format_info(plane->format_types[i]);
+		if (info->is_yuv)
+			return true;
+	}
+
+	return false;
+}
+
 static void vop_plane_add_properties(struct drm_plane *plane, int zpos,
 				     const struct vop_win_data *win_data)
 {
@@ -1908,6 +1922,19 @@ static void vop_plane_add_properties(struct drm_plane *plane, int zpos,
 						   DRM_MODE_ROTATE_0 | flags);
 
 	drm_plane_create_zpos_immutable_property(plane, zpos);
+
+	if (!plane_supports_yuv_format(plane))
+		return;
+
+	flags = BIT(DRM_COLOR_YCBCR_BT601) | BIT(DRM_COLOR_YCBCR_BT709);
+	if (VOP_WIN_HAS_REG(win_data, fmt_10))
+		flags |= BIT(DRM_COLOR_YCBCR_BT2020);
+
+	drm_plane_create_color_properties(plane, flags,
+					  BIT(DRM_COLOR_YCBCR_LIMITED_RANGE) |
+					  BIT(DRM_COLOR_YCBCR_FULL_RANGE),
+					  DRM_COLOR_YCBCR_BT601,
+					  DRM_COLOR_YCBCR_LIMITED_RANGE);
 }
 
 static int vop_create_crtc(struct vop *vop)
