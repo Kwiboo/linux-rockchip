@@ -447,6 +447,9 @@ struct hv_vmbus_device_id {
 
 struct rpmsg_device_id {
 	char name[RPMSG_NAME_SIZE];
+#ifdef CONFIG_NO_GKI
+	kernel_ulong_t driver_data;
+#endif
 };
 
 /* i2c */
