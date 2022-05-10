@@ -2199,6 +2199,8 @@ static void assemble_hw_rps(struct rkvdec_ctx *ctx,
 
 	for (j = 0; j < run->num_slices; j++) {
 		uint st_bit_offset = 0;
+		uint num_l0_refs = 0;
+		uint num_l1_refs = 0;
 
 		sl_params = &run->slices_params[j];
 		dpb = decode_params->dpb;
@@ -2217,7 +2219,7 @@ static void assemble_hw_rps(struct rkvdec_ctx *ctx,
 		hw_ps = &priv_tbl->rps[j];
 		memset(hw_ps, 0, sizeof(*hw_ps));
 
-		for (i = 0; i <= sl_params->num_ref_idx_l0_active_minus1; i++) {
+		for (i = 0; i < num_l0_refs; i++) {
 			WRITE_RPS(!!(dpb[sl_params->ref_idx_l0[i]].flags & V4L2_HEVC_DPB_ENTRY_LONG_TERM_REFERENCE),
 				  REF_PIC_LONG_TERM_L0(i));
 			WRITE_RPS(sl_params->ref_idx_l0[i], REF_PIC_IDX_L0(i));
@@ -2227,7 +2229,7 @@ static void assemble_hw_rps(struct rkvdec_ctx *ctx,
 
 		}
 
-		for (i = 0; i <= sl_params->num_ref_idx_l1_active_minus1; i++) {
+		for (i = 0; i < num_l1_refs; i++) {
 			WRITE_RPS(!!(dpb[sl_params->ref_idx_l1[i]].flags & V4L2_HEVC_DPB_ENTRY_LONG_TERM_REFERENCE),
 				  REF_PIC_LONG_TERM_L1(i));
 			WRITE_RPS(sl_params->ref_idx_l1[i], REF_PIC_IDX_L1(i));
