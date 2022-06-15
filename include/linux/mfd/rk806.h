@@ -276,7 +276,8 @@
 #define RK806_CMD_LEN_MSK		0x0f
 #define RK806_REG_H			0x00
 
-#define VERSION_AB		0x01
+#define VERSION_AB			0x01
+#define RK806_READ_BUFFER_SIZE         32
 
 enum rk806_reg_id {
 	RK806_ID_DCDC1 = 0,
@@ -516,6 +517,7 @@ struct rk806 {
 	struct regmap_irq_chip_data *irq_data;
 	struct rk806_platform_data *pdata;
 	struct rk806_pin_info *pins;
+	u8 read_buf[RK806_READ_BUFFER_SIZE];
 	int vb_lo_irq;
 };
 
