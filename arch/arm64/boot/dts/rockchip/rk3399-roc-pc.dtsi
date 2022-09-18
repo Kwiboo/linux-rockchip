@@ -215,7 +215,7 @@
 		regulator-name = "vdd_log";
 		regulator-always-on;
 		regulator-boot-on;
-		regulator-min-microvolt = <450000>;
+		regulator-min-microvolt = <430000>;
 		regulator-max-microvolt = <1400000>;
 		pwm-supply = <&vcc3v3_sys>;
 	};
@@ -536,7 +536,7 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&fusb1_int>;
 		vbus-supply = <&vcc_vbus_typec1>;
-		status = "okay";
+		status = "disabled";
 	};
 };
 
@@ -553,7 +553,7 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&fusb0_int>;
 		vbus-supply = <&vcc_vbus_typec0>;
-		status = "okay";
+		status = "disabled";
 	};
 
 	mp8859: regulator@66 {
