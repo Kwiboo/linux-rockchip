@@ -1050,6 +1050,44 @@ static ssize_t store_io_is_busy(struct gov_attr_set *attr_set, const char *buf,
 	return count;
 }
 
+static ssize_t store_touchboost_freq(struct gov_attr_set *attr_set,
+				     const char *buf, size_t count)
+{
+	struct interactive_tunables *tunables = to_tunables(attr_set);
+	unsigned long val;
+	int ret;
+
+	ret = kstrtoul(buf, 0, &val);
+	if (ret < 0)
+		return ret;
+
+	tunables->touchboost_freq = val;
+
+	return count;
+}
+
+static ssize_t show_touchboost_duration(struct gov_attr_set *attr_set, char *buf)
+{
+	struct interactive_tunables *tunables = to_tunables(attr_set);
+
+	return sprintf(buf, "%d\n", tunables->touchboostpulse_duration_val);
+}
+
+static ssize_t store_touchboost_duration(struct gov_attr_set *attr_set,
+					 const char *buf, size_t count)
+{
+	struct interactive_tunables *tunables = to_tunables(attr_set);
+	int val, ret;
+
+	ret = kstrtoint(buf, 0, &val);
+	if (ret < 0)
+		return ret;
+
+	tunables->touchboostpulse_duration_val = val;
+
+	return count;
+}
+
 show_one(hispeed_freq, "%u");
 show_one(go_hispeed_load, "%lu");
 show_one(min_sample_time, "%lu");
@@ -1057,6 +1095,7 @@ show_one(timer_slack, "%lu");
 show_one(boost, "%u");
 show_one(boostpulse_duration, "%u");
 show_one(io_is_busy, "%u");
+show_one(touchboost_freq, "%lu");
 
 gov_attr_rw(target_loads);
 gov_attr_rw(above_hispeed_delay);
@@ -1069,6 +1108,8 @@ gov_attr_rw(boost);
 gov_attr_wo(boostpulse);
 gov_attr_rw(boostpulse_duration);
 gov_attr_rw(io_is_busy);
+gov_attr_rw(touchboost_freq);
+gov_attr_rw(touchboost_duration);
 
 static struct attribute *interactive_attributes[] = {
 	&target_loads.attr,
@@ -1082,6 +1123,8 @@ static struct attribute *interactive_attributes[] = {
 	&boostpulse.attr,
 	&boostpulse_duration.attr,
 	&io_is_busy.attr,
+	&touchboost_freq.attr,
+	&touchboost_duration.attr,
 	NULL
 };
 
