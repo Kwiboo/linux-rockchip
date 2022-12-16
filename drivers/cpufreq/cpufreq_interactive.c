@@ -37,6 +37,7 @@
 #include <linux/slab.h>
 #include <uapi/linux/sched/types.h>
 #include <linux/sched/clock.h>
+#include <soc/rockchip/rockchip_system_monitor.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/cpufreq_interactive.h>
@@ -100,6 +101,7 @@ struct interactive_tunables {
 	int touchboostpulse_duration_val;
 	/* End time of touchboost pulse in ktime converted to usecs */
 	u64 touchboostpulse_endtime;
+	bool touchboost, is_touchboosted;
 #endif
 	bool boosted;
 
@@ -599,7 +601,44 @@ again:
 	for_each_cpu(cpu, &tmp_mask) {
 		struct interactive_cpu *icpu = &per_cpu(interactive_cpu, cpu);
 		struct cpufreq_policy *policy;
+#ifdef CONFIG_ARCH_ROCKCHIP
+		struct interactive_tunables *tunables;
+		bool update_policy = false;
+		u64 now;
 
+		now = ktime_to_us(ktime_get());
+		if (!down_read_trylock(&icpu->enable_sem))
+			continue;
+
+		if (!icpu->ipolicy) {
+			up_read(&icpu->enable_sem);
+			continue;
+		}
+
+		tunables = icpu->ipolicy->tunables;
+		if (!tunables) {
+			up_read(&icpu->enable_sem);
+			continue;
+		}
+
+		if (tunables->touchboost &&
+		    now > tunables->touchboostpulse_endtime) {
+			tunables->touchboost = false;
+			rockchip_monitor_restore_cpu_limit(cpu);
+			update_policy = true;
+		}
+
+		if (!tunables->is_touchboosted && tunables->touchboost) {
+			rockchip_monitor_remove_cpu_limit(cpu);
+			update_policy = true;
+		}
+
+		tunables->is_touchboosted = tunables->touchboost;
+
+		up_read(&icpu->enable_sem);
+		if (update_policy)
+			cpufreq_update_policy(cpu);
+#endif
 		policy = cpufreq_cpu_get(cpu);
 		if (!policy)
 			continue;
@@ -1241,6 +1280,7 @@ static void cpufreq_interactive_input_event(struct input_handle *handle,
 			cpumask_set_cpu(i, &speedchange_cpumask);
 			pcpu->loc_hispeed_val_time =
 					ktime_to_us(ktime_get());
+			tunables->touchboost = true;
 			anyboost = 1;
 		}
 
@@ -1474,6 +1514,10 @@ void cpufreq_interactive_exit(struct cpufreq_policy *policy)
 		idle_notifier_unregister(&cpufreq_interactive_idle_nb);
 #ifdef CONFIG_ARCH_ROCKCHIP
 		input_unregister_handler(&cpufreq_interactive_input_handler);
+		if (tunables->touchboost) {
+			tunables->touchboost = false;
+			rockchip_monitor_restore_cpu_limit(policy->cpu);
+		}
 #endif
 	}
 
