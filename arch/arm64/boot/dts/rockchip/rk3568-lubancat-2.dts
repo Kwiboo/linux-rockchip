@@ -519,12 +519,16 @@
 };
 
 &pcie3x2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pcie30x2m1_pins>;
 	reset-gpios = <&gpio2 RK_PD6 GPIO_ACTIVE_HIGH>;
 	vpcie3v3-supply = <&vcc3v3_m2_pcie>;
 	status = "okay";
 };
 
 &pcie2x1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pcie20m1_pins>;
 	reset-gpios = <&gpio3 RK_PC1 GPIO_ACTIVE_HIGH>;
 	disable-gpios = <&gpio3 RK_PC2 GPIO_ACTIVE_HIGH>;
 	vpcie3v3-supply = <&vcc3v3_mini_pcie>;

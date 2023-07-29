@@ -505,7 +505,7 @@
 
 &pcie3x2 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&pcie_reset_pin>;
+	pinctrl-0 = <&pcie30x2m1_pins>;
 	reset-gpios = <&gpio2 RK_PD6 GPIO_ACTIVE_HIGH>;
 	vpcie3v3-supply = <&vcc3v3_pcie>;
 	status = "okay";
@@ -543,9 +543,6 @@
 	};
 
 	pcie {
-		pcie_reset_pin: pcie-reset-pin {
-			rockchip,pins = <2 RK_PD6 RK_FUNC_GPIO &pcfg_pull_none>;
-		};
 		vcc3v3_pcie_en_pin: vcc3v3-pcie-en-pin {
 			rockchip,pins = <4 RK_PA7 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
