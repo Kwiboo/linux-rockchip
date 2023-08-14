@@ -11,6 +11,8 @@
  * V0.0X01.0X04 fix hdr ae error
  * V0.0X01.0X05 add quick stream on/off
  * V0.0X01.0X06 Increase hdr exposure restrictions
+ * V0.0X01.0X07 add binning resolution
+ * V0.0X01.0X08 add 2 lane mode
  */
 
 #define DEBUG
@@ -26,21 +28,26 @@
 #include <linux/slab.h>
 #include <linux/version.h>
 #include <linux/rk-camera-module.h>
+#include <linux/of_graph.h>
 #include <media/media-entity.h>
 #include <media/v4l2-async.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-subdev.h>
+#include <media/v4l2-fwnode.h>
+#include <media/v4l2-mediabus.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/rk-preisp.h>
 
-#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x06)
+#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x08)
 
 #ifndef V4L2_CID_DIGITAL_GAIN
 #define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
 #endif
 
+#define MIPI_FREQ_445M			445000000
 #define MIPI_FREQ_594M			594000000
 
+#define IMX335_2LANES			2
 #define IMX335_4LANES			4
 
 #define OF_CAMERA_HDR_MODE		"rockchip,camera-hdr-mode"
@@ -174,6 +181,8 @@ struct imx335_mode {
 	u32 bpp;
 	const struct regval *reg_list;
 	u32 hdr_mode;
+	u32 lanes;
+	u32 mipi_freq_idx;
 	u32 vc[PAD_MAX];
 };
 
@@ -197,9 +206,12 @@ struct imx335 {
 	struct v4l2_ctrl	*vblank;
 	struct v4l2_ctrl	*pixel_rate;
 	struct v4l2_ctrl	*link_freq;
+	struct v4l2_ctrl	*h_flip;
+	struct v4l2_ctrl	*v_flip;
 	struct mutex		mutex;
 	bool			streaming;
 	bool			power_on;
+	const struct imx335_mode *support_modes;
 	const struct imx335_mode *cur_mode;
 	u32			module_index;
 	u32			cfg_num;
@@ -210,16 +222,273 @@ struct imx335 {
 	bool			has_init_exp;
 	struct preisp_hdrae_exp_s init_hdrae_exp;
 	struct v4l2_fract	cur_fps;
+	struct v4l2_fwnode_endpoint bus_cfg;
+	u8			flip;
 };
 
 #define to_imx335(sd) container_of(sd, struct imx335, subdev)
 
 /*
  * Xclk 37.125Mhz
+ * max_framerate 30fps 2 lane
+ * 1188Mbps
  */
-static const struct regval imx335_linear_10bit_2592x1944_regs[] = {
+static const struct regval imx335_linear_10bit_1920x1080_2lane_regs[] = {
 	{0x3002, 0x00},
 	{0x300C, 0x5B},
+	{0x300D, 0x40},
+	{0x3018, 0x04},
+	{0x302C, 0x8C},
+	{0x302D, 0x01},
+	{0x302E, 0x80},
+	{0x302F, 0x07},
+	{0x3050, 0x00},
+	{0x3056, 0x3C},
+	{0x3057, 0x04},
+	{0x3058, 0x4E},
+	{0x3059, 0x0C},
+	{0x3074, 0x20},
+	{0x3075, 0x04},
+	{0x3076, 0x78},
+	{0x3077, 0x08},
+	{0x30C6, 0x12},
+	{0x30CE, 0x64},
+	{0x30D8, 0x68},
+	{0x30D9, 0x0D},
+	{0x30E8, 0x14},
+	{0x315A, 0x02},
+	{0x316A, 0x7E},
+	{0x319D, 0x00},
+	{0x31A1, 0x00},
+	{0x3288, 0x21},
+	{0x328A, 0x02},
+	{0x3414, 0x05},
+	{0x3416, 0x18},
+	{0x341C, 0xFF},
+	{0x341D, 0x01},
+	{0x3648, 0x01},
+	{0x364A, 0x04},
+	{0x364C, 0x04},
+	{0x3678, 0x01},
+	{0x367C, 0x31},
+	{0x367E, 0x31},
+	{0x3706, 0x10},
+	{0x3708, 0x03},
+	{0x3714, 0x02},
+	{0x3715, 0x02},
+	{0x3716, 0x01},
+	{0x3717, 0x03},
+	{0x371C, 0x3D},
+	{0x371D, 0x3F},
+	{0x372C, 0x00},
+	{0x372D, 0x00},
+	{0x372E, 0x46},
+	{0x372F, 0x00},
+	{0x3730, 0x89},
+	{0x3731, 0x00},
+	{0x3732, 0x08},
+	{0x3733, 0x01},
+	{0x3734, 0xFE},
+	{0x3735, 0x05},
+	{0x3740, 0x02},
+	{0x375D, 0x00},
+	{0x375E, 0x00},
+	{0x375F, 0x11},
+	{0x3760, 0x01},
+	{0x3768, 0x1A},
+	{0x3769, 0x1A},
+	{0x376A, 0x1A},
+	{0x376B, 0x1A},
+	{0x376C, 0x1A},
+	{0x376D, 0x17},
+	{0x376E, 0x0F},
+	{0x3776, 0x00},
+	{0x3777, 0x00},
+	{0x3778, 0x46},
+	{0x3779, 0x00},
+	{0x377A, 0x89},
+	{0x377B, 0x00},
+	{0x377C, 0x08},
+	{0x377D, 0x01},
+	{0x377E, 0x23},
+	{0x377F, 0x02},
+	{0x3780, 0xD9},
+	{0x3781, 0x03},
+	{0x3782, 0xF5},
+	{0x3783, 0x06},
+	{0x3784, 0xA5},
+	{0x3788, 0x0F},
+	{0x378A, 0xD9},
+	{0x378B, 0x03},
+	{0x378C, 0xEB},
+	{0x378D, 0x05},
+	{0x378E, 0x87},
+	{0x378F, 0x06},
+	{0x3790, 0xF5},
+	{0x3792, 0x43},
+	{0x3794, 0x7A},
+	{0x3796, 0xA1},
+	{0x3A01, 0x01},
+	{REG_NULL, 0x00},
+};
+
+/*
+ * Xclk 37.125Mhz
+ * max_framerate 30fps
+ * 4 lane
+ */
+static const struct regval imx335_linear_12bit_1296x972_regs[] = {
+	{0x300C, 0x5B},
+	{0x300D, 0x40},
+	{0x3034, 0x26},
+	{0x3035, 0x02},
+	{0x3048, 0x00},
+	{0x3049, 0x00},
+	{0x304A, 0x03},
+	{0x304B, 0x01},
+	{0x304C, 0x14},
+	{0x3050, 0x00},
+	{0x3056, 0xd8},
+	{0x3057, 0x03},
+	{0x3058, 0x4E},
+	{0x3059, 0x0C},
+	{0x305C, 0x12},
+	{0x3060, 0xE8},
+	{0x3061, 0x00},
+	{0x3068, 0xce},
+	{0x3069, 0x00},
+	{0x306C, 0x68},
+	{0x306D, 0x06},
+	{0x3072, 0x30},
+	{0x3074, 0xa8},
+	{0x3075, 0x00},
+	{0x3076, 0x60},
+	{0x3077, 0x0f},
+	{0x3078, 0x04},
+	{0x3079, 0xFD},
+	{0x307A, 0x04},
+	{0x307B, 0xFE},//binning
+	{0x307C, 0x04},
+	{0x307D, 0xFB},
+	{0x307E, 0x04},
+	{0x307F, 0x02}, /* Each frame gain adjustment disabled in linear mode */
+	{0x3080, 0x04},
+	{0x3081, 0xFD},
+	{0x3082, 0x04},//binning
+	{0x3083, 0xFE},
+	{0x3084, 0x04},
+	{0x3085, 0xFB},
+	{0x3086, 0x04},
+	{0x3087, 0x02},
+	{0x30A4, 0x77},
+	{0x30A8, 0x20},
+	{0x30A9, 0x00},
+	{0x30AC, 0x08},
+	{0x30AD, 0x08},
+	{0x30B0, 0x20},
+	{0x30B1, 0x00},
+	{0x30B4, 0x10},
+	{0x30B5, 0x10},
+	{0x30E8, 0x14},
+	{0x3112, 0x10},
+	{0x3116, 0x10},
+	{0x314C, 0xC0},
+	{0x315A, 0x06},
+	{0x316A, 0x7E},
+	{0x3199, 0x30},
+	{0x319D, 0x01},
+	{0x319E, 0x02},
+	{0x31A1, 0x00},
+	{0x31D7, 0x00},
+	{0x3200, 0x01},
+	{0x3288, 0x21},
+	{0x328A, 0x02},
+	{0x3300, 0x01},
+	{0x3414, 0x05},
+	{0x3416, 0x18},
+	{0x341C, 0xFF},
+	{0x341D, 0x01},
+	{0x3648, 0x01},
+	{0x364A, 0x04},
+	{0x364C, 0x04},
+	{0x3678, 0x01},
+	{0x367C, 0x31},
+	{0x367E, 0x31},
+	{0x3706, 0x10},
+	{0x3708, 0x03},
+	{0x3714, 0x02},
+	{0x3715, 0x02},
+	{0x3716, 0x01},
+	{0x3717, 0x03},
+	{0x371C, 0x3D},
+	{0x371D, 0x3F},
+	{0x372C, 0x00},
+	{0x372D, 0x00},
+	{0x372E, 0x46},
+	{0x372F, 0x00},
+	{0x3730, 0x89},
+	{0x3731, 0x00},
+	{0x3732, 0x08},
+	{0x3733, 0x01},
+	{0x3734, 0xFE},
+	{0x3735, 0x05},
+	{0x3740, 0x02},
+	{0x375D, 0x00},
+	{0x375E, 0x00},
+	{0x375F, 0x11},
+	{0x3760, 0x01},
+	{0x3768, 0x1B},
+	{0x3769, 0x1B},
+	{0x376A, 0x1B},
+	{0x376B, 0x1B},
+	{0x376C, 0x1A},
+	{0x376D, 0x17},
+	{0x376E, 0x0F},
+	{0x3776, 0x00},
+	{0x3777, 0x00},
+	{0x3778, 0x46},
+	{0x3779, 0x00},
+	{0x377A, 0x89},
+	{0x377B, 0x00},
+	{0x377C, 0x08},
+	{0x377D, 0x01},
+	{0x377E, 0x23},
+	{0x377F, 0x02},
+	{0x3780, 0xD9},
+	{0x3781, 0x03},
+	{0x3782, 0xF5},
+	{0x3783, 0x06},
+	{0x3784, 0xA5},
+	{0x3788, 0x0F},
+	{0x378A, 0xD9},
+	{0x378B, 0x03},
+	{0x378C, 0xEB},
+	{0x378D, 0x05},
+	{0x378E, 0x87},
+	{0x378F, 0x06},
+	{0x3790, 0xF5},
+	{0x3792, 0x43},
+	{0x3794, 0x7A},
+	{0x3796, 0xA1},
+	{0x3A18, 0x7F},
+	{0x3A1A, 0x37},
+	{0x3A1C, 0x37},
+	{0x3A1E, 0xF7},
+	{0x3A1F, 0x00},
+	{0x3A20, 0x3F},
+	{0x3A22, 0x6F},
+	{0x3A24, 0x3F},
+	{0x3A26, 0x5F},
+	{0x3A28, 0x2F},
+	{REG_NULL, 0x00},
+};
+
+/*
+ * Xclk 37.125Mhz
+ * max_framerate 30fps
+ * 4 lane
+ */
+static const struct regval imx335_linear_10bit_2592x1944_regs[] = {
 	{0x300D, 0x40},
 	{0x3034, 0x26},
 	{0x3035, 0x02},
@@ -316,6 +585,11 @@ static const struct regval imx335_linear_10bit_2592x1944_regs[] = {
 	{REG_NULL, 0x00},
 };
 
+/*
+ * Xclk 37.125Mhz
+ * max_framerate 30fps
+ * 4 lane
+ */
 static const struct regval imx335_hdr2_10bit_2592x1944_regs[] = {
 	{0x3002, 0x00},
 	{0x300C, 0x5B},
@@ -415,6 +689,11 @@ static const struct regval imx335_hdr2_10bit_2592x1944_regs[] = {
 	{REG_NULL, 0x00},
 };
 
+/*
+ * Xclk 37.125Mhz
+ * max_framerate 30fps
+ * 4 lane
+ */
 static const struct regval imx335_hdr3_10bit_2592x1944_regs[] = {
 	{0x3002, 0x00},
 	{0x300C, 0x5B},
@@ -527,7 +806,48 @@ static const struct regval imx335_hdr3_10bit_2592x1944_regs[] = {
  * }
  */
 
-static const struct imx335_mode supported_modes[] = {
+static const struct imx335_mode mipi_2lane_supported_modes[] = {
+	{
+		/* 1H period = 7.4us */
+		.bus_fmt = MEDIA_BUS_FMT_SRGGB10_1X10,
+		.width = 1920,
+		.height = 1080,
+		.max_fps = {
+			.numerator = 10000,
+			.denominator = 300000,
+		},
+		.exp_def = 0x1194 - 0x09,
+		.hts_def = 0x0226 * IMX335_2LANES * 2,
+		.vts_def = 0x1194,
+		.reg_list = imx335_linear_10bit_1920x1080_2lane_regs,
+		.hdr_mode = NO_HDR,
+		.bpp = 10,
+		.lanes = 2,
+		.mipi_freq_idx = 1,	//594Mbps
+		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+	},
+};
+
+static const struct imx335_mode mipi_4lane_supported_modes[] = {
+	{
+		/* 1H period = 7.4us */
+		.bus_fmt = MEDIA_BUS_FMT_SRGGB12_1X12,
+		.width = 1308,
+		.height = 984,
+		.max_fps = {
+			.numerator = 10000,
+			.denominator = 300000,
+		},
+		.exp_def = 0x600,
+		.hts_def = 0x0226 * IMX335_4LANES * 2,
+		.vts_def = 0x1194,
+		.reg_list = imx335_linear_12bit_1296x972_regs,
+		.hdr_mode = NO_HDR,
+		.bpp = 12,
+		.lanes = 4,
+		.mipi_freq_idx = 0,
+		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+	},
 	{
 		/* 1H period = 7.4us */
 		.bus_fmt = MEDIA_BUS_FMT_SRGGB10_1X10,
@@ -543,6 +863,9 @@ static const struct imx335_mode supported_modes[] = {
 		.reg_list = imx335_linear_10bit_2592x1944_regs,
 		.hdr_mode = NO_HDR,
 		.bpp = 10,
+		.lanes = 4,
+		.mipi_freq_idx = 1,
+		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
 	},
 	{
 		/* 1H period = 3.70us */
@@ -563,6 +886,8 @@ static const struct imx335_mode supported_modes[] = {
 		.reg_list = imx335_hdr2_10bit_2592x1944_regs,
 		.hdr_mode = HDR_X2,
 		.bpp = 10,
+		.mipi_freq_idx = 1,
+		.lanes = 4,
 		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
 		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
 		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
@@ -587,6 +912,7 @@ static const struct imx335_mode supported_modes[] = {
 		.reg_list = imx335_hdr3_10bit_2592x1944_regs,
 		.hdr_mode = HDR_X3,
 		.bpp = 10,
+		.mipi_freq_idx = 1,
 		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_2,
 		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr0
 		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
@@ -599,6 +925,7 @@ static const u32 bus_code[] = {
 };
 
 static const s64 link_freq_items[] = {
+	MIPI_FREQ_445M,
 	MIPI_FREQ_594M,
 };
 
@@ -696,18 +1023,19 @@ imx335_find_best_fit(struct imx335 *imx335, struct v4l2_subdev_format *fmt)
 	unsigned int i;
 
 	for (i = 0; i < imx335->cfg_num; i++) {
-		dist = imx335_get_reso_dist(&supported_modes[i], framefmt);
-		if (cur_best_fit_dist == -1 || dist < cur_best_fit_dist) {
+		dist = imx335_get_reso_dist(&imx335->support_modes[i], framefmt);
+		if ((cur_best_fit_dist == -1 || dist <= cur_best_fit_dist) &&
+			imx335->support_modes[i].bus_fmt == framefmt->code) {
 			cur_best_fit_dist = dist;
 			cur_best_fit = i;
 		} else if (dist == cur_best_fit_dist &&
-			   framefmt->code == supported_modes[i].bus_fmt) {
+			   framefmt->code == imx335->support_modes[i].bus_fmt) {
 			cur_best_fit = i;
 			break;
 		}
 	}
 
-	return &supported_modes[cur_best_fit];
+	return &imx335->support_modes[cur_best_fit];
 }
 
 static void imx335_change_mode(struct imx335 *imx335, const struct imx335_mode *mode)
@@ -726,6 +1054,7 @@ static int imx335_set_fmt(struct v4l2_subdev *sd,
 	struct imx335 *imx335 = to_imx335(sd);
 	const struct imx335_mode *mode;
 	s64 h_blank, vblank_def;
+	s64 dst_pixel_rate = 0;
 
 	mutex_lock(&imx335->mutex);
 
@@ -735,8 +1064,12 @@ static int imx335_set_fmt(struct v4l2_subdev *sd,
 	fmt->format.height = mode->height;
 	fmt->format.field = V4L2_FIELD_NONE;
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
+#ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
 		*v4l2_subdev_get_try_format(sd, cfg, fmt->pad) = fmt->format;
-
+#else
+		mutex_unlock(&imx307->mutex);
+		return -ENOTTY;
+#endif
 	} else {
 		imx335_change_mode(imx335, mode);
 		h_blank = mode->hts_def - mode->width;
@@ -746,6 +1079,12 @@ static int imx335_set_fmt(struct v4l2_subdev *sd,
 		__v4l2_ctrl_modify_range(imx335->vblank, vblank_def,
 					 IMX335_VTS_MAX - mode->height,
 					 1, vblank_def);
+		dst_pixel_rate = ((u32)link_freq_items[mode->mipi_freq_idx]) /
+				mode->bpp * 2 * mode->lanes;
+		__v4l2_ctrl_s_ctrl_int64(imx335->pixel_rate,
+					 dst_pixel_rate);
+		__v4l2_ctrl_s_ctrl(imx335->link_freq,
+				   mode->mipi_freq_idx);
 	}
 
 	mutex_unlock(&imx335->mutex);
@@ -762,7 +1101,12 @@ static int imx335_get_fmt(struct v4l2_subdev *sd,
 
 	mutex_lock(&imx335->mutex);
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
+#ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
 		fmt->format = *v4l2_subdev_get_try_format(sd, cfg, fmt->pad);
+#else
+		mutex_unlock(&imx307->mutex);
+		return -ENOTTY;
+#endif
 	} else {
 		fmt->format.width = mode->width;
 		fmt->format.height = mode->height;
@@ -774,7 +1118,6 @@ static int imx335_get_fmt(struct v4l2_subdev *sd,
 			fmt->reserved[0] = mode->vc[PAD0];
 	}
 	mutex_unlock(&imx335->mutex);
-
 	return 0;
 }
 
@@ -798,13 +1141,13 @@ static int imx335_enum_frame_sizes(struct v4l2_subdev *sd,
 	if (fse->index >= imx335->cfg_num)
 		return -EINVAL;
 
-	if (fse->code != supported_modes[fse->index].bus_fmt)
+	if (fse->code != imx335->support_modes[fse->index].bus_fmt)
 		return -EINVAL;
 
-	fse->min_width  = supported_modes[fse->index].width;
-	fse->max_width  = supported_modes[fse->index].width;
-	fse->max_height = supported_modes[fse->index].height;
-	fse->min_height = supported_modes[fse->index].height;
+	fse->min_width  = imx335->support_modes[fse->index].width;
+	fse->max_width  = imx335->support_modes[fse->index].width;
+	fse->max_height = imx335->support_modes[fse->index].height;
+	fse->min_height = imx335->support_modes[fse->index].height;
 
 	return 0;
 }
@@ -831,7 +1174,7 @@ static const struct imx335_mode *imx335_find_mode(struct imx335 *imx335, int fps
 	int i = 0;
 
 	for (i = 0; i < imx335->cfg_num; i++) {
-		mode = &supported_modes[i];
+		mode = &imx335->support_modes[i];
 		if (mode->width == imx335->cur_mode->width &&
 		    mode->height == imx335->cur_mode->height &&
 		    mode->bus_fmt == imx335->cur_mode->bus_fmt &&
@@ -887,6 +1230,9 @@ static int imx335_s_frame_interval(struct v4l2_subdev *sd,
 
 	__v4l2_ctrl_s_ctrl_int64(imx335->pixel_rate,
 				 pixel_rate);
+	mutex_lock(&imx335->mutex);
+	fi->interval = mode->max_fps;
+	mutex_unlock(&imx335->mutex);
 
 	return 0;
 }
@@ -898,9 +1244,10 @@ static int imx335_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 	struct imx335 *imx335 = to_imx335(sd);
 	const struct imx335_mode *mode = imx335->cur_mode;
 
-	val = 1 << (IMX335_4LANES - 1) |
-	      V4L2_MBUS_CSI2_CHANNEL_0 |
-	      V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
+	val = 1 << (mode->lanes - 1) |
+		V4L2_MBUS_CSI2_CHANNEL_0 |
+		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
+
 	if (mode->hdr_mode != NO_HDR)
 		val |= V4L2_MBUS_CSI2_CHANNEL_1;
 	if (mode->hdr_mode == HDR_X3)
@@ -1348,6 +1695,7 @@ static long imx335_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	int cur_best_fit = -1;
 	int cur_best_fit_dist = -1;
 	int cur_dist, cur_fps, dst_fps;
+	s64 dst_pixel_rate = 0;
 
 	switch (cmd) {
 	case PREISP_CMD_SET_HDRAE_EXP:
@@ -1373,12 +1721,12 @@ static long imx335_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		dst_fps = DIV_ROUND_CLOSEST(imx335->cur_mode->max_fps.denominator,
 			imx335->cur_mode->max_fps.numerator);
 		for (i = 0; i < imx335->cfg_num; i++) {
-			if (w == supported_modes[i].width &&
-			    h == supported_modes[i].height &&
-			    supported_modes[i].bus_fmt == imx335->cur_mode->bus_fmt &&
-			    supported_modes[i].hdr_mode == hdr->hdr_mode) {
-				cur_fps = DIV_ROUND_CLOSEST(supported_modes[i].max_fps.denominator,
-					supported_modes[i].max_fps.numerator);
+			if (w == imx335->support_modes[i].width &&
+			    h == imx335->support_modes[i].height &&
+			    imx335->support_modes[i].bus_fmt == imx335->cur_mode->bus_fmt &&
+			    imx335->support_modes[i].hdr_mode == hdr->hdr_mode) {
+				cur_fps = DIV_ROUND_CLOSEST(imx335->support_modes[i].max_fps.denominator,
+					imx335->support_modes[i].max_fps.numerator);
 				cur_dist = abs(cur_fps - dst_fps);
 				if (cur_best_fit_dist == -1 || cur_dist < cur_best_fit_dist) {
 					cur_best_fit_dist = cur_dist;
@@ -1395,25 +1743,33 @@ static long imx335_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 				hdr->hdr_mode, w, h);
 			ret = -EINVAL;
 		} else {
-			imx335_change_mode(imx335, &supported_modes[cur_best_fit]);
+			imx335_change_mode(imx335, &imx335->support_modes[cur_best_fit]);
 			w = imx335->cur_mode->hts_def - imx335->cur_mode->width;
 			h = imx335->cur_mode->vts_def - imx335->cur_mode->height;
 			__v4l2_ctrl_modify_range(imx335->hblank, w, w, 1, w);
 			__v4l2_ctrl_modify_range(imx335->vblank, h,
 				IMX335_VTS_MAX - imx335->cur_mode->height,
 				1, h);
+			dst_pixel_rate = ((u32)link_freq_items[imx335->cur_mode->mipi_freq_idx]) /
+				  imx335->cur_mode->bpp * 2 * imx335->cur_mode->lanes;
+			__v4l2_ctrl_s_ctrl_int64(imx335->pixel_rate,
+						 dst_pixel_rate);
+			__v4l2_ctrl_s_ctrl(imx335->link_freq,
+					   imx335->cur_mode->mipi_freq_idx);
 		}
 		break;
 	case RKMODULE_SET_QUICK_STREAM:
-
 		stream = *((u32 *)arg);
-
 		if (stream)
-			imx335_write_reg(imx335->client, IMX335_REG_CTRL_MODE,
-				IMX335_REG_VALUE_08BIT, 0);
+			imx335_write_reg(imx335->client,
+					 IMX335_REG_CTRL_MODE,
+					 IMX335_REG_VALUE_08BIT,
+					 0);
 		else
-			imx335_write_reg(imx335->client, IMX335_REG_CTRL_MODE,
-				IMX335_REG_VALUE_08BIT, 1);
+			imx335_write_reg(imx335->client,
+					 IMX335_REG_CTRL_MODE,
+					 IMX335_REG_VALUE_08BIT,
+					 1);
 		break;
 	case RKMODULE_GET_CHANNEL_INFO:
 		ch_info = (struct rkmodule_channel_info *)arg;
@@ -1437,7 +1793,7 @@ static long imx335_compat_ioctl32(struct v4l2_subdev *sd,
 	struct rkmodule_hdr_cfg *hdr;
 	struct preisp_hdrae_exp_s *hdrae;
 	struct rkmodule_channel_info *ch_info;
-	long ret;
+	long ret = 0;
 	u32 stream = 0;
 
 	switch (cmd) {
@@ -1449,8 +1805,10 @@ static long imx335_compat_ioctl32(struct v4l2_subdev *sd,
 		}
 
 		ret = imx335_ioctl(sd, cmd, inf);
-		if (!ret)
-			ret = copy_to_user(up, inf, sizeof(*inf));
+		if (!ret) {
+			if (copy_to_user(up, inf, sizeof(*inf)))
+				ret = -EFAULT;
+		}
 		kfree(inf);
 		break;
 	case RKMODULE_AWB_CFG:
@@ -1463,6 +1821,8 @@ static long imx335_compat_ioctl32(struct v4l2_subdev *sd,
 		ret = copy_from_user(cfg, up, sizeof(*cfg));
 		if (!ret)
 			ret = imx335_ioctl(sd, cmd, cfg);
+		else
+			ret = -EFAULT;
 		kfree(cfg);
 		break;
 	case RKMODULE_GET_HDR_CFG:
@@ -1473,8 +1833,10 @@ static long imx335_compat_ioctl32(struct v4l2_subdev *sd,
 		}
 
 		ret = imx335_ioctl(sd, cmd, hdr);
-		if (!ret)
-			ret = copy_to_user(up, hdr, sizeof(*hdr));
+		if (!ret) {
+			if (copy_to_user(up, hdr, sizeof(*hdr)))
+				ret = -EFAULT;
+		}
 		kfree(hdr);
 		break;
 	case RKMODULE_SET_HDR_CFG:
@@ -1487,6 +1849,8 @@ static long imx335_compat_ioctl32(struct v4l2_subdev *sd,
 		ret = copy_from_user(hdr, up, sizeof(*hdr));
 		if (!ret)
 			ret = imx335_ioctl(sd, cmd, hdr);
+		else
+			ret = -EFAULT;
 		kfree(hdr);
 		break;
 	case PREISP_CMD_SET_HDRAE_EXP:
@@ -1499,12 +1863,16 @@ static long imx335_compat_ioctl32(struct v4l2_subdev *sd,
 		ret = copy_from_user(hdrae, up, sizeof(*hdrae));
 		if (!ret)
 			ret = imx335_ioctl(sd, cmd, hdrae);
+		else
+			ret = -EFAULT;
 		kfree(hdrae);
 		break;
 	case RKMODULE_SET_QUICK_STREAM:
 		ret = copy_from_user(&stream, up, sizeof(u32));
 		if (!ret)
 			ret = imx335_ioctl(sd, cmd, &stream);
+		else
+			ret = -EFAULT;
 		break;
 	case RKMODULE_GET_CHANNEL_INFO:
 		ch_info = kzalloc(sizeof(*ch_info), GFP_KERNEL);
@@ -1552,15 +1920,19 @@ static int __imx335_start_stream(struct imx335 *imx335)
 			return ret;
 		}
 	}
-	return imx335_write_reg(imx335->client, IMX335_REG_CTRL_MODE,
-				IMX335_REG_VALUE_08BIT, 0);
+	return imx335_write_reg(imx335->client,
+				IMX335_REG_CTRL_MODE,
+				IMX335_REG_VALUE_08BIT,
+				0);
 }
 
 static int __imx335_stop_stream(struct imx335 *imx335)
 {
 	imx335->has_init_exp = false;
-	return imx335_write_reg(imx335->client, IMX335_REG_CTRL_MODE,
-				IMX335_REG_VALUE_08BIT, 1);
+	return imx335_write_reg(imx335->client,
+				IMX335_REG_CTRL_MODE,
+				IMX335_REG_VALUE_08BIT,
+				1);
 }
 
 static int imx335_s_stream(struct v4l2_subdev *sd, int on)
@@ -1729,7 +2101,7 @@ static int imx335_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	struct imx335 *imx335 = to_imx335(sd);
 	struct v4l2_mbus_framefmt *try_fmt =
 				v4l2_subdev_get_try_format(sd, fh->pad, 0);
-	const struct imx335_mode *def_mode = &supported_modes[0];
+	const struct imx335_mode *def_mode = &imx335->support_modes[0];
 
 	mutex_lock(&imx335->mutex);
 	/* Initialize try_fmt */
@@ -1753,16 +2125,18 @@ static int imx335_enum_frame_interval(struct v4l2_subdev *sd,
 	if (fie->index >= imx335->cfg_num)
 		return -EINVAL;
 
-	fie->code = supported_modes[fie->index].bus_fmt;
-	fie->width = supported_modes[fie->index].width;
-	fie->height = supported_modes[fie->index].height;
-	fie->interval = supported_modes[fie->index].max_fps;
-	fie->reserved[0] = supported_modes[fie->index].hdr_mode;
+	fie->code = imx335->support_modes[fie->index].bus_fmt;
+	fie->width = imx335->support_modes[fie->index].width;
+	fie->height = imx335->support_modes[fie->index].height;
+	fie->interval = imx335->support_modes[fie->index].max_fps;
+	fie->reserved[0] = imx335->support_modes[fie->index].hdr_mode;
 	return 0;
 }
 
 #define DST_WIDTH 2592
 #define DST_HEIGHT 1944
+#define BINNING_WIDTH 1296
+#define BINNING_HEIGHT 972
 
 /*
  * The resolution of the driver configuration needs to be exactly
@@ -1777,15 +2151,29 @@ static int imx335_get_selection(struct v4l2_subdev *sd,
 				struct v4l2_subdev_pad_config *cfg,
 				struct v4l2_subdev_selection *sel)
 {
+	struct imx335 *imx335 = to_imx335(sd);
+
 	/*
 	 * From "Pixel Array Image Drawing in All scan mode",
 	 * there are 12 pixel offset on horizontal and vertical.
 	 */
 	if (sel->target == V4L2_SEL_TGT_CROP_BOUNDS) {
-		sel->r.left = 12;
-		sel->r.width = DST_WIDTH;
-		sel->r.top = 12;
-		sel->r.height = DST_HEIGHT;
+		if (imx335->cur_mode->width == 2616 && imx335->cur_mode->height == 1964) {
+			sel->r.left = 12;
+			sel->r.width = DST_WIDTH;
+			sel->r.top = 12;
+			sel->r.height = DST_HEIGHT;
+		} else if (imx335->cur_mode->width == 1920 && imx335->cur_mode->height == 1080) {
+			sel->r.left = 0;
+			sel->r.width = 1920;
+			sel->r.top = 0;
+			sel->r.height = 1080;
+		} else {
+			sel->r.left = 4;
+			sel->r.width = BINNING_WIDTH;
+			sel->r.top = 8;
+			sel->r.height = BINNING_HEIGHT;
+		}
 		return 0;
 	}
 	return -EINVAL;
@@ -1997,7 +2385,10 @@ static int imx335_initialize_controls(struct imx335 *imx335)
 				link_freq_items);
 
 	/* pixel rate = link frequency * 2 * lanes / BITS_PER_SAMPLE */
-	pixel_rate = (u32)link_freq_items[0] / mode->bpp * 2 * IMX335_4LANES;
+	if (mode->width == 1920 && mode->height == 1080)
+		pixel_rate = (u32)link_freq_items[mode->mipi_freq_idx] / mode->bpp * 2 * IMX335_2LANES;
+	else
+		pixel_rate = (u32)link_freq_items[mode->mipi_freq_idx] / mode->bpp * 2 * IMX335_4LANES;
 	imx335->pixel_rate = v4l2_ctrl_new_std(handler, NULL,
 		V4L2_CID_PIXEL_RATE, 0, pixel_rate, 1, pixel_rate);
 
@@ -2087,6 +2478,7 @@ static int imx335_probe(struct i2c_client *client,
 	char facing[2];
 	int ret;
 	u32 i, hdr_mode = 0;
+	struct device_node *endpoint;
 
 	dev_info(dev, "driver version: %02x.%02x.%02x",
 		DRIVER_VERSION >> 16,
@@ -2115,11 +2507,31 @@ static int imx335_probe(struct i2c_client *client,
 		hdr_mode = NO_HDR;
 		dev_warn(dev, " Get hdr mode failed! no hdr default\n");
 	}
+
+	endpoint = of_graph_get_next_endpoint(dev->of_node, NULL);
+	if (!endpoint) {
+		dev_err(dev, "Failed to get endpoint\n");
+		return -EINVAL;
+	}
 	imx335->client = client;
-	imx335->cfg_num = ARRAY_SIZE(supported_modes);
+	ret = v4l2_fwnode_endpoint_parse(of_fwnode_handle(endpoint),
+		&imx335->bus_cfg);
+	if (ret)
+		dev_warn(dev, "could not get bus config!\n");
+
+	dev_info(dev, "imx335->bus_cfg.bus_type = %d\n", imx335->bus_cfg.bus_type);
+	if (imx335->bus_cfg.bus.mipi_csi1.data_lane == 2) {
+		imx335->support_modes = mipi_2lane_supported_modes;
+		imx335->cfg_num = ARRAY_SIZE(mipi_2lane_supported_modes);
+	} else if (imx335->bus_cfg.bus.mipi_csi1.data_lane == 4) {
+		imx335->support_modes = mipi_4lane_supported_modes;
+		imx335->cfg_num = ARRAY_SIZE(mipi_4lane_supported_modes);
+	} else {
+		dev_err(dev, "mipi lanes err!\n");
+	}
 	for (i = 0; i < imx335->cfg_num; i++) {
-		if (hdr_mode == supported_modes[i].hdr_mode) {
-			imx335->cur_mode = &supported_modes[i];
+		if (hdr_mode == imx335->support_modes[i].hdr_mode) {
+			imx335->cur_mode = &imx335->support_modes[i];
 			break;
 		}
 	}
@@ -2259,8 +2671,8 @@ static struct i2c_driver imx335_i2c_driver = {
 		.pm = &imx335_pm_ops,
 		.of_match_table = of_match_ptr(imx335_of_match),
 	},
-	.probe		= &imx335_probe,
-	.remove		= &imx335_remove,
+	.probe		= imx335_probe,
+	.remove		= imx335_remove,
 	.id_table	= imx335_match_id,
 };
 
