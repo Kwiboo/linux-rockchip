@@ -373,25 +373,143 @@ two non-contiguous planes.
 Tiled NV15
 ----------
 
-``V4L2_PIX_FMT_NV15_4L4`` Semi-planar 10-bit YUV 4:2:0 formats, using 4x4 tiling.
-All components are packed without any padding between each other.
-As a side-effect, each group of 4 components are stored over 5 bytes
-(YYYY or UVUV = 4 * 10 bits = 40 bits = 5 bytes).
+Semi-planar 10-bit YUV 4:2:0 formats. All components are packed
+without any padding between each other. Each components group occupy 15
+bits and are usually stored in group of 4 components stored over 5 bytes
+(YYYY or UVUV = 4 * 10 bits = 40 bits = 5 bytes) or partitioned into
+upper 8 bit and lower 2 bits. The final arrangement will vary depending if
+the hardware operated in little or big endian.
+
+.. flat-table:: Little endian sample of 4 NV15 luma pixels
+    :header-rows:  1
+    :stub-columns: 1
+
+    * - Bit
+      - 7
+      - 6
+      - 5
+      - 4
+      - 3
+      - 2
+      - 1
+      - 0
+    * - Byte 0
+      - Y'\ :sub:`0:7`
+      - Y'\ :sub:`0:6`
+      - Y'\ :sub:`0:5`
+      - Y'\ :sub:`0:4`
+      - Y'\ :sub:`0:3`
+      - Y'\ :sub:`0:2`
+      - Y'\ :sub:`0:1`
+      - Y'\ :sub:`0:0`
+    * - Byte 1
+      - Y'\ :sub:`1:5`
+      - Y'\ :sub:`1:4`
+      - Y'\ :sub:`1:3`
+      - Y'\ :sub:`1:2`
+      - Y'\ :sub:`1:1`
+      - Y'\ :sub:`1:0`
+      - Y'\ :sub:`0:9`
+      - Y'\ :sub:`0:8`
+    * - Byte 2
+      - Y'\ :sub:`2:3`
+      - Y'\ :sub:`2:2`
+      - Y'\ :sub:`2:1`
+      - Y'\ :sub:`2:0`
+      - Y'\ :sub:`1:9`
+      - Y'\ :sub:`1:8`
+      - Y'\ :sub:`1:7`
+      - Y'\ :sub:`1:6`
+    * - Byte 3
+      - Y'\ :sub:`3:1`
+      - Y'\ :sub:`3:0`
+      - Y'\ :sub:`2:9`
+      - Y'\ :sub:`2:8`
+      - Y'\ :sub:`2:7`
+      - Y'\ :sub:`2:6`
+      - Y'\ :sub:`2:5`
+      - Y'\ :sub:`2:4`
+    * - Byte 4
+      - Y'\ :sub:`3:9`
+      - Y'\ :sub:`3:8`
+      - Y'\ :sub:`3:7`
+      - Y'\ :sub:`3:6`
+      - Y'\ :sub:`3:5`
+      - Y'\ :sub:`3:4`
+      - Y'\ :sub:`3:3`
+      - Y'\ :sub:`3:2`
+
+.. flat-table:: Big endian sample of 4 NV15 luma pixels
+    :header-rows:  1
+    :stub-columns: 1
+
+    * - Bit
+      - 7
+      - 6
+      - 5
+      - 4
+      - 3
+      - 2
+      - 1
+      - 0
+    * - Byte 0
+      - Y'\ :sub:`0:9`
+      - Y'\ :sub:`0:8`
+      - Y'\ :sub:`0:7`
+      - Y'\ :sub:`0:6`
+      - Y'\ :sub:`0:5`
+      - Y'\ :sub:`0:4`
+      - Y'\ :sub:`0:3`
+      - Y'\ :sub:`0:2`
+    * - Byte 1
+      - Y'\ :sub:`0:1`
+      - Y'\ :sub:`0:0`
+      - Y'\ :sub:`1:9`
+      - Y'\ :sub:`1:8`
+      - Y'\ :sub:`1:7`
+      - Y'\ :sub:`1:6`
+      - Y'\ :sub:`1:5`
+      - Y'\ :sub:`1:4`
+    * - Byte 2
+      - Y'\ :sub:`1:3`
+      - Y'\ :sub:`1:2`
+      - Y'\ :sub:`1:1`
+      - Y'\ :sub:`1:0`
+      - Y'\ :sub:`2:9`
+      - Y'\ :sub:`2:8`
+      - Y'\ :sub:`2:7`
+      - Y'\ :sub:`2:6`
+    * - Byte 3
+      - Y'\ :sub:`2:5`
+      - Y'\ :sub:`2:4`
+      - Y'\ :sub:`2:3`
+      - Y'\ :sub:`2:2`
+      - Y'\ :sub:`2:1`
+      - Y'\ :sub:`2:0`
+      - Y'\ :sub:`3:9`
+      - Y'\ :sub:`3:8`
+    * - Byte 4
+      - Y'\ :sub:`3:7`
+      - Y'\ :sub:`3:6`
+      - Y'\ :sub:`3:5`
+      - Y'\ :sub:`3:4`
+      - Y'\ :sub:`3:3`
+      - Y'\ :sub:`3:2`
+      - Y'\ :sub:`3:1`
+      - Y'\ :sub:`3:0`
+
+``V4L2_PIX_FMT_NV15_4L4`` stores pixels in 4x4 tiles, and stores tiles linearly
+in memory. The tiles contains little endian NV15 data.
 
 ``V4L2_PIX_FMT_NV12M_10BE_8L128`` is similar to ``V4L2_PIX_FMT_NV12M`` but stores
 10 bits pixels in 2D 8x128 tiles, and stores tiles linearly in memory.
 the data is arranged in big endian order.
+
 The image height must be aligned to a multiple of 128.
 The layouts of the luma and chroma planes are identical.
-Note the tile size is 8bytes multiplied by 128 bytes,
-it means that the low bits and high bits of one pixel may be in different tiles.
-The 10 bit pixels are packed, so 5 bytes contain 4 10-bit pixels layout like
-this (for luma):
-byte 0: Y0(bits 9-2)
-byte 1: Y0(bits 1-0) Y1(bits 9-4)
-byte 2: Y1(bits 3-0) Y2(bits 9-6)
-byte 3: Y2(bits 5-0) Y3(bits 9-8)
-byte 4: Y3(bits 7-0)
+Note the tile size is 8 bytes multiplied by 128 bytes,
+it means that the low bits and high bits of one pixel may
+be in different tiles.
 
 ``V4L2_PIX_FMT_NV12_10BE_8L128`` is similar to ``V4L2_PIX_FMT_NV12M_10BE_8L128`` but stores
 two planes in one memory.
