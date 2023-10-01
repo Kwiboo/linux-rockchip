@@ -38,34 +38,37 @@
 
 /* Rockchip specific Registers */
 #define DWCMSHC_EMMC_DLL_CTRL		0x800
+#define DWCMSHC_EMMC_DLL_CTRL_RESET	BIT(1)
 #define DWCMSHC_EMMC_DLL_RXCLK		0x804
 #define DWCMSHC_EMMC_DLL_TXCLK		0x808
 #define DWCMSHC_EMMC_DLL_STRBIN		0x80c
-#define DECMSHC_EMMC_DLL_CMDOUT		0x810
+#define DWCMSHC_EMMC_DLL_CMDOUT		0x810
 #define DWCMSHC_EMMC_DLL_STATUS0	0x840
 #define DWCMSHC_EMMC_DLL_START		BIT(0)
 #define DWCMSHC_EMMC_DLL_LOCKED		BIT(8)
 #define DWCMSHC_EMMC_DLL_TIMEOUT	BIT(9)
-#define DWCMSHC_EMMC_DLL_RXCLK_SRCSEL	29
 #define DWCMSHC_EMMC_DLL_START_POINT	16
+#define DWCMSHC_EMMC_DLL_START_DEFAULT	5
+#define DWCMSHC_EMMC_DLL_INC_VALUE	2
 #define DWCMSHC_EMMC_DLL_INC		8
 #define DWCMSHC_EMMC_DLL_BYPASS		BIT(24)
 #define DWCMSHC_EMMC_DLL_DLYENA		BIT(27)
+#define DLL_RXCLK_NO_INVERTER		BIT(29)
+#define DLL_RXCLK_ORI_GATE		BIT(31)
 #define DLL_TXCLK_TAPNUM_DEFAULT	0x10
-#define DLL_TXCLK_TAPNUM_90_DEGREES	0xA
+#define DLL_TXCLK_TAPNUM_90_DEGREES	0x9
 #define DLL_TXCLK_TAPNUM_FROM_SW	BIT(24)
-#define DLL_STRBIN_TAPNUM_DEFAULT	0x8
+#define DLL_TXCLK_NO_INVERTER		BIT(29)
+#define DLL_STRBIN_TAPNUM_DEFAULT	0x4
 #define DLL_STRBIN_TAPNUM_FROM_SW	BIT(24)
 #define DLL_STRBIN_DELAY_NUM_SEL	BIT(26)
 #define DLL_STRBIN_DELAY_NUM_OFFSET	16
-#define DLL_STRBIN_DELAY_NUM_DEFAULT	0x16
-#define DLL_RXCLK_NO_INVERTER		1
-#define DLL_RXCLK_INVERTER		0
+#define DLL_STRBIN_DELAY_NUM_DEFAULT	0x10
 #define DLL_CMDOUT_TAPNUM_90_DEGREES	0x8
-#define DLL_RXCLK_ORI_GATE		BIT(31)
 #define DLL_CMDOUT_TAPNUM_FROM_SW	BIT(24)
 #define DLL_CMDOUT_SRC_CLK_NEG		BIT(28)
 #define DLL_CMDOUT_EN_SRC_CLK_NEG	BIT(29)
+#define DLL_CMDOUT_BOTH_CLK_EDGE	BIT(30)
 
 #define DLL_LOCK_WO_TMOUT(x) \
 	((((x) & DWCMSHC_EMMC_DLL_LOCKED) == DWCMSHC_EMMC_DLL_LOCKED) && \
@@ -181,15 +184,13 @@ static void dwcmshc_set_uhs_signaling(struct sdhci_host *host,
 		 (timing == MMC_TIMING_MMC_DDR52))
 		ctrl_2 |= SDHCI_CTRL_UHS_DDR50;
 	else if (timing == MMC_TIMING_MMC_HS400) {
-		/* set CARD_IS_EMMC bit to enable Data Strobe for HS400 */
-		ctrl = sdhci_readw(host, priv->vendor_specific_area1 + DWCMSHC_EMMC_CONTROL);
-		ctrl |= DWCMSHC_CARD_IS_EMMC;
-		sdhci_writew(host, ctrl, priv->vendor_specific_area1 + DWCMSHC_EMMC_CONTROL);
-
 		ctrl_2 |= DWCMSHC_CTRL_HS400;
 	}
-
 	sdhci_writew(host, ctrl_2, SDHCI_HOST_CONTROL2);
+
+	ctrl = sdhci_readw(host, priv->vendor_specific_area1 + DWCMSHC_EMMC_CONTROL);
+	ctrl |= DWCMSHC_CARD_IS_EMMC;
+	sdhci_writew(host, ctrl, priv->vendor_specific_area1 + DWCMSHC_EMMC_CONTROL);
 }
 
 static void dwcmshc_hs400_enhanced_strobe(struct mmc_host *mmc,
@@ -201,13 +202,13 @@ static void dwcmshc_hs400_enhanced_strobe(struct mmc_host *mmc,
 	struct dwcmshc_priv *priv = sdhci_pltfm_priv(pltfm_host);
 	int reg = priv->vendor_specific_area1 + DWCMSHC_EMMC_CONTROL;
 
-	vendor = sdhci_readl(host, reg);
+	vendor = sdhci_readw(host, reg);
 	if (ios->enhanced_strobe)
 		vendor |= DWCMSHC_ENHANCED_STROBE;
 	else
 		vendor &= ~DWCMSHC_ENHANCED_STROBE;
 
-	sdhci_writel(host, vendor, reg);
+	sdhci_writew(host, vendor, reg);
 }
 
 static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock)
@@ -251,7 +252,7 @@ static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock
 		sdhci_writel(host, DWCMSHC_EMMC_DLL_BYPASS | DWCMSHC_EMMC_DLL_START, DWCMSHC_EMMC_DLL_CTRL);
 		sdhci_writel(host, DLL_RXCLK_ORI_GATE, DWCMSHC_EMMC_DLL_RXCLK);
 		sdhci_writel(host, 0, DWCMSHC_EMMC_DLL_TXCLK);
-		sdhci_writel(host, 0, DECMSHC_EMMC_DLL_CMDOUT);
+		sdhci_writel(host, 0, DWCMSHC_EMMC_DLL_CMDOUT);
 		/*
 		 * Before switching to hs400es mode, the driver will enable
 		 * enhanced strobe first. PHY needs to configure the parameters
@@ -265,22 +266,13 @@ static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock
 	}
 
 	/* Reset DLL */
-	sdhci_writel(host, BIT(1), DWCMSHC_EMMC_DLL_CTRL);
+	sdhci_writel(host, DWCMSHC_EMMC_DLL_CTRL_RESET, DWCMSHC_EMMC_DLL_CTRL);
 	udelay(1);
 	sdhci_writel(host, 0x0, DWCMSHC_EMMC_DLL_CTRL);
 
-	/*
-	 * We shouldn't set DLL_RXCLK_NO_INVERTER for identify mode but
-	 * we must set it in higher speed mode.
-	 */
-	extra = DWCMSHC_EMMC_DLL_DLYENA;
-	if (priv->devtype == DWCMSHC_RK3568)
-		extra |= DLL_RXCLK_NO_INVERTER << DWCMSHC_EMMC_DLL_RXCLK_SRCSEL;
-	sdhci_writel(host, extra, DWCMSHC_EMMC_DLL_RXCLK);
-
 	/* Init DLL settings */
-	extra = 0x5 << DWCMSHC_EMMC_DLL_START_POINT |
-		0x2 << DWCMSHC_EMMC_DLL_INC |
+	extra = DWCMSHC_EMMC_DLL_START_DEFAULT << DWCMSHC_EMMC_DLL_START_POINT |
+		DWCMSHC_EMMC_DLL_INC_VALUE << DWCMSHC_EMMC_DLL_INC |
 		DWCMSHC_EMMC_DLL_START;
 	sdhci_writel(host, extra, DWCMSHC_EMMC_DLL_CTRL);
 	err = readl_poll_timeout(host->ioaddr + DWCMSHC_EMMC_DLL_STATUS0,
@@ -296,6 +288,15 @@ static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock
 		0x3 << 19;  /* post-change delay */
 	sdhci_writel(host, extra, dwc_priv->vendor_specific_area1 + DWCMSHC_EMMC_ATCTRL);
 
+	/*
+	 * We shouldn't set DLL_RXCLK_NO_INVERTER for identify mode but
+	 * we must set it in higher speed mode.
+	 */
+	extra = DWCMSHC_EMMC_DLL_DLYENA | DLL_RXCLK_ORI_GATE;
+	if (priv->devtype == DWCMSHC_RK3568)
+		extra |= DLL_RXCLK_NO_INVERTER;
+	sdhci_writel(host, extra, DWCMSHC_EMMC_DLL_RXCLK);
+
 	if (host->mmc->ios.timing == MMC_TIMING_MMC_HS200 ||
 	    host->mmc->ios.timing == MMC_TIMING_MMC_HS400)
 		txclk_tapnum = priv->txclk_tapnum;
@@ -304,16 +305,16 @@ static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock
 		txclk_tapnum = DLL_TXCLK_TAPNUM_90_DEGREES;
 
 		extra = DLL_CMDOUT_SRC_CLK_NEG |
-			DLL_CMDOUT_EN_SRC_CLK_NEG |
+			DLL_CMDOUT_BOTH_CLK_EDGE |
 			DWCMSHC_EMMC_DLL_DLYENA |
 			DLL_CMDOUT_TAPNUM_90_DEGREES |
 			DLL_CMDOUT_TAPNUM_FROM_SW;
-		sdhci_writel(host, extra, DECMSHC_EMMC_DLL_CMDOUT);
+		sdhci_writel(host, extra, DWCMSHC_EMMC_DLL_CMDOUT);
 	}
 
 	extra = DWCMSHC_EMMC_DLL_DLYENA |
 		DLL_TXCLK_TAPNUM_FROM_SW |
-		DLL_RXCLK_NO_INVERTER << DWCMSHC_EMMC_DLL_RXCLK_SRCSEL |
+		DLL_TXCLK_NO_INVERTER |
 		txclk_tapnum;
 	sdhci_writel(host, extra, DWCMSHC_EMMC_DLL_TXCLK);
 
