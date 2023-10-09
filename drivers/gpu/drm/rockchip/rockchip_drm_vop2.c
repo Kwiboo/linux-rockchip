@@ -2668,6 +2668,9 @@ static inline bool rockchip_rfbc(struct drm_plane *plane, u64 modifier)
 
 static bool rockchip_vop2_mod_supported(struct drm_plane *plane, u32 format, u64 modifier)
 {
+	struct vop2_win *win = to_vop2_win(plane);
+	struct vop2 *vop2 = win->vop2;
+
 	if (modifier == DRM_FORMAT_MOD_INVALID)
 		return false;
 
@@ -2677,7 +2680,8 @@ static bool rockchip_vop2_mod_supported(struct drm_plane *plane, u32 format, u64
 	if (!rockchip_afbc(plane, modifier) &&
 	    !rockchip_rfbc(plane, modifier) &&
 	    !rockchip_tiled(plane, modifier)) {
-		DRM_ERROR("%s unsupported format modifier 0x%llx\n", plane->name, modifier);
+		drm_dbg_kms(vop2->drm_dev, "%s unsupported format modifier 0x%llx\n", plane->name,
+			    modifier);
 
 		return false;
 	}
