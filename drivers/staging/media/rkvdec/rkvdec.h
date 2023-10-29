@@ -66,6 +66,8 @@ vb2_to_rkvdec_decoded_buf(struct vb2_buffer *buf)
 struct rkvdec_coded_fmt_ops {
 	int (*adjust_fmt)(struct rkvdec_ctx *ctx,
 			  struct v4l2_format *f);
+	u32 (*get_fmt_opaque)(struct rkvdec_ctx *ctx, struct v4l2_ctrl *ctrl);
+	bool (*valid_fmt)(struct rkvdec_ctx *ctx, u32 fourcc, u32 opaque);
 	int (*start)(struct rkvdec_ctx *ctx);
 	void (*stop)(struct rkvdec_ctx *ctx);
 	int (*run)(struct rkvdec_ctx *ctx);
@@ -104,6 +106,7 @@ struct rkvdec_ctx {
 	const struct rkvdec_coded_fmt_desc *coded_fmt_desc;
 	struct v4l2_ctrl_handler ctrl_hdl;
 	struct rkvdec_dev *dev;
+	u32 fmt_opaque;
 	void *priv;
 };
 

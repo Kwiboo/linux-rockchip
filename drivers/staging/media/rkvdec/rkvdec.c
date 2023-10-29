@@ -27,17 +27,23 @@
 #include "rkvdec.h"
 #include "rkvdec-regs.h"
 
-static u32 rkvdec_decoded_fmts(struct rkvdec_ctx *ctx, int index)
+static u32 rkvdec_decoded_fmts(struct rkvdec_ctx *ctx, int index, u32 opaque)
 {
 	const struct rkvdec_coded_fmt_desc *desc = ctx->coded_fmt_desc;
+	unsigned int i, j;
 
 	if (WARN_ON(!desc))
 		return 0;
 
-	if (index >= desc->num_decoded_fmts)
-		return 0;
+	for (i = 0, j = 0; i < desc->num_decoded_fmts; i++) {
+		if (!desc->ops->valid_fmt ||
+		    desc->ops->valid_fmt(ctx, desc->decoded_fmts[i], opaque)) {
+			if (index == j++)
+				return desc->decoded_fmts[i];
+		}
+	}
 
-	return desc->decoded_fmts[index];
+	return 0;
 }
 
 static void rkvdec_fill_decoded_pixfmt(struct rkvdec_ctx *ctx,
@@ -67,7 +73,7 @@ static void rkvdec_reset_decoded_fmt(struct rkvdec_ctx *ctx)
 {
 	struct v4l2_format *f = &ctx->decoded_fmt;
 
-	rkvdec_reset_fmt(ctx, f, rkvdec_decoded_fmts(ctx, 0));
+	rkvdec_reset_fmt(ctx, f, rkvdec_decoded_fmts(ctx, 0, ctx->fmt_opaque));
 	f->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
 	f->fmt.pix_mp.width = ctx->coded_fmt.fmt.pix_mp.width;
 	f->fmt.pix_mp.height = ctx->coded_fmt.fmt.pix_mp.height;
@@ -78,15 +84,60 @@ static int rkvdec_try_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct rkvdec_ctx *ctx = container_of(ctrl->handler, struct rkvdec_ctx, ctrl_hdl);
 	const struct rkvdec_coded_fmt_desc *desc = ctx->coded_fmt_desc;
+	struct v4l2_pix_format_mplane *pix_mp = &ctx->decoded_fmt.fmt.pix_mp;
+	struct vb2_queue *vq;
+	u32 opaque = 0;
+	int ret;
 
-	if (desc->ops->try_ctrl)
-		return desc->ops->try_ctrl(ctx, ctrl);
+	if (desc->ops->try_ctrl) {
+		ret = desc->ops->try_ctrl(ctx, ctrl);
+		if (ret)
+			return ret;
+	}
+
+	if (!desc->ops->valid_fmt)
+		return 0;
+
+	if (desc->ops->get_fmt_opaque) {
+		opaque = desc->ops->get_fmt_opaque(ctx, ctrl);
+		if (ctx->fmt_opaque == opaque)
+			return 0;
+	}
+
+	if (desc->ops->valid_fmt(ctx, pix_mp->pixelformat, opaque))
+		return 0;
+
+	/* format change not allowed when queue is busy */
+	vq = v4l2_m2m_get_vq(ctx->fh.m2m_ctx,
+			     V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE);
+	if (vb2_is_busy(vq))
+		return -EINVAL;
+
+	return 0;
+}
+
+static int rkvdec_s_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct rkvdec_ctx *ctx = container_of(ctrl->handler, struct rkvdec_ctx, ctrl_hdl);
+	const struct rkvdec_coded_fmt_desc *desc = ctx->coded_fmt_desc;
+	u32 opaque;
+
+	if (!desc->ops->get_fmt_opaque)
+		return 0;
+
+	opaque = desc->ops->get_fmt_opaque(ctx, ctrl);
+	if (ctx->fmt_opaque == opaque)
+		return 0;
+
+	ctx->fmt_opaque = opaque;
+	rkvdec_reset_decoded_fmt(ctx);
 
 	return 0;
 }
 
 static const struct v4l2_ctrl_ops rkvdec_ctrl_ops = {
 	.try_ctrl = rkvdec_try_ctrl,
+	.s_ctrl = rkvdec_s_ctrl,
 };
 
 static const struct rkvdec_ctrl_desc rkvdec_h264_ctrl_descs[] = {
@@ -252,11 +303,15 @@ static int rkvdec_querycap(struct file *file, void *priv,
 	return 0;
 }
 
-static bool rkvdec_valid_fmt(struct rkvdec_ctx *ctx, u32 fourcc)
+static bool rkvdec_valid_fmt(struct rkvdec_ctx *ctx, u32 fourcc, u32 opaque)
 {
 	const struct rkvdec_coded_fmt_desc *desc = ctx->coded_fmt_desc;
 	unsigned int i;
 
+	if (desc->ops->valid_fmt)
+		return desc->ops->valid_fmt(ctx, fourcc, opaque);
+
+	/* All decoded_fmts are valid without a valid_fmt ops */
 	for (i = 0; i < desc->num_decoded_fmts; i++) {
 		if (desc->decoded_fmts[i] == fourcc)
 			return true;
@@ -281,8 +336,9 @@ static int rkvdec_try_capture_fmt(struct file *file, void *priv,
 	if (WARN_ON(!coded_desc))
 		return -EINVAL;
 
-	if (!rkvdec_valid_fmt(ctx, pix_mp->pixelformat))
-		pix_mp->pixelformat = rkvdec_decoded_fmts(ctx, 0);
+	if (!rkvdec_valid_fmt(ctx, pix_mp->pixelformat, ctx->fmt_opaque))
+		pix_mp->pixelformat = rkvdec_decoded_fmts(ctx, 0,
+							  ctx->fmt_opaque);
 
 	/* Always apply the frmsize constraint of the coded end. */
 	pix_mp->width = max(pix_mp->width, ctx->coded_fmt.fmt.pix_mp.width);
@@ -398,6 +454,7 @@ static int rkvdec_s_output_fmt(struct file *file, void *priv,
 	 *
 	 * Note that this will propagates any size changes to the decoded format.
 	 */
+	ctx->fmt_opaque = 0;
 	rkvdec_reset_decoded_fmt(ctx);
 
 	/* Propagate colorspace information to capture. */
@@ -447,7 +504,7 @@ static int rkvdec_enum_capture_fmt(struct file *file, void *priv,
 	struct rkvdec_ctx *ctx = fh_to_rkvdec_ctx(priv);
 	u32 fourcc;
 
-	fourcc = rkvdec_decoded_fmts(ctx, f->index);
+	fourcc = rkvdec_decoded_fmts(ctx, f->index, ctx->fmt_opaque);
 	if (!fourcc)
 		return -EINVAL;
 
