@@ -16,7 +16,9 @@ description: |-
 properties:
   compatible:
     oneOf:
-      - const: rockchip,rk3399-vdec
+      - enum:
+          - rockchip,rk3288-vdec
+          - rockchip,rk3399-vdec
       - items:
           - enum:
               - rockchip,rk3228-vdec
