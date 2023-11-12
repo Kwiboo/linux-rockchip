@@ -139,21 +139,21 @@ All components are stored with the same number of bits per component.
       - Linear
     * - V4L2_PIX_FMT_NV15_4L4
       - 'VT15'
-      - 15
+      - 10
       - 4:2:0
       - Cb, Cr
       - Yes
       - 4x4 tiles
     * - V4L2_PIX_FMT_MT2110T
       - 'MT2T'
-      - 15
+      - 10
       - 4:2:0
       - Cb, Cr
       - No
       - 16x32 / 16x16 tiles tiled low bits
     * - V4L2_PIX_FMT_MT2110R
       - 'MT2R'
-      - 15
+      - 10
       - 4:2:0
       - Cb, Cr
       - No
@@ -390,7 +390,7 @@ Tiled NV15
 ----------
 
 Semi-planar 10-bit YUV 4:2:0 formats. All components are packed
-without any padding between each other. Each components group occupy 15
+without any padding between each other. Each components group occupy 10
 bits and are usually stored in group of 4 components stored over 5 bytes
 (YYYY or UVUV = 4 * 10 bits = 40 bits = 5 bytes) or partitioned into
 upper 8 bit and lower 2 bits. The final arrangement will vary depending if
