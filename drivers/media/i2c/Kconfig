@@ -2521,6 +2521,16 @@ config VIDEO_SC3338
 	  This is a Video4Linux2 sensor driver for the SmartSens
 	  SC3338 camera.
 
+config VIDEO_SC400AI
+	tristate "SmartSens SC400AI sensor support"
+	depends on I2C && VIDEO_V4L2
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  This is a Video4Linux2 sensor driver for the SmartSens
+	  SC401ai camera.
+
 config VIDEO_SC401AI
 	tristate "SmartSens SC401AI sensor support"
 	depends on I2C && VIDEO_V4L2
