@@ -1644,16 +1644,16 @@ retry_regulator:
 	if (ret)
 		goto release_driver;
 
+	ret = rk_pcie_reset_control_release(rk_pcie);
+	if (ret) {
+		dev_err(dev, "reset control init failed\n");
+		goto disable_vpcie3v3;
+	}
+
 	ret = rk_pcie_phy_init(rk_pcie);
 	if (ret) {
 		dev_err(dev, "phy init failed\n");
 		goto disable_vpcie3v3;
-	}
-
-	ret = rk_pcie_reset_control_release(rk_pcie);
-	if (ret) {
-		dev_err(dev, "reset control init failed\n");
-		goto disable_phy;
 	}
 
 	ret = rk_pcie_request_sys_irq(rk_pcie, pdev);
