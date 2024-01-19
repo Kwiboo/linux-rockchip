@@ -2691,6 +2691,16 @@ config VIDEO_SENSOR_ADAPTER
 	help
 	  This is a Video4Linux2 sensor driver adapter for other platform.
 
+config VIDEO_SP5508
+	tristate "SuperPix SP5508 sensor support"
+	depends on I2C && VIDEO_V4L2
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  This is a Video4Linux2 sensor driver for the SuperPix
+	  SP5508 camera.
+
 config VIDEO_SR030PC30
 	tristate "Siliconfile SR030PC30 sensor support"
 	depends on I2C && VIDEO_V4L2
