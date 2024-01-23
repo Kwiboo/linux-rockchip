@@ -97,6 +97,7 @@ struct rk630_phy_switched {
 	unsigned int detected_count;
 	bool config_rx_signal;
 	int old_link;
+	unsigned int config_max_speed;
 
 	/* linked process */
 	unsigned int linked_count;
@@ -480,6 +481,37 @@ static bool rk630_phy_switch_config_by_packets(struct phy_device *phydev)
 	return false;
 }
 
+static void rk630_phy_force_speed(struct phy_device *phydev, u32 max_speed)
+{
+	struct rk630_phy_priv *priv = phydev->priv;
+
+	if (priv->switched.config_max_speed != max_speed) {
+		if (max_speed == SPEED_10) {
+			linkmode_clear_bit(ETHTOOL_LINK_MODE_100baseFX_Full_BIT,
+					   phydev->supported);
+			linkmode_clear_bit(ETHTOOL_LINK_MODE_100baseFX_Half_BIT,
+					   phydev->supported);
+			linkmode_clear_bit(ETHTOOL_LINK_MODE_100baseT_Full_BIT,
+					   phydev->supported);
+			linkmode_clear_bit(ETHTOOL_LINK_MODE_100baseT_Half_BIT,
+					   phydev->supported);
+		} else {
+			linkmode_set_bit(ETHTOOL_LINK_MODE_100baseFX_Full_BIT,
+					 phydev->supported);
+			linkmode_set_bit(ETHTOOL_LINK_MODE_100baseFX_Half_BIT,
+					 phydev->supported);
+			linkmode_set_bit(ETHTOOL_LINK_MODE_100baseT_Full_BIT,
+					 phydev->supported);
+			linkmode_set_bit(ETHTOOL_LINK_MODE_100baseT_Half_BIT,
+					 phydev->supported);
+			linkmode_or(phydev->advertising,
+				    phydev->advertising, phydev->supported);
+		}
+		__genphy_config_aneg(priv->phydev, false);
+		priv->switched.config_max_speed = max_speed;
+	}
+}
+
 static void rk630_phy_service_task(struct work_struct *work)
 {
 	struct rk630_phy_priv *priv = container_of(work, struct rk630_phy_priv,
@@ -507,6 +539,7 @@ static void rk630_phy_service_task(struct work_struct *work)
 			priv->switched.linked_count = 0;
 			delay_time = 2 * RX_DETECT_SCHEDULE_TIME;
 			/* Goto default config if no rj45 signal plugin */
+			rk630_phy_force_speed(priv->phydev, SPEED_100);
 			rk630_phy_switch_config(priv->phydev, false);
 
 			/* Also go to 10M default config */
@@ -526,12 +559,17 @@ static void rk630_phy_service_task(struct work_struct *work)
 				rk630_phy_switch_config(priv->phydev, true);
 			} else if (priv->switched.detected_count == ALL_RX_DETECT_MAX_COUNT &&
 				   !priv->switched.finished) {
+				/* drop down to 10M speed */
+				rk630_phy_force_speed(priv->phydev, SPEED_10);
+			 } else if (priv->switched.detected_count == (ALL_RX_DETECT_MAX_COUNT + RX_DETECT_MAX_COUNT) &&
+				 !priv->switched.finished) {
 				/* After another detect, we lost the last chance,
 				 * go back to default config0.
 				 */
+				rk630_phy_force_speed(priv->phydev, SPEED_100);
 				rk630_phy_switch_config(priv->phydev, false);
 				priv->switched.finished = true;
-			} else if (priv->switched.detected_count > ALL_RX_DETECT_MAX_COUNT ||
+			} else if (priv->switched.detected_count > (ALL_RX_DETECT_MAX_COUNT + RX_DETECT_MAX_COUNT) ||
 				   priv->switched.finished) {
 				/* Slow schedule work for 2 * SCHEDULE_TIME, if
 				 * detected finish.
