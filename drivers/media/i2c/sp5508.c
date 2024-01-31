@@ -5,6 +5,7 @@
  * Copyright (C) 2024 Rockchip Electronics Co., Ltd.
  *
  * V0.0X01.0X00 first version.
+ * V0.0X01.0X01 add support otp.
  */
 
 // #define DEBUG
@@ -25,11 +26,14 @@
 #include <media/v4l2-async.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-subdev.h>
+#include <media/v4l2-fwnode.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/rk-preisp.h>
 #include "../platform/rockchip/isp/rkisp_tb_helper.h"
+#include <linux/of_graph.h>
+#include "otp_eeprom.h"
 
-#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x00)
+#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x01)
 
 #ifndef V4L2_CID_DIGITAL_GAIN
 #define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
@@ -629,14 +633,106 @@ static int sp5508_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 	return 0;
 }
 
+static void sp5508_get_otp(struct otp_info *otp,
+			   struct rkmodule_inf *inf)
+{
+	u32 i, j;
+	u32 w, h;
+
+	/* awb */
+	if (otp->awb_data.flag) {
+		inf->awb.flag = 1;
+		inf->awb.r_value = otp->awb_data.r_ratio;
+		inf->awb.b_value = otp->awb_data.b_ratio;
+		inf->awb.gr_value = otp->awb_data.g_ratio;
+		inf->awb.gb_value = 0x0;
+
+		inf->awb.golden_r_value = otp->awb_data.r_golden;
+		inf->awb.golden_b_value = otp->awb_data.b_golden;
+		inf->awb.golden_gr_value = otp->awb_data.g_golden;
+		inf->awb.golden_gb_value = 0x0;
+	}
+
+	/* lsc */
+	if (otp->lsc_data.flag) {
+		inf->lsc.flag = 1;
+		inf->lsc.width = otp->basic_data.size.width;
+		inf->lsc.height = otp->basic_data.size.height;
+		inf->lsc.table_size = otp->lsc_data.table_size;
+
+		for (i = 0; i < 289; i++) {
+			inf->lsc.lsc_r[i] = (otp->lsc_data.data[i * 2] << 8) |
+					    otp->lsc_data.data[i * 2 + 1];
+			inf->lsc.lsc_gr[i] = (otp->lsc_data.data[i * 2 + 578] << 8) |
+					     otp->lsc_data.data[i * 2 + 579];
+			inf->lsc.lsc_gb[i] = (otp->lsc_data.data[i * 2 + 1156] << 8) |
+					     otp->lsc_data.data[i * 2 + 1157];
+			inf->lsc.lsc_b[i] = (otp->lsc_data.data[i * 2 + 1734] << 8) |
+					    otp->lsc_data.data[i * 2 + 1735];
+		}
+	}
+
+	/* pdaf */
+	if (otp->pdaf_data.flag) {
+		inf->pdaf.flag = 1;
+		inf->pdaf.gainmap_width = otp->pdaf_data.gainmap_width;
+		inf->pdaf.gainmap_height = otp->pdaf_data.gainmap_height;
+		inf->pdaf.pd_offset = otp->pdaf_data.pd_offset;
+		inf->pdaf.dcc_mode = otp->pdaf_data.dcc_mode;
+		inf->pdaf.dcc_dir = otp->pdaf_data.dcc_dir;
+		inf->pdaf.dccmap_width = otp->pdaf_data.dccmap_width;
+		inf->pdaf.dccmap_height = otp->pdaf_data.dccmap_height;
+		w = otp->pdaf_data.gainmap_width;
+		h = otp->pdaf_data.gainmap_height;
+		for (i = 0; i < h; i++) {
+			for (j = 0; j < w; j++) {
+				inf->pdaf.gainmap[i * w + j] =
+					(otp->pdaf_data.gainmap[(i * w + j) * 2] << 8) |
+					otp->pdaf_data.gainmap[(i * w + j) * 2 + 1];
+			}
+		}
+		w = otp->pdaf_data.dccmap_width;
+		h = otp->pdaf_data.dccmap_height;
+		for (i = 0; i < h; i++) {
+			for (j = 0; j < w; j++) {
+				inf->pdaf.dccmap[i * w + j] =
+					(otp->pdaf_data.dccmap[(i * w + j) * 2] << 8) |
+					otp->pdaf_data.dccmap[(i * w + j) * 2 + 1];
+			}
+		}
+	}
+
+	/* af */
+	if (otp->af_data.flag) {
+		inf->af.flag = 1;
+		inf->af.dir_cnt = 1;
+		inf->af.af_otp[0].vcm_start = otp->af_data.af_inf;
+		inf->af.af_otp[0].vcm_end = otp->af_data.af_macro;
+		inf->af.af_otp[0].vcm_dir = 0;
+	}
+}
+
 static void sp5508_get_module_inf(struct sp5508 *sp5508,
 				  struct rkmodule_inf *inf)
 {
+	struct otp_info *otp = sp5508->otp;
+
 	memset(inf, 0, sizeof(*inf));
 	strscpy(inf->base.sensor, SP5508_NAME, sizeof(inf->base.sensor));
 	strscpy(inf->base.module, sp5508->module_name,
 		sizeof(inf->base.module));
 	strscpy(inf->base.lens, sp5508->len_name, sizeof(inf->base.lens));
+
+	if (otp)
+		sp5508_get_otp(otp, inf);
+}
+
+static void sp5508_set_awb_cfg(struct sp5508 *sp5508,
+			       struct rkmodule_awb_cfg *cfg)
+{
+	mutex_lock(&sp5508->mutex);
+	memcpy(&sp5508->awb_cfg, cfg, sizeof(*cfg));
+	mutex_unlock(&sp5508->mutex);
 }
 
 static long sp5508_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
@@ -662,6 +758,9 @@ static long sp5508_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		hdr_cfg = (struct rkmodule_hdr_cfg *)arg;
 		hdr_cfg->esp.mode = HDR_NORMAL_VC;
 		hdr_cfg->hdr_mode = sp5508->cur_mode->hdr_mode;
+		break;
+	case RKMODULE_AWB_CFG:
+		sp5508_set_awb_cfg(sp5508, (struct rkmodule_awb_cfg *)arg);
 		break;
 	case RKMODULE_SET_CONVERSION_GAIN:
 		break;
@@ -693,6 +792,7 @@ static long sp5508_compat_ioctl32(struct v4l2_subdev *sd,
 {
 	void __user *up = compat_ptr(arg);
 	struct rkmodule_inf *inf;
+	struct rkmodule_awb_cfg *awb_cfg;
 	struct rkmodule_hdr_cfg *hdr;
 	long ret;
 	u32 stream = 0;
@@ -742,6 +842,21 @@ static long sp5508_compat_ioctl32(struct v4l2_subdev *sd,
 			ret = -EFAULT;
 		kfree(hdr);
 		break;
+	case RKMODULE_AWB_CFG:
+		awb_cfg = kzalloc(sizeof(*awb_cfg), GFP_KERNEL);
+		if (!awb_cfg) {
+			ret = -ENOMEM;
+			return ret;
+		}
+
+		ret = copy_from_user(awb_cfg, up, sizeof(*awb_cfg));
+		if (!ret)
+			ret = sp5508_ioctl(sd, cmd, awb_cfg);
+		else
+			ret = -EFAULT;
+
+		kfree(awb_cfg);
+		break;
 	case RKMODULE_SET_QUICK_STREAM:
 		if (copy_from_user(&stream, up, sizeof(u32)))
 			return -EFAULT;
@@ -756,7 +871,6 @@ static long sp5508_compat_ioctl32(struct v4l2_subdev *sd,
 	return ret;
 }
 #endif
-
 
 static int __sp5508_start_stream(struct sp5508 *sp5508)
 {
@@ -1362,6 +1476,10 @@ static int sp5508_probe(struct i2c_client *client,
 	char facing[2];
 	int ret;
 	u32 i, hdr_mode = 0;
+	struct device_node *eeprom_ctrl_node;
+	struct i2c_client *eeprom_ctrl_client;
+	struct v4l2_subdev *eeprom_ctrl;
+	struct otp_info *otp_ptr;
 
 	dev_info(dev, "driver version: %02x.%02x.%02x",
 		 DRIVER_VERSION >> 16,
@@ -1453,6 +1571,34 @@ static int sp5508_probe(struct i2c_client *client,
 	ret = sp5508_check_sensor_id(sp5508, client);
 	if (ret)
 		goto err_power_off;
+
+	sp5508->otp = NULL;
+	eeprom_ctrl_node = of_parse_phandle(node, "eeprom-ctrl", 0);
+	if (eeprom_ctrl_node) {
+		eeprom_ctrl_client = of_find_i2c_device_by_node(eeprom_ctrl_node);
+		of_node_put(eeprom_ctrl_node);
+		if (IS_ERR_OR_NULL(eeprom_ctrl_client)) {
+			dev_err(dev, "can not get eeprom i2c client\n");
+		} else {
+			eeprom_ctrl = i2c_get_clientdata(eeprom_ctrl_client);
+			if (IS_ERR_OR_NULL(eeprom_ctrl)) {
+				dev_err(dev, "can not get eeprom i2c client data\n");
+			} else {
+				otp_ptr = devm_kzalloc(dev, sizeof(*otp_ptr), GFP_KERNEL);
+				if (!otp_ptr) {
+					ret = -ENOMEM;
+					put_device(&eeprom_ctrl_client->dev);
+					goto err_power_off;
+				}
+				ret = v4l2_subdev_call(eeprom_ctrl, core, ioctl, 0, otp_ptr);
+				if (!ret)
+					sp5508->otp = otp_ptr;
+				else
+					devm_kfree(dev, otp_ptr);
+			}
+			put_device(&eeprom_ctrl_client->dev);
+		}
+	}
 
 #ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
 	sd->internal_ops = &sp5508_internal_ops;
