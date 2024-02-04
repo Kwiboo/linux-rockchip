@@ -1280,6 +1280,14 @@ config VIDEO_HI556
 	  To compile this driver as a module, choose M here: the
 	  module will be called hi556.
 
+config VIDEO_HI556_EEPROM
+	tristate "Hynix Hi-556 sensor otp from eeprom support"
+	depends on VIDEO_V4L2 && I2C
+	depends on VIDEO_HI556
+	select V4L2_FWNODE
+	help
+	  This driver supports HI556 OTP load from eeprom.
+
 config VIDEO_IMX214
 	tristate "Sony IMX214 sensor support"
 	depends on GPIOLIB && I2C && VIDEO_V4L2

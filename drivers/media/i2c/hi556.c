@@ -7,6 +7,8 @@
  * V0.0X01.0X00 init version
  */
 
+// #define DEBUG
+
 #include <linux/clk.h>
 #include <linux/device.h>
 #include <linux/delay.h>
@@ -31,6 +33,7 @@
 #include <media/v4l2-mediabus.h>
 #include <media/v4l2-subdev.h>
 #include <linux/rk-camera-module.h>
+#include "hi556_eeprom_head.h"
 
 /* verify default register values */
 //#define CHECK_REG_VALUE
@@ -169,6 +172,7 @@ struct hi556 {
 	const char		*module_name;
 	const char		*len_name;
 	struct rkmodule_awb_cfg	awb_cfg;
+	struct otp_info		*rk_otp;
 };
 
 #define to_hi556(sd) container_of(sd, struct hi556, subdev)
@@ -441,7 +445,7 @@ static const struct regval hi556_2592x1944_regs_2lane[] = {
 	{0x002e, 0x1111},
 	{0x0030, 0x1111},
 	{0x0032, 0x1111},
-	{0x0006, 0x0823},
+	{0x0006, 0x0c34},
 	{0x0a22, 0x0000},
 	{0x0a12, 0x0a20},
 	{0x0a14, 0x0798},
@@ -467,11 +471,11 @@ static const struct hi556_mode supported_modes_2lane[] = {
 		.height = 1944,
 		.max_fps = {
 			.numerator = 10000,
-			.denominator = 300000,
+			.denominator = 200000,
 		},
 		.exp_def = 0x0810,
 		.hts_def = 0x0B00,
-		.vts_def = 0x0823,
+		.vts_def = 0x0c34,
 		.reg_list = hi556_2592x1944_regs_2lane,
 		.hdr_mode = NO_HDR,
 	}
@@ -773,15 +777,58 @@ static int hi556_g_mbus_config(struct v4l2_subdev *sd,
 	return 0;
 }
 
+static void hi556_get_otp(struct otp_info *otp,
+			       struct rkmodule_inf *inf)
+{
+	u32 i;
+
+	/* awb */
+	if (otp->awb_data.flag) {
+		inf->awb.flag = 1;
+		inf->awb.r_value = otp->awb_data.r_ratio;
+		inf->awb.b_value = otp->awb_data.b_ratio;
+		inf->awb.gr_value = otp->awb_data.g_ratio;
+		inf->awb.gb_value = 0x0;
+
+		inf->awb.golden_r_value = otp->awb_data.r_golden;
+		inf->awb.golden_b_value = otp->awb_data.b_golden;
+		inf->awb.golden_gr_value = otp->awb_data.g_golden;
+		inf->awb.golden_gb_value = 0x0;
+	}
+
+	/* lsc */
+	if (otp->lsc_data.flag) {
+		inf->lsc.flag = 1;
+		inf->lsc.width = otp->basic_data.size.width;
+		inf->lsc.height = otp->basic_data.size.height;
+		inf->lsc.table_size = otp->lsc_data.table_size;
+
+		for (i = 0; i < 289; i++) {
+			inf->lsc.lsc_r[i] = (otp->lsc_data.data[i * 2] << 8) |
+					     otp->lsc_data.data[i * 2 + 1];
+			inf->lsc.lsc_gr[i] = (otp->lsc_data.data[i * 2 + 578] << 8) |
+					      otp->lsc_data.data[i * 2 + 579];
+			inf->lsc.lsc_gb[i] = (otp->lsc_data.data[i * 2 + 1156] << 8) |
+					      otp->lsc_data.data[i * 2 + 1157];
+			inf->lsc.lsc_b[i] = (otp->lsc_data.data[i * 2 + 1734] << 8) |
+					     otp->lsc_data.data[i * 2 + 1735];
+		}
+	}
+}
+
 static void hi556_get_module_inf(struct hi556 *hi556,
 				  struct rkmodule_inf *inf)
 {
+	struct otp_info *otp = hi556->rk_otp;
+
 	memset(inf, 0, sizeof(*inf));
 	strscpy(inf->base.sensor, HI556_NAME, sizeof(inf->base.sensor));
 	strscpy(inf->base.module, hi556->module_name,
 		sizeof(inf->base.module));
 	strscpy(inf->base.lens, hi556->len_name, sizeof(inf->base.lens));
 
+	if (otp)
+		hi556_get_otp(otp, inf);
 }
 
 static void hi556_set_awb_cfg(struct hi556 *hi556,
@@ -905,11 +952,10 @@ static int __hi556_start_stream(struct hi556 *hi556)
 	mutex_unlock(&hi556->mutex);
 	ret = v4l2_ctrl_handler_setup(&hi556->ctrl_handler);
 	mutex_lock(&hi556->mutex);
-	if (ret)
-		return ret;
-
-	if (ret)
+	if (ret) {
 		dev_info(&hi556->client->dev, "APPly otp failed!\n");
+		return ret;
+	}
 
 	ret = hi556_write_reg(hi556->client, HI556_REG_CTRL_MODE,
 				HI556_REG_VALUE_08BIT, HI556_MODE_STREAMING);
@@ -1236,7 +1282,7 @@ static int hi556_set_ctrl(struct v4l2_ctrl *ctrl)
 					     struct hi556, ctrl_handler);
 	struct i2c_client *client = hi556->client;
 	s64 max;
-	u32 val = 0;
+//	u32 val = 0;
 	int ret = 0;
 
 	/* Propagate change of current control to all related controls */
@@ -1273,7 +1319,7 @@ static int hi556_set_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_TEST_PATTERN:
 		ret = hi556_enable_test_pattern(hi556, ctrl->val);
 		break;
-	case V4L2_CID_HFLIP:
+/*	case V4L2_CID_HFLIP:
 		ret = hi556_read_reg(hi556->client, HI556_FLIP_MIRROR_REG,
 				       HI556_REG_VALUE_08BIT, &val);
 		ret |= hi556_write_reg(hi556->client, HI556_FLIP_MIRROR_REG,
@@ -1287,7 +1333,7 @@ static int hi556_set_ctrl(struct v4l2_ctrl *ctrl)
 					 HI556_REG_VALUE_08BIT,
 					 HI556_FETCH_FLIP(val, ctrl->val));
 		break;
-	default:
+*/	default:
 		dev_warn(&client->dev, "%s Unhandled id:0x%x, val:0x%x\n",
 			 __func__, ctrl->id, ctrl->val);
 		break;
@@ -1376,6 +1422,68 @@ err_free_handler:
 	return ret;
 }
 
+static int hi556_enable_otp_mode(struct hi556 *hi556,
+				  struct i2c_client *client)
+{
+	struct device *dev = &hi556->client->dev;
+	u32 temp = 0;
+	int i;
+	int ret;
+
+	ret = hi556_write_reg(hi556->client, 0x0a02,
+			       HI556_REG_VALUE_08BIT, 0x01);
+	ret |= hi556_write_reg(hi556->client, 0x0a00,
+			       HI556_REG_VALUE_08BIT, 0x00);
+	usleep_range(10 * 1000, 20 * 1000);
+	ret |= hi556_write_reg(hi556->client, 0x0f02,
+			       HI556_REG_VALUE_08BIT, 0x00);
+	ret |= hi556_write_reg(hi556->client, 0x011a,
+			       HI556_REG_VALUE_08BIT, 0x01);
+	ret |= hi556_write_reg(hi556->client, 0x011b,
+			       HI556_REG_VALUE_08BIT, 0x09);
+	ret |= hi556_write_reg(hi556->client, 0x0d04,
+			       HI556_REG_VALUE_08BIT, 0x01);
+	ret |= hi556_write_reg(hi556->client, 0x0d02,
+			       HI556_REG_VALUE_08BIT, 0x07);
+	ret |= hi556_write_reg(hi556->client, 0x003e,
+			       HI556_REG_VALUE_08BIT, 0x10);
+	ret |= hi556_write_reg(hi556->client, 0x0a00,
+			       HI556_REG_VALUE_08BIT, 0x01);
+
+	ret |= hi556_write_reg(hi556->client, 0x010a,
+			       HI556_REG_VALUE_08BIT, 0x00);
+	ret |= hi556_write_reg(hi556->client, 0x010b,
+			       HI556_REG_VALUE_08BIT, 0x01);
+	ret |= hi556_write_reg(hi556->client, 0x0102,
+			       HI556_REG_VALUE_08BIT, 0x01);
+
+	for (i = 0; i < 10; i++) {
+		hi556_read_reg(client, 0x0108, HI556_REG_VALUE_08BIT, &temp);
+		dev_info(dev, "read sensor id: %x", temp);
+	}
+
+	return ret;
+}
+static int hi556_disable_otp_mode(struct hi556 *hi556,
+				  struct i2c_client *client)
+{
+	int ret;
+
+	ret = hi556_write_reg(hi556->client, 0x0a00,
+			      HI556_REG_VALUE_08BIT, 0x00);
+	usleep_range(10 * 1000, 20 * 1000);
+	ret |= hi556_write_reg(hi556->client, 0x004a,
+			       HI556_REG_VALUE_08BIT, 0x00);
+	ret |= hi556_write_reg(hi556->client, 0x0d04,
+			       HI556_REG_VALUE_08BIT, 0x00);
+	ret |= hi556_write_reg(hi556->client, 0x003e,
+			       HI556_REG_VALUE_08BIT, 0x00);
+	ret |= hi556_write_reg(hi556->client, 0x004a,
+			       HI556_REG_VALUE_08BIT, 0x01);
+
+	return ret;
+}
+
 static int hi556_check_sensor_id(struct hi556 *hi556,
 				  struct i2c_client *client)
 {
@@ -1384,7 +1492,7 @@ static int hi556_check_sensor_id(struct hi556 *hi556,
 	int ret;
 
 	ret = hi556_read_reg(client, HI556_REG_CHIP_ID,
-			      HI556_REG_VALUE_16BIT, &id);
+			     HI556_REG_VALUE_16BIT, &id);
 	if (id != CHIP_ID) {
 		dev_err(dev, "Unexpected sensor id(%06x), ret(%d)\n", id, ret);
 		return -ENODEV;
@@ -1453,6 +1561,10 @@ static int hi556_probe(struct i2c_client *client,
 	struct v4l2_subdev *sd;
 	char facing[2] = "b";
 	int ret;
+	struct device_node *eeprom_ctrl_node;
+	struct i2c_client *eeprom_ctrl_client;
+	struct v4l2_subdev *eeprom_ctrl;
+	struct otp_info *otp_ptr;
 
 	dev_info(dev, "driver version: %02x.%02x.%02x",
 		DRIVER_VERSION >> 16,
@@ -1542,6 +1654,51 @@ static int hi556_probe(struct i2c_client *client,
 				  "check following information:\n"
 				  "Power/PowerDown/Reset/Mclk/I2cBus !!\n",
 				  __func__, __LINE__);
+		goto err_power_off;
+	}
+
+	ret = hi556_write_array(hi556->client, hi556_global_regs);
+	if (ret) {
+		v4l2_err(sd, "could not set init registers\n");
+		goto err_power_off;
+	}
+
+	ret = hi556_enable_otp_mode(hi556, client);
+	if (ret) {
+		v4l2_err(sd, "enable opt mode fail\n");
+		goto err_power_off;
+	}
+
+	eeprom_ctrl_node = of_parse_phandle(node, "eeprom-ctrl", 0);
+	if (eeprom_ctrl_node) {
+		eeprom_ctrl_client = of_find_i2c_device_by_node(eeprom_ctrl_node);
+		of_node_put(eeprom_ctrl_node);
+		if (IS_ERR_OR_NULL(eeprom_ctrl_client)) {
+			dev_err(dev, "can not get eeprom i2c client\n");
+		} else {
+			eeprom_ctrl = i2c_get_clientdata(eeprom_ctrl_client);
+			if (IS_ERR_OR_NULL(eeprom_ctrl)) {
+				dev_err(dev, "can not get eeprom i2c client\n");
+			} else {
+				otp_ptr = devm_kzalloc(dev, sizeof(*otp_ptr), GFP_KERNEL);
+				if (!otp_ptr) {
+					ret = -ENOMEM;
+					put_device(&eeprom_ctrl_client->dev);
+					goto err_power_off;
+				}
+				ret = v4l2_subdev_call(eeprom_ctrl, core, ioctl, 0, otp_ptr);
+				if (!ret)
+					hi556->rk_otp = otp_ptr;
+				else
+					devm_kfree(dev, otp_ptr);
+			}
+			put_device(&eeprom_ctrl_client->dev);
+		}
+	}
+
+	ret = hi556_disable_otp_mode(hi556, client);
+	if (ret) {
+		v4l2_err(sd, "disable opt mode fail\n");
 		goto err_power_off;
 	}
 
