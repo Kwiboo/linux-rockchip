@@ -12,7 +12,7 @@ maintainers:
 
 description: |
   Rockchip RK809 series PMIC. This device consists of an i2c controlled MFD
-  that includes regulators, an RTC, and power button.
+  that includes regulators, an RTC, a power button and an audio codec.
 
 properties:
   compatible:
@@ -31,15 +31,30 @@ properties:
     minimum: 0
     maximum: 1
 
+  clocks:
+    maxItems: 1
+
+  clock-names:
+    items:
+      - const: mclk
+
   clock-output-names:
     description:
       From common clock binding to override the default output clock name.
+
+  rockchip,mic-in-differential:
+    type: boolean
+    description:
+      The microphone input uses differential mode and not single-ended.
 
   rockchip,system-power-controller:
     type: boolean
     deprecated: true
     description:
       Telling whether or not this PMIC is controlling the system power.
+
+  '#sound-dai-cells':
+    const: 0
 
   system-power-controller: true
 
@@ -94,6 +109,7 @@ properties:
     unevaluatedProperties: false
 
 allOf:
+  - $ref: /schemas/sound/dai-common.yaml#
   - if:
       properties:
         '#clock-cells':
@@ -119,6 +135,7 @@ additionalProperties: false
 
 examples:
   - |
+    #include <dt-bindings/clock/rk3568-cru.h>
     #include <dt-bindings/pinctrl/rockchip.h>
     #include <dt-bindings/interrupt-controller/irq.h>
     #include <dt-bindings/gpio/gpio.h>
@@ -129,12 +146,18 @@ examples:
         rk809: pmic@20 {
             compatible = "rockchip,rk809";
             reg = <0x20>;
+            assigned-clocks = <&cru I2S1_MCLKOUT_TX>;
+            assigned-clock-parents = <&cru CLK_I2S1_8CH_TX>;
             #clock-cells = <1>;
+            clocks = <&cru I2S1_MCLKOUT_TX>;
+            clock-names = "mclk";
             clock-output-names = "rk809-clkout1", "rk809-clkout2";
             interrupt-parent = <&gpio0>;
             interrupts = <RK_PA3 IRQ_TYPE_LEVEL_LOW>;
             pinctrl-names = "default";
-            pinctrl-0 = <&pmic_int_l>;
+            pinctrl-0 = <&pmic_int_l>, <&i2s1m0_mclk>;
+            rockchip,mic-in-differential;
+            #sound-dai-cells = <0>;
             system-power-controller;
             wakeup-source;
 
