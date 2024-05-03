@@ -78,11 +78,11 @@ properties:
 
   vcc8-supply:
     description:
-      The input supply for SWITCH_REG1.
+      The input supply for SWITCH_REG2.
 
   vcc9-supply:
     description:
-      The input supply for DCDC_REG5 and SWITCH_REG2.
+      The input supply for DCDC_REG5 and SWITCH_REG1.
 
   regulators:
     type: object
