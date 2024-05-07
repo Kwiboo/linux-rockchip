@@ -459,12 +459,14 @@ static void rk817_codec_parse_dt_property(struct device *dev,
 
 	node = of_get_child_by_name(dev->parent->of_node, "codec");
 	if (!node) {
-		dev_dbg(dev, "%s() Can not get child: codec\n",
-			__func__);
+		rk817->mic_in_differential =
+			of_property_read_bool(dev->parent->of_node,
+					      "rockchip,mic-in-differential");
+		return;
 	}
 
 	rk817->mic_in_differential =
-			of_property_read_bool(node, "rockchip,mic-in-differential");
+		of_property_read_bool(node, "rockchip,mic-in-differential");
 
 	of_node_put(node);
 }
