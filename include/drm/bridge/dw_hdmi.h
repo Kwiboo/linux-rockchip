@@ -263,6 +263,8 @@ struct dw_hdmi_plat_data {
 	struct drm_display_mode *(*get_force_timing)(void *data);
 	u32 (*get_refclk_rate)(void *data);
 	void (*force_frl_rate)(void *data, u8 rate);
+	void (*get_mode_color_caps)(struct drm_connector *connector, struct drm_display_info *info,
+				    void *data);
 
 	/* Vendor Property support */
 	const struct dw_hdmi_property_ops *property_ops;
