@@ -142,6 +142,7 @@ struct rockchip_rgb {
 	struct regmap *grf;
 	bool data_sync_bypass;
 	bool phy_enabled;
+	bool support_psr;
 	const struct rockchip_rgb_funcs *funcs;
 	struct rockchip_drm_sub_dev sub_dev;
 };
@@ -211,15 +212,44 @@ rockchip_rgb_connector_best_encoder(struct drm_connector *connector)
 	return &rgb->encoder;
 }
 
+static int
+rockchip_rgb_connector_atomic_check(struct drm_connector *connector,
+				    struct drm_atomic_state *state)
+{
+	struct rockchip_rgb *rgb = connector_to_rgb(connector);
+	struct drm_connector_state *conn_state;
+
+	conn_state = drm_atomic_get_new_connector_state(state, connector);
+	if (WARN_ON(!conn_state))
+		return -ENODEV;
+
+	conn_state->self_refresh_aware = rgb->support_psr;
+
+	return 0;
+}
+
 static const
 struct drm_connector_helper_funcs rockchip_rgb_connector_helper_funcs = {
 	.get_modes = rockchip_rgb_connector_get_modes,
 	.best_encoder = rockchip_rgb_connector_best_encoder,
+	.atomic_check = rockchip_rgb_connector_atomic_check,
 };
 
-static void rockchip_rgb_encoder_enable(struct drm_encoder *encoder)
+static void rockchip_rgb_encoder_atomic_enable(struct drm_encoder *encoder,
+					       struct drm_atomic_state *state)
 {
 	struct rockchip_rgb *rgb = encoder_to_rgb(encoder);
+	struct drm_crtc *new_crtc;
+	struct drm_crtc_state *old_crtc_state;
+
+	new_crtc = rockchip_drm_encoder_get_new_crtc(encoder, state);
+	if (!new_crtc)
+		return;
+
+	old_crtc_state = drm_atomic_get_old_crtc_state(state, new_crtc);
+	/* Coming back from self refresh, nothing to do */
+	if (old_crtc_state && old_crtc_state->self_refresh_active)
+		return;
 
 	pinctrl_pm_select_default_state(rgb->dev);
 
@@ -243,6 +273,17 @@ static void rockchip_rgb_encoder_atomic_disable(struct drm_encoder *encoder,
 	struct rockchip_rgb *rgb = encoder_to_rgb(encoder);
 	struct drm_crtc *old_crtc, *new_crtc;
 	struct rockchip_crtc_state *s;
+	struct drm_crtc_state *new_crtc_state = NULL;
+
+	new_crtc = rockchip_drm_encoder_get_new_crtc(encoder, state);
+	/* No crtc means we're doing a full shutdown */
+	if (!new_crtc)
+		return;
+
+	new_crtc_state = drm_atomic_get_new_crtc_state(state, new_crtc);
+	/* Entering self-refresh, do nothing */
+	if (new_crtc_state && new_crtc_state->self_refresh_active)
+		return;
 
 	if (rgb->panel) {
 		drm_panel_disable(rgb->panel);
@@ -260,8 +301,6 @@ static void rockchip_rgb_encoder_atomic_disable(struct drm_encoder *encoder,
 	pinctrl_pm_select_sleep_state(rgb->dev);
 
 	old_crtc = rockchip_drm_encoder_get_old_crtc(encoder, state);
-	new_crtc = rockchip_drm_encoder_get_new_crtc(encoder, state);
-
 	if (old_crtc && old_crtc != new_crtc) {
 		s = to_rockchip_crtc_state(old_crtc->state);
 
@@ -413,7 +452,7 @@ rockchip_rgb_encoder_mode_valid(struct drm_encoder *encoder,
 
 static const
 struct drm_encoder_helper_funcs rockchip_rgb_encoder_helper_funcs = {
-	.enable = rockchip_rgb_encoder_enable,
+	.atomic_enable = rockchip_rgb_encoder_atomic_enable,
 	.atomic_disable = rockchip_rgb_encoder_atomic_disable,
 	.atomic_check = rockchip_rgb_encoder_atomic_check,
 	.mode_valid = rockchip_rgb_encoder_mode_valid,
@@ -1007,8 +1046,10 @@ static int rockchip_rgb_probe(struct platform_device *pdev)
 	rgb->data_sync_bypass = of_property_read_bool(dev->of_node, "rockchip,data-sync-bypass");
 
 	fwnode_mcu_panel = device_get_named_child_node(dev, "mcu-panel");
-	if (fwnode_mcu_panel)
+	if (fwnode_mcu_panel) {
 		rgb->np_mcu_panel = to_of_node(fwnode_mcu_panel);
+		rgb->support_psr = of_property_read_bool(dev->of_node, "support-psr");
+	}
 
 	rgb_data = of_device_get_match_data(dev);
 	if (rgb_data) {
