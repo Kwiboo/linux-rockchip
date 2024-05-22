@@ -1632,7 +1632,17 @@ static void vop_crtc_atomic_disable_for_psr(struct drm_crtc *crtc,
 {
 	struct vop *vop = to_vop(crtc);
 
-	vop_disable_all_planes(vop);
+	/*
+	 * For mcu interface, if mcu_hold_mode is enabled, the wins will stop
+	 * accessing DDR and the interface will also stop output.
+	 *
+	 * In addition, the regs operations in vop_disable_all_planes() will
+	 * not take effect when the mcu_hold_mode is enabled.
+	 */
+	if (vop->mcu_timing.mcu_pix_total)
+		VOP_CTRL_SET(vop, mcu_hold_mode, 1);
+	else
+		vop_disable_all_planes(vop);
 	drm_crtc_vblank_off(crtc);
 	vop->aclk_rate = clk_get_rate(vop->aclk);
 	clk_set_rate(vop->aclk, vop->aclk_rate / 3);
@@ -3260,6 +3270,8 @@ static void vop_crtc_atomic_enable(struct drm_crtc *crtc,
 		if (vop->aclk_rate_reset)
 			clk_set_rate(vop->aclk, vop->aclk_rate);
 		vop->aclk_rate_reset = false;
+		if (vop->mcu_timing.mcu_pix_total)
+			VOP_CTRL_SET(vop, mcu_hold_mode, 0);
 
 		return;
 	}
