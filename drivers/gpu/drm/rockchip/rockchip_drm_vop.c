@@ -1225,9 +1225,13 @@ static enum drm_mode_status vop_crtc_mode_valid(struct drm_crtc *crtc,
 						const struct drm_display_mode *mode)
 {
 	struct vop *vop = to_vop(crtc);
+	const struct vop_rect *max_output = &vop->data->max_output;
 
-	if (vop->data->max_output.width && mode->hdisplay > vop->data->max_output.width)
-		return MODE_BAD_HVALUE;
+	if (drm_mode_validate_size(mode, max_output->width,
+				   max_output->height) != MODE_OK) {
+		return drm_mode_validate_size(mode, max_output->height,
+					      max_output->width);
+	}
 
 	return MODE_OK;
 }
