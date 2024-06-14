@@ -211,7 +211,7 @@
 
 	display-subsystem {
 		compatible = "rockchip,display-subsystem";
-		ports = <&vopl_out>, <&vopb_out>;
+		ports = <&vopb_out>, <&vopl_out>;
 	};
 
 	sdmmc: mmc@ff0c0000 {
