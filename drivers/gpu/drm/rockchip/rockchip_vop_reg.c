@@ -768,7 +768,7 @@ static const struct vop_intr rk3288_vop_intr = {
 	.clear = VOP_REG(RK3288_INTR_CTRL0, 0xf, 8),
 };
 
-static const struct vop_data rk3288_vop = {
+static const struct vop_data rk3288_vop_big = {
 	.version = VOP_VERSION(3, 1),
 	.feature = VOP_FEATURE_OUTPUT_RGB10,
 	.intr = &rk3288_vop_intr,
@@ -778,12 +778,20 @@ static const struct vop_data rk3288_vop = {
 	.win = rk3288_vop_win_data,
 	.win_size = ARRAY_SIZE(rk3288_vop_win_data),
 	.lut_size = 1024,
-	/*
-	 * This is the maximum resolution for the VOPB, the VOPL can only do
-	 * 2560x1600, but we can't distinguish them as they have the same
-	 * compatible.
-	 */
 	.max_output = { 3840, 2160 },
+};
+
+static const struct vop_data rk3288_vop_lit = {
+	.version = VOP_VERSION(3, 1),
+	.feature = VOP_FEATURE_OUTPUT_RGB10,
+	.intr = &rk3288_vop_intr,
+	.common = &rk3288_common,
+	.modeset = &rk3288_modeset,
+	.output = &rk3288_output,
+	.win = rk3288_vop_win_data,
+	.win_size = ARRAY_SIZE(rk3288_vop_win_data),
+	.lut_size = 1024,
+	.max_output = { 2560, 1600 },
 };
 
 static const int rk3368_vop_intrs[] = {
@@ -1320,8 +1328,10 @@ static const struct of_device_id vop_driver_dt_match[] = {
 	  .data = &rk3066_vop },
 	{ .compatible = "rockchip,rk3188-vop",
 	  .data = &rk3188_vop },
+	{ .compatible = "rockchip,rk3288-vop-lit",
+	  .data = &rk3288_vop_lit },
 	{ .compatible = "rockchip,rk3288-vop",
-	  .data = &rk3288_vop },
+	  .data = &rk3288_vop_big },
 	{ .compatible = "rockchip,rk3368-vop",
 	  .data = &rk3368_vop },
 	{ .compatible = "rockchip,rk3366-vop",
