@@ -17,22 +17,26 @@ maintainers:
 
 properties:
   compatible:
-    enum:
-      - rockchip,px30-vop-big
-      - rockchip,px30-vop-lit
-      - rockchip,rk3036-vop
-      - rockchip,rk3066-vop
-      - rockchip,rk3126-vop
-      - rockchip,rk3188-vop
-      - rockchip,rk3228-vop
-      - rockchip,rk3288-vop
-      - rockchip,rk3328-vop
-      - rockchip,rk3366-vop
-      - rockchip,rk3368-vop
-      - rockchip,rk3399-vop-big
-      - rockchip,rk3399-vop-lit
-      - rockchip,rk3506-vop
-      - rockchip,rv1126-vop
+    oneOf:
+      - items:
+          - const: rockchip,rk3288-vop-lit
+          - const: rockchip,rk3288-vop
+      - enum:
+          - rockchip,px30-vop-big
+          - rockchip,px30-vop-lit
+          - rockchip,rk3036-vop
+          - rockchip,rk3066-vop
+          - rockchip,rk3126-vop
+          - rockchip,rk3188-vop
+          - rockchip,rk3228-vop
+          - rockchip,rk3288-vop
+          - rockchip,rk3328-vop
+          - rockchip,rk3366-vop
+          - rockchip,rk3368-vop
+          - rockchip,rk3399-vop-big
+          - rockchip,rk3399-vop-lit
+          - rockchip,rk3506-vop
+          - rockchip,rv1126-vop
 
   reg:
     minItems: 1
