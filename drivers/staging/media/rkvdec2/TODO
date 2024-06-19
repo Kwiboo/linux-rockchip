@@ -1,0 +1,12 @@
+* H264 features
+
+  - Fluster score currently is 129/135 for JVT-AVC_V1.
+    This probably won't improve.
+
+* Support for HEVC and VP9 are planned for this driver.
+
+  First, the h264 backend needs to be stabilized.
+
+* Evaluate sharing code with rkvdec
+
+  As rkvdec is still in staging, this driver stays there as well.
