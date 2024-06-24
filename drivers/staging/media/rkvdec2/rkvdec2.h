@@ -101,6 +101,7 @@ struct rkvdec2_dev {
 	struct gen_pool *sram_pool;
 	struct mutex vdev_lock; /* serializes ioctls */
 	struct delayed_work watchdog_work;
+	bool flush_iommu;
 };
 
 struct rkvdec2_ctx {

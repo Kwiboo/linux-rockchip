@@ -37,6 +37,7 @@
 
 #define RKVDEC2_REG_STA_INT		0x380
 #define STA_INT_DEC_RDY_STA		BIT(2)
+#define STA_INT_SOFTRESET_RDY		BIT(9)
 
 /* base: OFFSET_COMMON_REGS */
 struct rkvdec2_regs_common {
