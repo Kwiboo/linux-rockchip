@@ -943,12 +943,9 @@ static int rkvdec_queue_init(void *priv,
 	src_vq->mem_ops = &vb2_dma_contig_memops;
 
 	/*
-	 * Driver does mostly sequential access, so sacrifice TLB efficiency
-	 * for faster allocation. Also, no CPU access on the source queue,
-	 * so no kernel mapping needed.
+	 * No CPU access on the queues, so no kernel mapping needed.
 	 */
-	src_vq->dma_attrs = DMA_ATTR_ALLOC_SINGLE_PAGES |
-			    DMA_ATTR_NO_KERNEL_MAPPING;
+	src_vq->dma_attrs = DMA_ATTR_NO_KERNEL_MAPPING;
 	src_vq->buf_struct_size = sizeof(struct v4l2_m2m_buffer);
 	src_vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
 	src_vq->lock = &rkvdec->vdev_lock;
@@ -962,8 +959,7 @@ static int rkvdec_queue_init(void *priv,
 
 	dst_vq->bidirectional = true;
 	dst_vq->mem_ops = &vb2_dma_contig_memops;
-	dst_vq->dma_attrs = DMA_ATTR_ALLOC_SINGLE_PAGES |
-			    DMA_ATTR_NO_KERNEL_MAPPING;
+	dst_vq->dma_attrs = DMA_ATTR_NO_KERNEL_MAPPING;
 	dst_vq->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
 	dst_vq->io_modes = VB2_MMAP | VB2_DMABUF;
 	dst_vq->drv_priv = ctx;
@@ -1177,7 +1173,7 @@ static irqreturn_t rkvdec_irq_handler(int irq, void *priv)
 	state = (status & RKVDEC_RDY_STA) ?
 		VB2_BUF_STATE_DONE : VB2_BUF_STATE_ERROR;
 
-	writel(0, rkvdec->regs + RKVDEC_REG_INTERRUPT);
+	writel(RKVDEC_CONFIG_DEC_CLK_GATE_E, rkvdec->regs + RKVDEC_REG_INTERRUPT);
 	if (cancel_delayed_work(&rkvdec->watchdog_work)) {
 		struct rkvdec_ctx *ctx;
 
@@ -1198,7 +1194,8 @@ static void rkvdec_watchdog_func(struct work_struct *work)
 	ctx = v4l2_m2m_get_curr_priv(rkvdec->m2m_dev);
 	if (ctx) {
 		dev_err(rkvdec->dev, "Frame processing timed out!\n");
-		writel(RKVDEC_IRQ_DIS, rkvdec->regs + RKVDEC_REG_INTERRUPT);
+		writel(RKVDEC_CONFIG_DEC_CLK_GATE_E | RKVDEC_IRQ_DIS,
+		       rkvdec->regs + RKVDEC_REG_INTERRUPT);
 		writel(0, rkvdec->regs + RKVDEC_REG_SYSCTRL);
 		rkvdec_job_finish(ctx, VB2_BUF_STATE_ERROR);
 	}
@@ -1323,9 +1320,9 @@ static void rkvdec_remove(struct platform_device *pdev)
 
 	cancel_delayed_work_sync(&rkvdec->watchdog_work);
 
-	rkvdec_v4l2_cleanup(rkvdec);
-	pm_runtime_disable(&pdev->dev);
 	pm_runtime_dont_use_autosuspend(&pdev->dev);
+	pm_runtime_disable(&pdev->dev);
+	rkvdec_v4l2_cleanup(rkvdec);
 }
 
 #ifdef CONFIG_PM

@@ -771,6 +771,7 @@ static int rkvdec_hevc_run(struct rkvdec_ctx *ctx)
 {
 	struct rkvdec_dev *rkvdec = ctx->dev;
 	struct rkvdec_hevc_run run;
+	u32 reg;
 
 	rkvdec_hevc_run_preamble(ctx, &run);
 
@@ -798,8 +799,10 @@ static int rkvdec_hevc_run(struct rkvdec_ctx *ctx)
 	}
 
 	/* Start decoding! */
+	reg = (run.pps->flags & V4L2_HEVC_PPS_FLAG_TILES_ENABLED) ?
+		0 : RKVDEC_WR_DDR_ALIGN_EN;
 	writel(RKVDEC_INTERRUPT_DEC_E | RKVDEC_CONFIG_DEC_CLK_GATE_E |
-	       RKVDEC_TIMEOUT_E | RKVDEC_BUF_EMPTY_E,
+	       RKVDEC_TIMEOUT_E | RKVDEC_BUF_EMPTY_E | reg,
 	       rkvdec->regs + RKVDEC_REG_INTERRUPT);
 
 	return 0;
