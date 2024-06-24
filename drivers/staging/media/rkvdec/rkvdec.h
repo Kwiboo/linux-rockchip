@@ -124,6 +124,7 @@ struct rkvdec_dev {
 	struct delayed_work watchdog_work;
 	unsigned int capabilities;
 	unsigned int quirks;
+	bool flush_iommu;
 };
 
 struct rkvdec_ctx {
