@@ -114,7 +114,7 @@ struct rkvdec2_sps_pps {
 
 /* Data structure describing auxiliary buffer format. */
 struct rkvdec2_h264_priv_tbl {
-	u32 cabac_table[928];
+	s8 cabac_table[4][464][2];
 	struct rkvdec2_h264_scaling_list scaling_list;
 	struct rkvdec2_sps_pps param_set[256];
 	struct rkvdec2_rps rps;
@@ -127,18 +127,18 @@ struct rkvdec2_h264_reflists {
 };
 
 struct rkvdec2_h264_run {
-	struct rkvdec2_run					base;
-	const struct v4l2_ctrl_h264_decode_params		*decode_params;
-	const struct v4l2_ctrl_h264_sps				*sps;
-	const struct v4l2_ctrl_h264_pps				*pps;
-	const struct v4l2_ctrl_h264_scaling_matrix		*scaling_matrix;
+	struct rkvdec2_run base;
+	const struct v4l2_ctrl_h264_decode_params *decode_params;
+	const struct v4l2_ctrl_h264_sps *sps;
+	const struct v4l2_ctrl_h264_pps *pps;
+	const struct v4l2_ctrl_h264_scaling_matrix *scaling_matrix;
 	struct vb2_buffer *ref_buf[V4L2_H264_NUM_DPB_ENTRIES];
 };
 
 struct rkvdec2_h264_ctx {
-	struct rkvdec2_aux_buf		priv_tbl;
-	struct rkvdec2_h264_reflists	reflists;
-	struct rkvdec2_regs_h264	regs;
+	struct rkvdec2_aux_buf priv_tbl;
+	struct rkvdec2_h264_reflists reflists;
+	struct rkvdec2_regs_h264 regs;
 };
 
 static void assemble_hw_pps(struct rkvdec2_ctx *ctx,
@@ -165,13 +165,15 @@ static void assemble_hw_pps(struct rkvdec2_ctx *ctx,
 	memset(hw_ps, 0, sizeof(*hw_ps));
 
 	/* write sps */
-	hw_ps->sps.seq_parameter_set_id = 0xf;
-	hw_ps->sps.profile_idc = 0xff;
-	hw_ps->sps.constraint_set3_flag = 1;
+	hw_ps->sps.seq_parameter_set_id = sps->seq_parameter_set_id;
+	hw_ps->sps.profile_idc = sps->profile_idc;
+	hw_ps->sps.constraint_set3_flag =
+		!!(sps->constraint_set_flags & (1 << 3));
 	hw_ps->sps.chroma_format_idc = sps->chroma_format_idc;
 	hw_ps->sps.bit_depth_luma = sps->bit_depth_luma_minus8;
 	hw_ps->sps.bit_depth_chroma = sps->bit_depth_chroma_minus8;
-	hw_ps->sps.qpprime_y_zero_transform_bypass_flag = 0;
+	hw_ps->sps.qpprime_y_zero_transform_bypass_flag =
+		!!(sps->flags & V4L2_H264_SPS_FLAG_QPPRIME_Y_ZERO_TRANSFORM_BYPASS);
 	hw_ps->sps.log2_max_frame_num_minus4 = sps->log2_max_frame_num_minus4;
 	hw_ps->sps.max_num_ref_frames = sps->max_num_ref_frames;
 	hw_ps->sps.pic_order_cnt_type = sps->pic_order_cnt_type;
@@ -199,8 +201,8 @@ static void assemble_hw_pps(struct rkvdec2_ctx *ctx,
 		!!(sps->flags & V4L2_H264_SPS_FLAG_DIRECT_8X8_INFERENCE);
 
 	/* write pps */
-	hw_ps->pps.pic_parameter_set_id = 0xff;
-	hw_ps->pps.pps_seq_parameter_set_id = 0x1f;
+	hw_ps->pps.pic_parameter_set_id = pps->pic_parameter_set_id;
+	hw_ps->pps.pps_seq_parameter_set_id = pps->seq_parameter_set_id;
 	hw_ps->pps.entropy_coding_mode_flag =
 		!!(pps->flags & V4L2_H264_PPS_FLAG_ENTROPY_CODING_MODE);
 	hw_ps->pps.bottom_field_pic_order_in_frame_present_flag =
@@ -429,7 +431,6 @@ static void config_registers(struct rkvdec2_ctx *ctx,
 			     struct rkvdec2_h264_run *run)
 {
 	const struct v4l2_ctrl_h264_decode_params *dec_params = run->decode_params;
-	const struct v4l2_ctrl_h264_sps *sps = run->sps;
 	const struct v4l2_h264_dpb_entry *dpb = dec_params->dpb;
 	struct rkvdec2_h264_ctx *h264_ctx = ctx->priv;
 	dma_addr_t priv_start_addr = h264_ctx->priv_tbl.dma;
@@ -440,9 +441,9 @@ static void config_registers(struct rkvdec2_ctx *ctx,
 	const struct v4l2_format *f;
 	dma_addr_t rlc_addr;
 	dma_addr_t dst_addr;
-	u32 hor_virstride = 0;
-	u32 ver_virstride = 0;
-	u32 y_virstride = 0;
+	u32 hor_virstride;
+	u32 ver_virstride;
+	u32 y_virstride;
 	u32 offset;
 	u32 pixels;
 	u32 i;
@@ -471,8 +472,8 @@ static void config_registers(struct rkvdec2_ctx *ctx,
 	/* Set strides */
 	f = &ctx->decoded_fmt;
 	dst_fmt = &f->fmt.pix_mp;
-	hor_virstride = (sps->bit_depth_luma_minus8 + 8) * dst_fmt->width / 8;
-	ver_virstride = round_up(dst_fmt->height, 16);
+	hor_virstride = dst_fmt->plane_fmt[0].bytesperline;
+	ver_virstride = dst_fmt->height;
 	y_virstride = hor_virstride * ver_virstride;
 	pixels = dst_fmt->height * dst_fmt->width;
 
@@ -485,12 +486,12 @@ static void config_registers(struct rkvdec2_ctx *ctx,
 	regs->common.reg026.reg_cfg_gating_en = 1;
 
 	/* Set timeout threshold */
-	if (pixels < RKVDEC2_1080P_PIXELS)
-		regs->common.timeout_threshold = RKVDEC2_TIMEOUT_1080p;
-	else if (pixels < RKVDEC2_4K_PIXELS)
-		regs->common.timeout_threshold = RKVDEC2_TIMEOUT_4K;
-	else if (pixels < RKVDEC2_8K_PIXELS)
+	if (pixels > RKVDEC2_4K_PIXELS)
 		regs->common.timeout_threshold = RKVDEC2_TIMEOUT_8K;
+	else if (pixels > RKVDEC2_1080P_PIXELS)
+		regs->common.timeout_threshold = RKVDEC2_TIMEOUT_4K;
+	else
+		regs->common.timeout_threshold = RKVDEC2_TIMEOUT_1080p;
 
 	/* Set TOP and BOTTOM POCs */
 	regs->h264_param.cur_top_poc = dec_params->top_field_order_cnt;

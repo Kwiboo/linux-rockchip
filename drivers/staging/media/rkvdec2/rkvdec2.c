@@ -26,6 +26,70 @@
 
 #include "rkvdec2.h"
 
+static u32 rkvdec2_enum_decoded_fmt(struct rkvdec2_ctx *ctx, int index)
+{
+	const struct rkvdec2_coded_fmt_desc *desc = ctx->coded_fmt_desc;
+
+	if (WARN_ON(!desc))
+		return 0;
+
+	if (index >= desc->num_decoded_fmts)
+		return 0;
+
+	return desc->decoded_fmts[index];
+}
+
+static bool rkvdec2_is_valid_fmt(struct rkvdec2_ctx *ctx, u32 fourcc)
+{
+	const struct rkvdec2_coded_fmt_desc *desc = ctx->coded_fmt_desc;
+	unsigned int i;
+
+	for (i = 0; i < desc->num_decoded_fmts; i++) {
+		if (desc->decoded_fmts[i] == fourcc)
+			return true;
+	}
+
+	return false;
+}
+
+static void rkvdec2_fill_decoded_pixfmt(struct rkvdec2_ctx *ctx,
+				        struct v4l2_pix_format_mplane *pix_mp,
+					bool update_ctx)
+{
+	v4l2_fill_pixfmt_mp(pix_mp, pix_mp->pixelformat,
+			    pix_mp->width, pix_mp->height);
+	if (update_ctx)
+		ctx->colmv_offset = pix_mp->plane_fmt[0].sizeimage;
+	pix_mp->plane_fmt[0].sizeimage += 128 *
+		DIV_ROUND_UP(pix_mp->width, 16) *
+		DIV_ROUND_UP(pix_mp->height, 16);
+}
+
+static void rkvdec2_reset_fmt(struct rkvdec2_ctx *ctx, struct v4l2_format *f,
+			      u32 fourcc)
+{
+	memset(f, 0, sizeof(*f));
+	f->fmt.pix_mp.pixelformat = fourcc;
+	f->fmt.pix_mp.field = V4L2_FIELD_NONE;
+	f->fmt.pix_mp.colorspace = V4L2_COLORSPACE_REC709;
+	f->fmt.pix_mp.ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
+	f->fmt.pix_mp.quantization = V4L2_QUANTIZATION_DEFAULT;
+	f->fmt.pix_mp.xfer_func = V4L2_XFER_FUNC_DEFAULT;
+}
+
+static void rkvdec2_reset_decoded_fmt(struct rkvdec2_ctx *ctx)
+{
+	struct v4l2_format *f = &ctx->decoded_fmt;
+	u32 fourcc;
+
+	fourcc = rkvdec2_enum_decoded_fmt(ctx, 0);
+	rkvdec2_reset_fmt(ctx, f, fourcc);
+	f->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+	f->fmt.pix_mp.width = ctx->coded_fmt.fmt.pix_mp.width;
+	f->fmt.pix_mp.height = ctx->coded_fmt.fmt.pix_mp.height;
+	rkvdec2_fill_decoded_pixfmt(ctx, &f->fmt.pix_mp, true);
+}
+
 static int rkvdec2_try_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct rkvdec2_ctx *ctx = container_of(ctrl->handler, struct rkvdec2_ctx, ctrl_hdl);
@@ -69,7 +133,7 @@ static const struct rkvdec2_ctrl_desc rkvdec2_h264_ctrl_descs[] = {
 	},
 	{
 		.cfg.id = V4L2_CID_MPEG_VIDEO_H264_PROFILE,
-		.cfg.min = V4L2_MPEG_VIDEO_H264_PROFILE_BASELINE,
+		.cfg.min = V4L2_MPEG_VIDEO_H264_PROFILE_CONSTRAINED_BASELINE,
 		.cfg.max = V4L2_MPEG_VIDEO_H264_PROFILE_HIGH,
 		.cfg.menu_skip_mask =
 			BIT(V4L2_MPEG_VIDEO_H264_PROFILE_EXTENDED),
@@ -88,16 +152,16 @@ static const struct rkvdec2_ctrls rkvdec2_h264_ctrls = {
 };
 
 static const u32 rkvdec2_h264_decoded_fmts[] = {
-	V4L2_PIX_FMT_NV12
+	V4L2_PIX_FMT_NV12,
 };
 
 static const struct rkvdec2_coded_fmt_desc rkvdec2_coded_fmts[] = {
 	{
 		.fourcc = V4L2_PIX_FMT_H264_SLICE,
 		.frmsize = {
-			.min_width = 16,
+			.min_width = 64,
 			.max_width =  65520,
-			.step_width = 16,
+			.step_width = 64,
 			.min_height = 16,
 			.max_height =  65520,
 			.step_height = 16,
@@ -133,7 +197,7 @@ static struct rcb_size_info rcb_sizes[] = {
 	{67,	PIC_HEIGHT},	// filtc col
 };
 
-#define RCB_SIZE(n) (rcb_sizes[(n)].multiplier * (rcb_sizes[(n)].axis ? height : width))
+#define RCB_SIZE(n,w,h) (rcb_sizes[(n)].multiplier * (rcb_sizes[(n)].axis ? (h) : (w)))
 
 static const struct rkvdec2_coded_fmt_desc *
 rkvdec2_find_coded_fmt_desc(u32 fourcc)
@@ -146,18 +210,6 @@ rkvdec2_find_coded_fmt_desc(u32 fourcc)
 	}
 
 	return NULL;
-}
-
-static void rkvdec2_reset_fmt(struct rkvdec2_ctx *ctx, struct v4l2_format *f,
-			      u32 fourcc)
-{
-	memset(f, 0, sizeof(*f));
-	f->fmt.pix_mp.pixelformat = fourcc;
-	f->fmt.pix_mp.field = V4L2_FIELD_NONE;
-	f->fmt.pix_mp.colorspace = V4L2_COLORSPACE_REC709;
-	f->fmt.pix_mp.ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
-	f->fmt.pix_mp.quantization = V4L2_QUANTIZATION_DEFAULT;
-	f->fmt.pix_mp.xfer_func = V4L2_XFER_FUNC_DEFAULT;
 }
 
 static void rkvdec2_reset_coded_fmt(struct rkvdec2_ctx *ctx)
@@ -175,38 +227,20 @@ static void rkvdec2_reset_coded_fmt(struct rkvdec2_ctx *ctx)
 		ctx->coded_fmt_desc->ops->adjust_fmt(ctx, f);
 }
 
-static void rkvdec2_reset_decoded_fmt(struct rkvdec2_ctx *ctx)
-{
-	struct v4l2_format *f = &ctx->decoded_fmt;
-
-	rkvdec2_reset_fmt(ctx, f, ctx->coded_fmt_desc->decoded_fmts[0]);
-	f->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
-	v4l2_fill_pixfmt_mp(&f->fmt.pix_mp,
-			    ctx->coded_fmt_desc->decoded_fmts[0],
-			    ctx->coded_fmt.fmt.pix_mp.width,
-			    ctx->coded_fmt.fmt.pix_mp.height);
-
-	ctx->colmv_offset = f->fmt.pix_mp.plane_fmt[0].sizeimage;
-
-	f->fmt.pix_mp.plane_fmt[0].sizeimage += 128 *
-		DIV_ROUND_UP(f->fmt.pix_mp.width, 16) *
-		DIV_ROUND_UP(f->fmt.pix_mp.height, 16);
-}
-
 static int rkvdec2_enum_framesizes(struct file *file, void *priv,
 				   struct v4l2_frmsizeenum *fsize)
 {
-	const struct rkvdec2_coded_fmt_desc *fmt;
+	const struct rkvdec2_coded_fmt_desc *desc;
 
 	if (fsize->index != 0)
 		return -EINVAL;
 
-	fmt = rkvdec2_find_coded_fmt_desc(fsize->pixel_format);
-	if (!fmt)
+	desc = rkvdec2_find_coded_fmt_desc(fsize->pixel_format);
+	if (!desc)
 		return -EINVAL;
 
 	fsize->type = V4L2_FRMSIZE_TYPE_STEPWISE;
-	fsize->stepwise = fmt->frmsize;
+	fsize->stepwise = desc->frmsize;
 	return 0;
 }
 
@@ -230,7 +264,6 @@ static int rkvdec2_try_capture_fmt(struct file *file, void *priv,
 	struct v4l2_pix_format_mplane *pix_mp = &f->fmt.pix_mp;
 	struct rkvdec2_ctx *ctx = fh_to_rkvdec2_ctx(priv);
 	const struct rkvdec2_coded_fmt_desc *coded_desc;
-	unsigned int i;
 
 	/*
 	 * The codec context should point to a coded format desc, if the format
@@ -241,13 +274,8 @@ static int rkvdec2_try_capture_fmt(struct file *file, void *priv,
 	if (WARN_ON(!coded_desc))
 		return -EINVAL;
 
-	for (i = 0; i < coded_desc->num_decoded_fmts; i++) {
-		if (coded_desc->decoded_fmts[i] == pix_mp->pixelformat)
-			break;
-	}
-
-	if (i == coded_desc->num_decoded_fmts)
-		pix_mp->pixelformat = coded_desc->decoded_fmts[0];
+	if (!rkvdec2_is_valid_fmt(ctx, pix_mp->pixelformat))
+		pix_mp->pixelformat = rkvdec2_enum_decoded_fmt(ctx, 0);
 
 	/* Always apply the frmsize constraint of the coded end. */
 	pix_mp->width = max(pix_mp->width, ctx->coded_fmt.fmt.pix_mp.width);
@@ -256,14 +284,7 @@ static int rkvdec2_try_capture_fmt(struct file *file, void *priv,
 				       &pix_mp->height,
 				       &coded_desc->frmsize);
 
-	v4l2_fill_pixfmt_mp(pix_mp, pix_mp->pixelformat,
-			    pix_mp->width, pix_mp->height);
-
-	pix_mp->plane_fmt[0].sizeimage +=
-		128 *
-		DIV_ROUND_UP(pix_mp->width, 16) *
-		DIV_ROUND_UP(pix_mp->height, 16);
-
+	rkvdec2_fill_decoded_pixfmt(ctx, pix_mp, false);
 	pix_mp->field = V4L2_FIELD_NONE;
 
 	return 0;
@@ -418,14 +439,13 @@ static int rkvdec2_enum_capture_fmt(struct file *file, void *priv,
 				    struct v4l2_fmtdesc *f)
 {
 	struct rkvdec2_ctx *ctx = fh_to_rkvdec2_ctx(priv);
+	u32 fourcc;
 
-	if (WARN_ON(!ctx->coded_fmt_desc))
+	fourcc = rkvdec2_enum_decoded_fmt(ctx, f->index);
+	if (!fourcc)
 		return -EINVAL;
 
-	if (f->index >= ctx->coded_fmt_desc->num_decoded_fmts)
-		return -EINVAL;
-
-	f->pixelformat = ctx->coded_fmt_desc->decoded_fmts[f->index];
+	f->pixelformat = fourcc;
 	return 0;
 }
 
@@ -559,11 +579,11 @@ static void rkvdec2_free_rcb(struct rkvdec2_ctx *ctx)
 		case RKVDEC2_ALLOC_SRAM:
 			gen_pool_free(ctx->dev->sram_pool,
 				      (unsigned long)ctx->rcb_bufs[i].cpu,
-				      RCB_SIZE(i));
+				      RCB_SIZE(i, width, height));
 			break;
 		case RKVDEC2_ALLOC_DMA:
 			dma_free_coherent(ctx->dev->dev,
-					  RCB_SIZE(i),
+					  RCB_SIZE(i, width, height),
 					  ctx->rcb_bufs[i].cpu,
 					  ctx->rcb_bufs[i].dma);
 			break;
@@ -584,7 +604,7 @@ static int rkvdec2_allocate_rcb(struct rkvdec2_ctx *ctx)
 	for (i = 0; i < RKVDEC2_RCB_COUNT; i++) {
 		void *cpu = NULL;
 		dma_addr_t dma;
-		size_t rcb_size = RCB_SIZE(i);
+		size_t rcb_size = RCB_SIZE(i, width, height);
 		enum rkvdec2_alloc_type alloc_type = RKVDEC2_ALLOC_SRAM;
 
 		if (ctx->dev->sram_pool) {
@@ -1204,9 +1224,9 @@ static void rkvdec2_remove(struct platform_device *pdev)
 
 	cancel_delayed_work_sync(&rkvdec->watchdog_work);
 
-	rkvdec2_v4l2_cleanup(rkvdec);
-	pm_runtime_disable(&pdev->dev);
 	pm_runtime_dont_use_autosuspend(&pdev->dev);
+	pm_runtime_disable(&pdev->dev);
+	rkvdec2_v4l2_cleanup(rkvdec);
 
 	if (rkvdec->sram_pool)
 		gen_pool_destroy(rkvdec->sram_pool);

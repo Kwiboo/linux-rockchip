@@ -111,9 +111,7 @@ struct rkvdec2_ctx {
 	struct v4l2_ctrl_handler ctrl_hdl;
 	struct rkvdec2_dev *dev;
 	struct rkvdec2_aux_buf rcb_bufs[RKVDEC2_RCB_COUNT];
-
 	u32 colmv_offset;
-
 	void *priv;
 };
 
