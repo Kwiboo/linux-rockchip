@@ -168,44 +168,6 @@ static u32 *display_connector_get_output_bus_fmts(struct drm_bridge *bridge,
 							      num_output_fmts);
 }
 
-/*
- * Since this bridge is tied to the connector, it acts like a passthrough,
- * so concerning the input bus formats, either pass the bus formats from the
- * previous bridge or MEDIA_BUS_FMT_FIXED (like select_bus_fmt_recursive())
- * when atomic_get_input_bus_fmts is not supported.
- * This supports negotiation if the bridge chain has all bits in place.
- */
-static u32 *display_connector_get_input_bus_fmts(struct drm_bridge *bridge,
-					struct drm_bridge_state *bridge_state,
-					struct drm_crtc_state *crtc_state,
-					struct drm_connector_state *conn_state,
-					u32 output_fmt,
-					unsigned int *num_input_fmts)
-{
-	struct drm_bridge *prev_bridge __free(drm_bridge_put) = drm_bridge_get_prev_bridge(bridge);
-	struct drm_bridge_state *prev_bridge_state;
-
-	if (!prev_bridge || !prev_bridge->funcs->atomic_get_input_bus_fmts) {
-		u32 *in_bus_fmts;
-
-		*num_input_fmts = 1;
-		in_bus_fmts = kmalloc_obj(*in_bus_fmts);
-		if (!in_bus_fmts)
-			return NULL;
-
-		in_bus_fmts[0] = MEDIA_BUS_FMT_FIXED;
-
-		return in_bus_fmts;
-	}
-
-	prev_bridge_state = drm_atomic_get_new_bridge_state(crtc_state->state,
-							    prev_bridge);
-
-	return prev_bridge->funcs->atomic_get_input_bus_fmts(prev_bridge, prev_bridge_state,
-							     crtc_state, conn_state, output_fmt,
-							     num_input_fmts);
-}
-
 static const struct drm_bridge_funcs display_connector_bridge_funcs = {
 	.attach = display_connector_attach,
 	.detect = display_connector_bridge_detect,
@@ -213,7 +175,7 @@ static const struct drm_bridge_funcs display_connector_bridge_funcs = {
 	.hpd_disable = display_connector_hpd_disable,
 	.edid_read = display_connector_edid_read,
 	.atomic_get_output_bus_fmts = display_connector_get_output_bus_fmts,
-	.atomic_get_input_bus_fmts = display_connector_get_input_bus_fmts,
+	.atomic_get_input_bus_fmts = drm_atomic_helper_bridge_propagate_bus_fmt,
 	.atomic_duplicate_state = drm_atomic_helper_bridge_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_bridge_destroy_state,
 	.atomic_create_state = drm_atomic_helper_bridge_create_state,
