@@ -256,6 +256,7 @@ struct rockchip_pwm_chip {
 	struct pwm_chip chip;
 	struct clk *clk;
 	struct clk *pclk;
+	struct clk *clk_osc;
 	struct pinctrl *pinctrl;
 	struct pinctrl_state *active_state;
 	struct delayed_work pwm_work;
@@ -1603,13 +1604,21 @@ int rockchip_pwm_set_wave(struct pwm_device *pwm, struct rockchip_pwm_wave_confi
 	if (ret)
 		return ret;
 
+	if (config->enable) {
+		ret = clk_enable(pc->clk_osc);
+		if (ret) {
+			dev_err(chip->dev, "Failed to enable OSC clk for PWM%d\n", pc->channel_id);
+			goto err_disable_pclk;
+		}
+	}
+
 	if (config->duty_table) {
 		ret = pc->data->funcs.set_wave_table(chip, pwm, config->duty_table,
 						     config->width_mode);
 		if (ret) {
 			dev_err(chip->dev, "Failed to set wave duty table for PWM%d\n",
 				pc->channel_id);
-			goto err_disable_pclk;
+			goto err_disable_clk_osc;
 		}
 	}
 
@@ -1619,16 +1628,26 @@ int rockchip_pwm_set_wave(struct pwm_device *pwm, struct rockchip_pwm_wave_confi
 		if (ret) {
 			dev_err(chip->dev, "Failed to set wave period table for PWM%d\n",
 				pc->channel_id);
-			goto err_disable_pclk;
+			goto err_disable_clk_osc;
 		}
 	}
 
 	ret = pc->data->funcs.set_wave(chip, pwm, config);
 	if (ret) {
 		dev_err(chip->dev, "Failed to set wave generator for PWM%d\n", pc->channel_id);
-		goto err_disable_pclk;
+		goto err_disable_clk_osc;
 	}
 
+	if (!config->enable)
+		clk_disable(pc->clk_osc);
+
+	clk_disable(pc->pclk);
+
+	return ret;
+
+err_disable_clk_osc:
+	if (config->enable)
+		clk_disable(pc->clk_osc);
 err_disable_pclk:
 	clk_disable(pc->pclk);
 
@@ -2075,10 +2094,12 @@ static int rockchip_pwm_probe(struct platform_device *pdev)
 
 	count = of_count_phandle_with_args(pdev->dev.of_node,
 					   "clocks", "#clock-cells");
-	if (count == 2)
+	if (count >= 2) {
 		pc->pclk = devm_clk_get(&pdev->dev, "pclk");
-	else
+		pc->clk_osc = devm_clk_get_optional(&pdev->dev, "osc");
+	} else {
 		pc->pclk = pc->clk;
+	}
 
 	if (IS_ERR(pc->pclk)) {
 		ret = PTR_ERR(pc->pclk);
@@ -2190,6 +2211,20 @@ static int rockchip_pwm_probe(struct platform_device *pdev)
 
 	clk_disable(pc->pclk);
 
+	if (pc->wave_support) {
+		if (!pc->clk_osc) {
+			dev_err(&pdev->dev, "Can't find OSC clk for wave generator mode\n");
+			ret = -EINVAL;
+			goto err_pclk;
+		}
+
+		ret = clk_prepare(pc->clk_osc);
+		if (ret) {
+			dev_err(&pdev->dev, "Can't prepare OSC clk for wave generator mode\n");
+			goto err_pclk;
+		}
+	}
+
 	return 0;
 
 err_pclk:
@@ -2226,6 +2261,7 @@ static int rockchip_pwm_remove(struct platform_device *pdev)
 
 	if (pc->oneshot_en)
 		clk_disable(pc->pclk);
+	clk_unprepare(pc->clk_osc);
 	clk_unprepare(pc->pclk);
 	clk_unprepare(pc->clk);
 
