@@ -1234,6 +1234,17 @@ config VIDEO_GC5035
 	  To compile this driver as a module, choose M here: the
 	  module will be called gc5035.
 
+config VIDEO_GC5603
+	tristate "GalaxyCore GC5603 sensor support"
+	depends on VIDEO_V4L2 && I2C && MEDIA_CONTROLLER
+	depends on MEDIA_CAMERA_SUPPORT
+	select V4L2_FWNODE
+	help
+	  Support for the GalaxyCore GC5603 sensor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called GC5603.
+
 config VIDEO_GC8034
 	tristate "GalaxyCore GC8034 sensor support"
 	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
