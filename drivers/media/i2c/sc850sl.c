@@ -8,6 +8,7 @@
  * V0.0X01.0X02 change power_gpio to pwdn_gpio
  * V0.0X01.0X03 support thunder boot
  * V0.0X01.0X04 support sleep/wake up
+ * V0.0X01.0X05 unified standby hw mode
  *
  */
 
@@ -33,7 +34,7 @@
 #include "../platform/rockchip/isp/rkisp_tb_helper.h"
 #include "cam-sleep-wakeup.h"
 
-#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x04)
+#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x05)
 
 #ifndef V4L2_CID_DIGITAL_GAIN
 #define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
@@ -181,10 +182,12 @@ struct sc850sl {
 	const char		*module_facing;
 	const char		*module_name;
 	const char		*len_name;
+	u32			standby_hw;
 	u32			cur_vts;
 	bool			has_init_exp;
 	bool			is_thunderboot;
 	bool			is_first_streamoff;
+	bool			is_standby;
 	struct preisp_hdrae_exp_s init_hdrae_exp;
 	struct cam_sw_info	*cam_sw_info;
 };
@@ -1034,25 +1037,32 @@ static long sc850sl_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		stream = *((u32 *)arg);
 
 		if (stream) {
-			ret = sc850sl_write_reg(sc850sl->client, 0x3019,
-						SC850SL_REG_VALUE_08BIT,
-						0xf0);
-			ret = sc850sl_write_reg(sc850sl->client, 0x3018,
-						SC850SL_REG_VALUE_08BIT,
-						0x7a);
-			ret = sc850sl_write_reg(sc850sl->client, SC850SL_REG_CTRL_MODE,
-						SC850SL_REG_VALUE_08BIT,
-						SC850SL_MODE_STREAMING);
+			ret |= sc850sl_write_reg(sc850sl->client, 0x3019,
+						 SC850SL_REG_VALUE_08BIT,
+						 0xf0);
+			ret |= sc850sl_write_reg(sc850sl->client, 0x3018,
+						 SC850SL_REG_VALUE_08BIT,
+						 0x7a);
+			ret |= sc850sl_write_reg(sc850sl->client, 0x302c,
+						 SC850SL_REG_VALUE_08BIT,
+						 0x00);
+			ret |= sc850sl_write_reg(sc850sl->client, SC850SL_REG_CTRL_MODE,
+						 SC850SL_REG_VALUE_08BIT,
+						 SC850SL_MODE_STREAMING);
 		} else {
-			ret = sc850sl_write_reg(sc850sl->client, 0x3018,
-						SC850SL_REG_VALUE_08BIT,
-						0x7f);
-			ret = sc850sl_write_reg(sc850sl->client, 0x3019,
-						SC850SL_REG_VALUE_08BIT,
-						0xff);
-			ret = sc850sl_write_reg(sc850sl->client, SC850SL_REG_CTRL_MODE,
-						SC850SL_REG_VALUE_08BIT,
-						SC850SL_MODE_SW_STANDBY);
+			ret |= sc850sl_write_reg(sc850sl->client, 0x3018,
+						 SC850SL_REG_VALUE_08BIT,
+						 0x7f);
+			ret |= sc850sl_write_reg(sc850sl->client, 0x3019,
+						 SC850SL_REG_VALUE_08BIT,
+						 0xff);
+
+			ret |= sc850sl_write_reg(sc850sl->client, SC850SL_REG_CTRL_MODE,
+						 SC850SL_REG_VALUE_08BIT,
+						 SC850SL_MODE_SW_STANDBY);
+			ret |= sc850sl_write_reg(sc850sl->client, 0x302c,
+						 SC850SL_REG_VALUE_08BIT,
+						 0x0f);
 		}
 		break;
 
@@ -1440,8 +1450,12 @@ static int sc850sl_resume(struct device *dev)
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct sc850sl *sc850sl = to_sc850sl(sd);
 
-	cam_sw_prepare_wakeup(sc850sl->cam_sw_info, dev);
+	if (sc850sl->standby_hw) {
+		dev_info(dev, "resume standby!");
+		return 0;
+	}
 
+	cam_sw_prepare_wakeup(sc850sl->cam_sw_info, dev);
 	usleep_range(4000, 5000);
 	cam_sw_write_array(sc850sl->cam_sw_info);
 
@@ -1450,12 +1464,13 @@ static int sc850sl_resume(struct device *dev)
 
 	if (sc850sl->has_init_exp && sc850sl->cur_mode != NO_HDR) {	// hdr mode
 		ret = sc850sl_ioctl(&sc850sl->subdev, PREISP_CMD_SET_HDRAE_EXP,
-				     &sc850sl->cam_sw_info->hdr_ae);
+				&sc850sl->cam_sw_info->hdr_ae);
 		if (ret) {
 			dev_err(&sc850sl->client->dev, "set exp fail in hdr mode\n");
 			return ret;
 		}
 	}
+
 	return 0;
 }
 
@@ -1464,6 +1479,11 @@ static int sc850sl_suspend(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct sc850sl *sc850sl = to_sc850sl(sd);
+
+	if (sc850sl->standby_hw) {
+		dev_info(dev, "suspend standby!");
+		return 0;
+	}
 
 	cam_sw_write_array_cb_init(sc850sl->cam_sw_info, client,
 				   (void *)sc850sl->cur_mode->reg_list,
@@ -1643,6 +1663,11 @@ static int sc850sl_set_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	}
 
+	if (sc850sl->standby_hw && sc850sl->is_standby) {
+		dev_dbg(&client->dev, "%s: is_standby=true, will return\n", __func__);
+		return 0;
+	}
+
 	if (!pm_runtime_get_if_in_use(&client->dev))
 		return 0;
 
@@ -1791,6 +1816,7 @@ static int sc850sl_initialize_controls(struct sc850sl *sc850sl)
 
 	sc850sl->subdev.ctrl_handler = handler;
 	sc850sl->has_init_exp = false;
+	sc850sl->is_standby = false;
 	sc850sl->cur_fps = mode->max_fps;
 	sc850sl->cur_vts = mode->vts_def;
 
@@ -1869,6 +1895,10 @@ static int sc850sl_probe(struct i2c_client *client,
 		dev_err(dev, "could not get module information!\n");
 		return -EINVAL;
 	}
+
+	/* Compatible with non-standby mode if this attribute is not configured in dts*/
+	of_property_read_u32(node, RKMODULE_CAMERA_STANDBY_HW,
+			     &sc850sl->standby_hw);
 
 	ret = of_property_read_u32(node, OF_CAMERA_HDR_MODE, &hdr_mode);
 	if (ret) {
