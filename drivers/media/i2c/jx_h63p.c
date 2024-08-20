@@ -5,6 +5,7 @@
  * Copyright (C) 2024 Rockchip Electronics Co., Ltd.
  *
  * V0.0X01.0X01 first implementation
+ * V0.0X01.0X02 add support thunderboot mode
  */
 
 // #define DEBUG
@@ -25,8 +26,9 @@
 #include <media/v4l2-subdev.h>
 #include <linux/version.h>
 #include <linux/pinctrl/consumer.h>
+#include "../platform/rockchip/isp/rkisp_tb_helper.h"
 
-#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x01)
+#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x02)
 
 #ifndef V4L2_CID_DIGITAL_GAIN
 #define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
@@ -142,6 +144,10 @@ struct jx_h63p {
 	const char		*module_name;
 	const char		*len_name;
 	u32			cur_vts;
+	bool			has_init_exp;
+	bool			is_thunderboot;
+	bool			is_first_streamoff;
+	struct preisp_hdrae_exp_s init_hdrae_exp;
 };
 
 #define to_jx_h63p(sd) container_of(sd, struct jx_h63p, subdev)
@@ -736,14 +742,26 @@ static int __jx_h63p_start_stream(struct jx_h63p *jx_h63p)
 		 jx_h63p->cur_mode->hdr_mode,
 		 jx_h63p->cur_vts);
 
-	ret = jx_h63p_write_array(jx_h63p->client, jx_h63p->cur_mode->reg_list);
-	if (ret)
-		return ret;
+	if (!jx_h63p->is_thunderboot) {
+		ret = jx_h63p_write_array(jx_h63p->client, jx_h63p->cur_mode->reg_list);
+		if (ret)
+			return ret;
 
-	/* In case these controls are set before streaming */
-	ret = __v4l2_ctrl_handler_setup(&jx_h63p->ctrl_handler);
-	if (ret)
-		return ret;
+		/* In case these controls are set before streaming */
+		ret = __v4l2_ctrl_handler_setup(&jx_h63p->ctrl_handler);
+		if (ret)
+			return ret;
+
+		if (jx_h63p->has_init_exp && jx_h63p->cur_mode->hdr_mode != NO_HDR) {
+			ret = jx_h63p_ioctl(&jx_h63p->subdev, PREISP_CMD_SET_HDRAE_EXP,
+					    &jx_h63p->init_hdrae_exp);
+			if (ret) {
+				dev_err(&jx_h63p->client->dev,
+					"init exp fail in hdr mode\n");
+				return ret;
+			}
+		}
+	}
 
 	ret = jx_h63p_write_reg(jx_h63p->client, JX_H63P_REG_CTRL_MODE,
 				JX_H63P_MODE_STREAMING);
@@ -752,10 +770,14 @@ static int __jx_h63p_start_stream(struct jx_h63p *jx_h63p)
 
 static int __jx_h63p_stop_stream(struct jx_h63p *jx_h63p)
 {
+	jx_h63p->has_init_exp = false;
+	if (jx_h63p->is_thunderboot)
+		jx_h63p->is_first_streamoff = true;
 	return jx_h63p_write_reg(jx_h63p->client, JX_H63P_REG_CTRL_MODE,
 				 JX_H63P_MODE_SW_STANDBY);
 }
 
+static int __jx_h63p_power_on(struct jx_h63p *jx_h63p);
 static int jx_h63p_s_stream(struct v4l2_subdev *sd, int on)
 {
 	struct jx_h63p *jx_h63p = to_jx_h63p(sd);
@@ -768,6 +790,11 @@ static int jx_h63p_s_stream(struct v4l2_subdev *sd, int on)
 		goto unlock_and_return;
 
 	if (on) {
+		if (jx_h63p->is_thunderboot && rkisp_tb_get_state() == RKISP_TB_NG) {
+			jx_h63p->is_thunderboot = false;
+			__jx_h63p_power_on(jx_h63p);
+		}
+
 		ret = pm_runtime_get_sync(&client->dev);
 		if (ret < 0) {
 			pm_runtime_put_noidle(&client->dev);
@@ -812,11 +839,13 @@ static int jx_h63p_s_power(struct v4l2_subdev *sd, int on)
 			goto unlock_and_return;
 		}
 
-		ret = jx_h63p_write_array(jx_h63p->client, jx_h63p_global_regs);
-		if (ret) {
-			v4l2_err(sd, "could not set init registers\n");
-			pm_runtime_put_noidle(&client->dev);
-			goto unlock_and_return;
+		if (!jx_h63p->is_thunderboot) {
+			ret = jx_h63p_write_array(jx_h63p->client, jx_h63p_global_regs);
+			if (ret) {
+				v4l2_err(sd, "could not set init registers\n");
+				pm_runtime_put_noidle(&client->dev);
+				goto unlock_and_return;
+			}
 		}
 
 		jx_h63p->power_on = true;
@@ -856,6 +885,9 @@ static int __jx_h63p_power_on(struct jx_h63p *jx_h63p)
 		dev_err(dev, "Failed to enable xvclk\n");
 		return ret;
 	}
+
+	if (jx_h63p->is_thunderboot)
+		return 0;
 
 	if (!IS_ERR(jx_h63p->pwdn_gpio))
 		gpiod_set_value_cansleep(jx_h63p->pwdn_gpio, 0);
@@ -907,6 +939,16 @@ static void __jx_h63p_power_off(struct jx_h63p *jx_h63p)
 {
 	int ret;
 	struct device *dev = &jx_h63p->client->dev;
+
+	clk_disable_unprepare(jx_h63p->xvclk);
+	if (jx_h63p->is_thunderboot) {
+		if (jx_h63p->is_first_streamoff) {
+			jx_h63p->is_thunderboot = false;
+			jx_h63p->is_first_streamoff = false;
+		} else {
+			return;
+		}
+	}
 
 	if (!IS_ERR(jx_h63p->pwdn_gpio))
 		gpiod_set_value_cansleep(jx_h63p->pwdn_gpio, 0);
@@ -1173,6 +1215,11 @@ static int jx_h63p_check_sensor_id(struct jx_h63p *jx_h63p,
 	u8 id_l = 0;
 	int ret;
 
+	if (jx_h63p->is_thunderboot) {
+		dev_info(dev, "Enable thunderboot mode, skip sensor id check\n");
+		return 0;
+	}
+
 	ret = jx_h63p_read_reg(client, JX_H63P_PIDH_ADDR, &id_h);
 	ret |= jx_h63p_read_reg(client, JX_H63P_PIDL_ADDR, &id_l);
 	if (id_h != CHIP_ID_H && id_l != CHIP_ID_L) {
@@ -1231,6 +1278,8 @@ static int jx_h63p_probe(struct i2c_client *client,
 		return -EINVAL;
 	}
 
+	jx_h63p->is_thunderboot = IS_ENABLED(CONFIG_VIDEO_ROCKCHIP_THUNDER_BOOT_ISP);
+
 	jx_h63p->client = client;
 	jx_h63p->cur_mode = &supported_modes[0];
 
@@ -1240,11 +1289,13 @@ static int jx_h63p_probe(struct i2c_client *client,
 		return -EINVAL;
 	}
 
-	jx_h63p->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_LOW);
+	jx_h63p->reset_gpio = devm_gpiod_get(dev, "reset",
+					     jx_h63p->is_thunderboot ? GPIOD_ASIS : GPIOD_OUT_LOW);
 	if (IS_ERR(jx_h63p->reset_gpio))
 		dev_warn(dev, "Failed to get reset-gpios\n");
 
-	jx_h63p->pwdn_gpio = devm_gpiod_get(dev, "pwdn", GPIOD_OUT_LOW);
+	jx_h63p->pwdn_gpio = devm_gpiod_get(dev, "pwdn",
+					    jx_h63p->is_thunderboot ? GPIOD_ASIS : GPIOD_OUT_LOW);
 	if (IS_ERR(jx_h63p->pwdn_gpio))
 		dev_warn(dev, "Failed to get pwdn-gpios\n");
 
@@ -1318,7 +1369,10 @@ static int jx_h63p_probe(struct i2c_client *client,
 
 	pm_runtime_set_active(dev);
 	pm_runtime_enable(dev);
-	pm_runtime_idle(dev);
+	if (jx_h63p->is_thunderboot)
+		pm_runtime_get_sync(dev);
+	else
+		pm_runtime_idle(dev);
 
 	return 0;
 
