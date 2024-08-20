@@ -6,6 +6,7 @@
  *
  * V0.0X01.0X01 first implementation
  * V0.0X01.0X02 add support thunderboot mode
+ * V0.0X01.0X03 add sleep wake-up mode
  */
 
 // #define DEBUG
@@ -27,15 +28,18 @@
 #include <linux/version.h>
 #include <linux/pinctrl/consumer.h>
 #include "../platform/rockchip/isp/rkisp_tb_helper.h"
+#include "cam-tb-setup.h"
+#include "cam-sleep-wakeup.h"
 
-#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x02)
+#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x03)
 
 #ifndef V4L2_CID_DIGITAL_GAIN
 #define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
 #endif
 
 #define JX_H63P_LANES			1
-#define JX_H63P_LINK_FREQ		216000000
+#define JX_H63P_LINK_FREQ		432000000
+// #define JX_H63P_LINK_FREQ		216000000
 
 /* pixel rate = link frequency * 2 * lanes / BITS_PER_SAMPLE */
 #define JX_H63P_PIXEL_RATE		(JX_H63P_LINK_FREQ * 2 * JX_H63P_LANES / 10)
@@ -113,6 +117,7 @@ struct jx_h63p_mode {
 	u32 exp_def;
 	const struct regval *reg_list;
 	u32 hdr_mode;
+	u32 mclk;
 	u32 vc[PAD_MAX];
 };
 
@@ -143,11 +148,14 @@ struct jx_h63p {
 	const char		*module_facing;
 	const char		*module_name;
 	const char		*len_name;
+	u32			standby_hw;
 	u32			cur_vts;
 	bool			has_init_exp;
 	bool			is_thunderboot;
 	bool			is_first_streamoff;
+	bool			is_standby;
 	struct preisp_hdrae_exp_s init_hdrae_exp;
+	struct cam_sw_info	*cam_sw_inf;
 };
 
 #define to_jx_h63p(sd) container_of(sd, struct jx_h63p, subdev)
@@ -161,7 +169,7 @@ static const struct regval jx_h63p_global_regs[] = {
 
 /*
  * Xclk 24Mhz
- * lane 2
+ * lane 1
  * linelength 750(0x370)
  * framelength 1920(0x5dc)
  * grabwindow_width 1280
@@ -169,8 +177,7 @@ static const struct regval jx_h63p_global_regs[] = {
  * max_framerate 60fps
  * mipi_datarate per lane 432Mbps
  */
-
-static const struct regval jx_h63p_1280x720_2lane_regs[] = {
+static const struct regval jx_h63p_1280x720_1lane_regs[] = {
 	{0x12, 0x40},
 	{0x48, 0x85},
 	{0x48, 0x05},
@@ -282,7 +289,146 @@ static const struct regval jx_h63p_1280x720_2lane_regs[] = {
 	{REG_NULL, 0x00},
 };
 
+/*
+ * Xclk 24Mhz
+ * lane 1
+ * linelength 375(0x177)
+ * framelength 1920(0x5dc)
+ * grabwindow_width 640
+ * grabwindow_height 360
+ * max_framerate 120fps
+ * mipi_datarate per lane 432Mbps
+ */
+static const struct regval jx_h63p_640x360_1lane_regs[] = {
+	{0x12, 0x42},
+	{0x48, 0x85},
+	{0x48, 0x05},
+	{0x0E, 0x11},
+	{0x0F, 0xA4},
+	{0x10, 0x48},
+	{0x11, 0x80},
+	{0x57, 0x60},
+	{0x58, 0x18},
+	{0x61, 0x10},
+	{0x46, 0x0A},
+	{0x0D, 0x50},
+	{0x20, 0xC0},
+	{0x21, 0x03},
+	{0x22, 0x77},
+	{0x23, 0x01},
+	{0x24, 0x40},
+	{0x25, 0x68},
+	{0x26, 0x11},
+	{0x27, 0x9A},
+	{0x28, 0x0B},
+	{0x29, 0x03},
+	{0x2A, 0x90},
+	{0x2B, 0x13},
+	{0x2C, 0x00},
+	{0x2D, 0x00},
+	{0x2E, 0xBA},
+	{0x2F, 0x60},
+	{0x41, 0x82},
+	{0x42, 0x02},
+	{0x47, 0x46},
+	{0x76, 0x20},
+	{0x77, 0x03},
+	{0x80, 0x00},
+	{0xAF, 0x12},
+	{0x8A, 0x00},
+	{0xA6, 0x00},
+	{0x8D, 0x49},
+	{0xAB, 0x01},
+	{0x1D, 0x00},
+	{0x1E, 0x04},
+	{0x6C, 0x54},	//DPHY2[3:2]Pg Vcm[1:0] D-phy Hs Tx output voltage control 01:min, 00,11,10: max,[3:2] 01<00<11<10
+	// {0x6D, 0x11}, //MIPI high speed iref select, (MIPl HS current control).Hs mode voD: Min.=140mv, Typ.=200mV Max,=270mV
+	{0x9E, 0xF8},
+	{0x6E, 0x2C},
+	{0x70, 0xD8},
+	{0x71, 0xDB},
+	{0x72, 0xD4},
+	{0x73, 0x59},
+	{0x74, 0x02},
+	{0x78, 0x99},	//Mipi TX start point adjust related to DVP HREF and internal FIFO
+	{0x89, 0x01},
+	{0x6B, 0x20},
+	{0x86, 0x40},
+	{0x9C, 0xE1},
+	{0x3A, 0xAC},
+	{0x3B, 0x24},
+	{0x3C, 0xA6},
+	{0x3D, 0xE0},
+	{0x3E, 0xD0},
+	{0x31, 0x0E},
+	{0x32, 0x28},
+	{0x33, 0x20},
+	{0x34, 0x38},
+	{0x35, 0x38},
+	{0x56, 0x12},
+	{0x59, 0x40},
+	{0x85, 0x30},
+	{0x64, 0xD2},
+	{0x8F, 0x90},
+	{0xA4, 0x87},
+	{0xA7, 0x80},
+	{0xA9, 0x48},
+	{0x45, 0x01},
+	{0x5B, 0xA0},
+	{0x5C, 0x6C},
+	{0x5D, 0x44},
+	{0x5E, 0x81},
+	{0x63, 0x0F},
+	{0x65, 0x12},
+	{0x66, 0x43},
+	{0x67, 0x79},
+	{0x68, 0x00},
+	{0x69, 0x78},
+	{0x6A, 0x28},
+	{0x7A, 0x66},
+	{0xA5, 0x03},
+	{0x94, 0xC0},
+	{0x13, 0x81},
+	{0x96, 0x84},
+	{0xB7, 0x25},
+	{0x4A, 0x01},
+	{0xB5, 0x0C},
+	{0xA1, 0x0F},
+	{0xA3, 0x40},
+	{0xB1, 0x00},
+	{0x93, 0x00},
+	{0x7E, 0x4C},
+	{0x50, 0x02},
+	{0x49, 0x10},
+	{0x8E, 0x40},
+	{0x7F, 0x56},
+	{0x0C, 0x00},
+	{0xBC, 0x11},
+	{0x82, 0x00},
+	{0x19, 0x20},
+	{0x1F, 0x10},
+	{0x1B, 0x4F},
+	// {0x12, 0x00},
+	{REG_NULL, 0x00},
+};
+
 static const struct jx_h63p_mode supported_modes[] = {
+	{
+		.width = 640,
+		.height = 360,
+		.max_fps = {
+			.numerator = 10000,
+			.denominator = 1200000,
+		},
+		.exp_def = 0x001f,
+		.hts_def = 0x0780,
+		.vts_def = 0x0177,
+		.reg_list = jx_h63p_640x360_1lane_regs,
+		.bus_fmt = MEDIA_BUS_FMT_SBGGR10_1X10,
+		.hdr_mode = NO_HDR,
+		.mclk = 24000000,
+		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+	},
 	{
 		.width = 1280,
 		.height = 720,
@@ -293,9 +439,10 @@ static const struct jx_h63p_mode supported_modes[] = {
 		.exp_def = 0x001f,
 		.hts_def = 0x0780,
 		.vts_def = 0x02ee,
-		.reg_list = jx_h63p_1280x720_2lane_regs,
+		.reg_list = jx_h63p_1280x720_1lane_regs,
 		.bus_fmt = MEDIA_BUS_FMT_SBGGR10_1X10,
 		.hdr_mode = NO_HDR,
+		.mclk = 24000000,
 		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
 	},
 };
@@ -623,17 +770,73 @@ static long jx_h63p_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		}
 		break;
 	case PREISP_CMD_SET_HDRAE_EXP:
+		if (jx_h63p->cam_sw_inf)
+			memcpy(&jx_h63p->cam_sw_inf->hdr_ae, (struct preisp_hdrae_exp_s *)(arg),
+			       sizeof(struct preisp_hdrae_exp_s));
 		break;
 	case RKMODULE_SET_QUICK_STREAM:
 
 		stream = *((u32 *)arg);
 
-		if (stream)
-			ret = jx_h63p_write_reg(jx_h63p->client, JX_H63P_REG_CTRL_MODE,
-						JX_H63P_MODE_STREAMING);
-		else
-			ret = jx_h63p_write_reg(jx_h63p->client, JX_H63P_REG_CTRL_MODE,
-						JX_H63P_MODE_SW_STANDBY);
+		if (jx_h63p->standby_hw) {	/* hardware standby */
+			if (stream) {
+				/* pwdn gpio pull up */
+				if (!IS_ERR(jx_h63p->pwdn_gpio))
+					gpiod_set_value_cansleep(jx_h63p->pwdn_gpio, 1);//low level, power on
+
+				usleep_range(5 * 1000, 10 * 1000);
+
+				#if IS_REACHABLE(CONFIG_VIDEO_CAM_SLEEP_WAKEUP)
+				if (__v4l2_ctrl_handler_setup(&jx_h63p->ctrl_handler))
+					dev_err(&jx_h63p->client->dev, "__v4l2_ctrl_handler_setup fail!");
+				if (jx_h63p->cur_mode->hdr_mode != NO_HDR) {	// hdr mode
+					if (jx_h63p->cam_sw_inf) {
+						ret = jx_h63p_ioctl(&jx_h63p->subdev,
+								    PREISP_CMD_SET_HDRAE_EXP,
+								    &jx_h63p->cam_sw_inf->hdr_ae);
+						if (ret) {
+							dev_err(&jx_h63p->client->dev,
+								"init exp fail in hdr mode\n");
+							return ret;
+						}
+					}
+				}
+				#endif
+
+				/* stream on */
+				ret |= jx_h63p_write_reg(jx_h63p->client, JX_H63P_REG_CTRL_MODE,
+							 JX_H63P_MODE_STREAMING);
+				dev_info(&jx_h63p->client->dev,
+					"quickstream, streaming on: exit hw standby mode\n");
+				jx_h63p->is_standby = false;
+			} else {
+				/* stream off */
+				ret |= jx_h63p_write_reg(jx_h63p->client, JX_H63P_REG_CTRL_MODE,
+							 JX_H63P_MODE_SW_STANDBY);
+
+				/* pwnd gpio pull down */
+				if (!IS_ERR(jx_h63p->pwdn_gpio))
+					gpiod_set_value_cansleep(jx_h63p->pwdn_gpio, 0);//high level, power off
+				dev_info(&jx_h63p->client->dev,
+					"quickstream, streaming off: enter hw standby mode\n");
+				// delay_us = jx_h63p_cal_delay(8192);
+				// usleep_range(delay_us, delay_us * 2);
+				usleep_range(5 * 1000, 10 * 1000);
+				jx_h63p->is_standby = true;
+			}
+		} else {	/* software standby */
+			if (stream) {
+				ret = jx_h63p_write_reg(jx_h63p->client, JX_H63P_REG_CTRL_MODE,
+							JX_H63P_MODE_STREAMING);
+				dev_info(&jx_h63p->client->dev,
+					"quickstream, streaming on: exit soft standby mode\n");
+			} else {
+				ret = jx_h63p_write_reg(jx_h63p->client, JX_H63P_REG_CTRL_MODE,
+							JX_H63P_MODE_SW_STANDBY);
+				dev_info(&jx_h63p->client->dev,
+					"quickstream, streaming off: enter soft standby mode\n");
+			}
+		}
 		break;
 	default:
 		ret = -ENOIOCTLCMD;
@@ -886,6 +1089,8 @@ static int __jx_h63p_power_on(struct jx_h63p *jx_h63p)
 		return ret;
 	}
 
+	cam_sw_regulator_bulk_init(jx_h63p->cam_sw_inf, JX_H63P_NUM_SUPPLIES, jx_h63p->supplies);
+
 	if (jx_h63p->is_thunderboot)
 		return 0;
 
@@ -964,6 +1169,93 @@ static void __jx_h63p_power_off(struct jx_h63p *jx_h63p)
 	regulator_bulk_disable(JX_H63P_NUM_SUPPLIES, jx_h63p->supplies);
 }
 
+#if IS_REACHABLE(CONFIG_VIDEO_CAM_SLEEP_WAKEUP)
+static int __maybe_unused jx_h63p_resume(struct device *dev)
+{
+	int ret;
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct jx_h63p *jx_h63p = to_jx_h63p(sd);
+
+	if (jx_h63p->standby_hw) {
+		dev_info(dev, "resume standby!");
+		return 0;
+	}
+
+	cam_sw_prepare_wakeup(jx_h63p->cam_sw_inf, dev);
+
+	{
+		if (!IS_ERR(jx_h63p->pwdn_gpio))
+			gpiod_set_value_cansleep(jx_h63p->pwdn_gpio, 0);
+		if (!IS_ERR(jx_h63p->reset_gpio))
+			gpiod_set_value_cansleep(jx_h63p->reset_gpio, 1);
+
+		usleep_range(2 * 1000, 3 * 1000);
+		if (!IS_ERR(jx_h63p->reset_gpio))
+			gpiod_set_value_cansleep(jx_h63p->reset_gpio, 0);
+
+		usleep_range(2 * 1000, 3 * 1000);
+		if (!IS_ERR(jx_h63p->reset_gpio))
+			gpiod_set_value_cansleep(jx_h63p->reset_gpio, 1);
+
+		/* According to datasheet, at least 10ms for reset duration */
+		usleep_range(10 * 1000, 15 * 1000);
+
+		if (!IS_ERR(jx_h63p->reset_gpio))
+			gpiod_set_value_cansleep(jx_h63p->reset_gpio, 0);
+
+		usleep_range(2000, 3000);
+		if (!IS_ERR(jx_h63p->pwdn_gpio))
+			gpiod_set_value_cansleep(jx_h63p->pwdn_gpio, 1);
+
+		if (!IS_ERR(jx_h63p->reset_gpio))
+			usleep_range(6000, 8000);
+		else
+			usleep_range(12000, 16000);
+
+	}
+
+	usleep_range(4000, 5000);
+	cam_sw_write_array(jx_h63p->cam_sw_inf);
+
+	if (__v4l2_ctrl_handler_setup(&jx_h63p->ctrl_handler))
+		dev_err(dev, "__v4l2_ctrl_handler_setup fail!");
+
+	if (jx_h63p->has_init_exp && jx_h63p->cur_mode != NO_HDR) {	// hdr mode
+		ret = jx_h63p_ioctl(&jx_h63p->subdev, PREISP_CMD_SET_HDRAE_EXP,
+				&jx_h63p->cam_sw_inf->hdr_ae);
+		if (ret) {
+			dev_err(&jx_h63p->client->dev, "set exp fail in hdr mode\n");
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
+static int __maybe_unused jx_h63p_suspend(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct jx_h63p *jx_h63p = to_jx_h63p(sd);
+
+	if (jx_h63p->standby_hw) {
+		dev_info(dev, "suspend standby!");
+		return 0;
+	}
+
+	cam_sw_write_array_cb_init(jx_h63p->cam_sw_inf, client,
+				   (void *)jx_h63p->cur_mode->reg_list,
+				   (sensor_write_array)jx_h63p_write_array);
+	cam_sw_prepare_sleep(jx_h63p->cam_sw_inf);
+
+	return 0;
+}
+#else
+#define jx_h63p_resume NULL
+#define jx_h63p_suspend NULL
+#endif
+
 static int jx_h63p_runtime_resume(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
@@ -1024,6 +1316,9 @@ static int jx_h63p_enum_frame_interval(struct v4l2_subdev *sd,
 static const struct dev_pm_ops jx_h63p_pm_ops = {
 	SET_RUNTIME_PM_OPS(jx_h63p_runtime_suspend,
 			   jx_h63p_runtime_resume, NULL)
+#ifdef CONFIG_VIDEO_CAM_SLEEP_WAKEUP
+	SET_LATE_SYSTEM_SLEEP_PM_OPS(jx_h63p_suspend, jx_h63p_resume)
+#endif
 };
 
 #ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
@@ -1086,6 +1381,11 @@ static int jx_h63p_set_ctrl(struct v4l2_ctrl *ctrl)
 					 jx_h63p->exposure->step,
 					 jx_h63p->exposure->default_value);
 		break;
+	}
+
+	if (jx_h63p->standby_hw && jx_h63p->is_standby) {
+		dev_dbg(&client->dev, "%s: is_standby = true, will return\n", __func__);
+		return 0;
 	}
 
 	if (!pm_runtime_get_if_in_use(&client->dev))
@@ -1198,6 +1498,9 @@ static int jx_h63p_initialize_controls(struct jx_h63p *jx_h63p)
 	}
 
 	jx_h63p->subdev.ctrl_handler = handler;
+	jx_h63p->has_init_exp = false;
+	jx_h63p->cur_fps = mode->max_fps;
+	jx_h63p->is_standby = false;
 
 	return 0;
 
@@ -1278,6 +1581,11 @@ static int jx_h63p_probe(struct i2c_client *client,
 		return -EINVAL;
 	}
 
+	/* Compatible with non-standby mode if this attribute is not configured in dts*/
+	of_property_read_u32(node, RKMODULE_CAMERA_STANDBY_HW,
+			     &jx_h63p->standby_hw);
+	dev_info(dev, "jx_h63p->standby_hw = %d\n", jx_h63p->standby_hw);
+
 	jx_h63p->is_thunderboot = IS_ENABLED(CONFIG_VIDEO_ROCKCHIP_THUNDER_BOOT_ISP);
 
 	jx_h63p->client = client;
@@ -1351,6 +1659,14 @@ static int jx_h63p_probe(struct i2c_client *client,
 		goto err_power_off;
 #endif
 
+	if (!jx_h63p->cam_sw_inf) {
+		jx_h63p->cam_sw_inf = cam_sw_init();
+		cam_sw_clk_init(jx_h63p->cam_sw_inf, jx_h63p->xvclk,
+				jx_h63p->cur_mode->mclk);
+		cam_sw_reset_pin_init(jx_h63p->cam_sw_inf, jx_h63p->reset_gpio, 0);
+		cam_sw_pwdn_pin_init(jx_h63p->cam_sw_inf, jx_h63p->pwdn_gpio, 0);
+	}
+
 	memset(facing, 0, sizeof(facing));
 	if (strcmp(jx_h63p->module_facing, "back") == 0)
 		facing[0] = 'b';
@@ -1401,6 +1717,8 @@ static int jx_h63p_remove(struct i2c_client *client)
 #endif
 	v4l2_ctrl_handler_free(&jx_h63p->ctrl_handler);
 	mutex_destroy(&jx_h63p->mutex);
+
+	cam_sw_deinit(jx_h63p->cam_sw_inf);
 
 	pm_runtime_disable(&client->dev);
 	if (!pm_runtime_status_suspended(&client->dev))
