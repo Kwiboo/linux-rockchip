@@ -849,7 +849,8 @@ static void scl_vop_cal_scl_fac(struct vop *vop, const struct vop_win *win,
 	if (!win->phy->scl)
 		return;
 
-	if ((adjusted_mode->flags & DRM_MODE_FLAG_INTERLACE) && vop->version == VOP_VERSION(2, 2)) {
+	if ((adjusted_mode->flags & DRM_MODE_FLAG_INTERLACE) &&
+	    vop->version == VOP_VERSION_RK3036) {
 		VOP_SCL_SET(vop, win, scale_yrgb_x, ((src_w << 12) / dst_w));
 		VOP_SCL_SET(vop, win, scale_yrgb_y, ((src_h << 12) / dst_h));
 		if (is_yuv) {
@@ -1901,8 +1902,7 @@ static void vop_plane_atomic_disable(struct drm_plane *plane,
 	 * vop will access the freed memory lead to iommu pagefault.
 	 * so we add this reset to workaround.
 	 */
-	if (VOP_MAJOR(vop->version) == 2 && VOP_MINOR(vop->version) == 5 &&
-	    win->win_id == 2)
+	if (vop->version == VOP_VERSION_PX30_LITE && win->win_id == 2)
 		VOP_WIN_SET(vop, win, yrgb_mst, 0);
 
 	spin_unlock(&vop->reg_lock);
@@ -2031,7 +2031,7 @@ static void vop_plane_atomic_update(struct drm_plane *plane,
 			dsp_h = 4;
 		actual_h = dsp_h * actual_h / drm_rect_height(dest);
 	}
-	if ((adjusted_mode->flags & DRM_MODE_FLAG_INTERLACE) && vop->version == VOP_VERSION(2, 2))
+	if ((adjusted_mode->flags & DRM_MODE_FLAG_INTERLACE) && vop->version == VOP_VERSION_RK3036)
 		dsp_h = dsp_h / 2;
 
 	act_info = (actual_h - 1) << 16 | ((actual_w - 1) & 0xffff);
@@ -2041,7 +2041,7 @@ static void vop_plane_atomic_update(struct drm_plane *plane,
 
 	dsp_stx = dest->x1 + mode->crtc_htotal - mode->crtc_hsync_start;
 	dsp_sty = dest->y1 + mode->crtc_vtotal - mode->crtc_vsync_start;
-	if ((adjusted_mode->flags & DRM_MODE_FLAG_INTERLACE) && vop->version == VOP_VERSION(2, 2))
+	if ((adjusted_mode->flags & DRM_MODE_FLAG_INTERLACE) && vop->version == VOP_VERSION_RK3036)
 		dsp_sty = dest->y1 / 2 + mode->crtc_vtotal - mode->crtc_vsync_start;
 	dsp_st = dsp_sty << 16 | (dsp_stx & 0xffff);
 
@@ -2430,7 +2430,7 @@ static int vop_crtc_enable_vblank(struct drm_crtc *crtc)
 
 	spin_lock_irqsave(&vop->irq_lock, flags);
 
-	if (VOP_MAJOR(vop->version) == 3 && VOP_MINOR(vop->version) >= 7) {
+	if (vop->version == VOP_VERSION_RK3228 || vop->version == VOP_VERSION_RK3328) {
 		VOP_INTR_SET_TYPE(vop, clear, FS_FIELD_INTR, 1);
 		VOP_INTR_SET_TYPE(vop, enable, FS_FIELD_INTR, 1);
 	} else {
@@ -2453,7 +2453,7 @@ static void vop_crtc_disable_vblank(struct drm_crtc *crtc)
 
 	spin_lock_irqsave(&vop->irq_lock, flags);
 
-	if (VOP_MAJOR(vop->version) == 3 && VOP_MINOR(vop->version) >= 7)
+	if (vop->version == VOP_VERSION_RK3228 || vop->version == VOP_VERSION_RK3328)
 		VOP_INTR_SET_TYPE(vop, enable, FS_FIELD_INTR, 0);
 	else
 		VOP_INTR_SET_TYPE(vop, enable, FS_INTR, 0);
@@ -2733,12 +2733,13 @@ vop_crtc_mode_valid(struct drm_crtc *crtc, const struct drm_display_mode *mode)
 		return MODE_BAD_HVALUE;
 
 	if ((mode->flags & DRM_MODE_FLAG_INTERLACE) &&
-	    VOP_MAJOR(vop->version) == 3 &&
-	    VOP_MINOR(vop->version) <= 2)
+	    (vop->version == VOP_VERSION_RK3288 || vop->version == VOP_VERSION_RK3288W ||
+	     vop->version == VOP_VERSION_RK3368))
 		return MODE_BAD;
 
 	/*
 	 * Dclk need to be double if BT656 interface and vop version >= 2.12.
+	 * That is RV1126/RV1106
 	 */
 	if (mode->flags & DRM_MODE_FLAG_DBLCLK ||
 	    (VOP_MAJOR(vop->version) == 2 && VOP_MINOR(vop->version) >= 12 &&
@@ -3053,6 +3054,7 @@ static bool vop_crtc_mode_fixup(struct drm_crtc *crtc,
 
 	/*
 	 * Dclk need to be double if BT656 interface and vop version >= 2.12.
+	 * That is RV1126/RV1106
 	 */
 	if (mode->flags & DRM_MODE_FLAG_DBLCLK ||
 	    (VOP_MAJOR(vop->version) == 2 && VOP_MINOR(vop->version) >= 12 &&
@@ -3130,6 +3132,9 @@ static void vop_update_csc(struct drm_crtc *crtc)
 	struct vop *vop = to_vop(crtc);
 	u32 val;
 
+	/*
+	 * When using BT656, set RV1126/RV1106 to P8888 mode.
+	 */
 	if ((s->output_mode == ROCKCHIP_OUT_MODE_AAAA &&
 	     !(vop->data->feature & VOP_FEATURE_OUTPUT_10BIT)) ||
 	    (VOP_MAJOR(vop->version) == 2 && VOP_MINOR(vop->version) >= 12 &&
@@ -3155,11 +3160,11 @@ static void vop_update_csc(struct drm_crtc *crtc)
 
 	/*
 	 * Background color is 10bit depth if vop version >= 3.5
+	 * That is RK3399/RK3228/RK3328
 	 */
 	if (!is_yuv_output(s->bus_format))
 		val = 0;
-	else if (VOP_MAJOR(vop->version) == 3 && VOP_MINOR(vop->version) == 8 &&
-		 s->hdr.pre_overlay)
+	else if (vop->version == VOP_VERSION_RK3328 && s->hdr.pre_overlay)
 		val = 0;
 	else if (VOP_MAJOR(vop->version) == 3 && VOP_MINOR(vop->version) >= 5)
 		val = 0x20010200;
@@ -3281,7 +3286,7 @@ static void vop_crtc_atomic_enable(struct drm_crtc *crtc,
 
 	dclk_inv = (s->bus_flags & DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE) ? 1 : 0;
 	/* For improving signal quality, dclk need to be inverted by default on rv1106. */
-	if ((VOP_MAJOR(vop->version) == 2 && VOP_MINOR(vop->version) == 12))
+	if (vop->version == VOP_VERSION_RV1106)
 		dclk_inv = !dclk_inv;
 
 	VOP_CTRL_SET(vop, dclk_pol, dclk_inv);
@@ -3392,8 +3397,7 @@ static void vop_crtc_atomic_enable(struct drm_crtc *crtc,
 		act_end = vact_end;
 	}
 
-	if (VOP_MAJOR(vop->version) == 3 &&
-	    (VOP_MINOR(vop->version) == 2 || VOP_MINOR(vop->version) == 8))
+	if (vop->version == VOP_VERSION_RK3368 || vop->version == VOP_VERSION_RK3328)
 		for_ddr_freq = 1000;
 	VOP_INTR_SET(vop, line_flag_num[0], act_end);
 	VOP_INTR_SET(vop, line_flag_num[1],
@@ -3881,7 +3885,7 @@ static void vop_tv_config_update(struct drm_crtc *crtc,
 	VOP_CTRL_SET(vop, bcsh_sin_hue, sin_hue);
 	VOP_CTRL_SET(vop, bcsh_cos_hue, cos_hue);
 	VOP_CTRL_SET(vop, bcsh_out_mode, BCSH_OUT_MODE_NORMAL_VIDEO);
-	if (VOP_MAJOR(vop->version) == 3 && VOP_MINOR(vop->version) == 0)
+	if (vop->version == VOP_VERSION_RK3288)
 		VOP_CTRL_SET(vop, auto_gate_en, 0);
 	VOP_CTRL_SET(vop, bcsh_en, s->bcsh_en);
 }
@@ -3928,7 +3932,7 @@ static void vop_cfg_update(struct drm_crtc *crtc,
 
 static bool vop_fs_irq_is_pending(struct vop *vop)
 {
-	if (VOP_MAJOR(vop->version) == 3 && VOP_MINOR(vop->version) >= 7)
+	if (vop->version == VOP_VERSION_RK3228 || vop->version == VOP_VERSION_RK3328)
 		return VOP_INTR_GET_TYPE(vop, status, FS_FIELD_INTR);
 	else
 		return VOP_INTR_GET_TYPE(vop, status, FS_INTR);
