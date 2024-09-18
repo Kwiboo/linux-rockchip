@@ -126,6 +126,8 @@
 #define PCIE_BAR_MAX_NUM		6
 #define PCIE_HOTRESET_TMOUT_US		10000
 
+#define PCIE_WAKE_DELAY_US		2000 /* 2 ms */
+
 struct rockchip_pcie {
 	struct dw_pcie			pci;
 	void __iomem			*apb_base;
@@ -133,7 +135,11 @@ struct rockchip_pcie {
 	struct clk_bulk_data		*clks;
 	unsigned int			clk_cnt;
 	struct reset_control		*rst;
-	struct gpio_desc		*rst_gpio;
+	struct gpio_desc		*perst_gpio;
+	struct gpio_desc		*wake_gpio;
+	int				perst_irq;
+	bool				ep_power_independent;
+	struct completion		ep_perst_deassert_complete;
 	unsigned long			*ib_window_map;
 	unsigned long			*ob_window_map;
 	u32				num_ib_windows;
@@ -171,6 +177,8 @@ static const struct of_device_id rockchip_pcie_ep_of_match[] = {
 };
 
 MODULE_DEVICE_TABLE(of, rockchip_pcie_ep_of_match);
+
+static irqreturn_t rockchip_pcie_perst_irq_handler(int irq, void *arg);
 
 static void rockchip_pcie_devmode_update(struct rockchip_pcie *rockchip, int mode, int submode)
 {
@@ -227,10 +235,24 @@ static int rockchip_pcie_get_io_resource(struct platform_device *pdev,
 	char name[8];
 	int i, idx;
 
-	rockchip->rst_gpio = devm_gpiod_get_optional(dev, "reset", GPIOD_IN);
-	if (IS_ERR(rockchip->rst_gpio)) {
+	rockchip->perst_gpio = devm_gpiod_get_optional(dev, "reset", GPIOD_IN);
+	if (IS_ERR(rockchip->perst_gpio)) {
 		dev_err(dev, "Failed to get reset gpio\n");
-		return PTR_ERR(rockchip->rst_gpio);
+		return PTR_ERR(rockchip->perst_gpio);
+	}
+
+	if (device_property_read_bool(dev, "rockchip,ep-power-independent")) {
+		rockchip->ep_power_independent = true;
+		if (!rockchip->perst_gpio) {
+			dev_err(dev, "When the EP power supply is independent of the RC, the perst_gpio is necessary\n");
+			return -EINVAL;
+		}
+	}
+
+	rockchip->wake_gpio = devm_gpiod_get_optional(dev, "wake", GPIOD_OUT_LOW);
+	if (IS_ERR(rockchip->wake_gpio)) {
+		dev_err(dev, "Failed to get wake gpio\n");
+		return PTR_ERR(rockchip->wake_gpio);
 	}
 
 	apb_res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "pcie-apb");
@@ -364,7 +386,18 @@ static int rockchip_pcie_get_resource(struct platform_device *pdev,
 		return -EINVAL;
 	}
 
-	return 0;
+	if (rockchip->perst_gpio) {
+		rockchip->perst_irq = gpiod_to_irq(rockchip->perst_gpio);
+		irq_set_status_flags(rockchip->perst_irq, IRQ_NOAUTOEN);
+		ret = devm_request_threaded_irq(&pdev->dev, rockchip->perst_irq, NULL,
+						rockchip_pcie_perst_irq_handler,
+						IRQF_TRIGGER_HIGH | IRQF_ONESHOT,
+						"perst_irq", rockchip);
+		if (ret)
+			dev_err(&pdev->dev, "Failed to request PERST IRQ\n");
+	}
+
+	return ret;
 }
 
 static int rockchip_pci_find_ext_capability(struct rockchip_pcie *rockchip, int cap)
@@ -557,6 +590,38 @@ static int rockchip_pcie_poll_irq_user(struct rockchip_pcie *rockchip, struct pc
 	return 0;
 }
 
+static int rockchip_pcie_perst_deassert(struct rockchip_pcie *rockchip)
+{
+	gpiod_set_value_cansleep(rockchip->wake_gpio, 0);
+	usleep_range(PCIE_WAKE_DELAY_US, PCIE_WAKE_DELAY_US + 500);
+	gpiod_set_value_cansleep(rockchip->wake_gpio, 1);
+
+	if (rockchip->ep_power_independent)
+		complete(&rockchip->ep_perst_deassert_complete);
+
+	return 0;
+}
+
+static irqreturn_t rockchip_pcie_perst_irq_handler(int irq, void *arg)
+{
+	struct rockchip_pcie *rockchip = arg;
+	struct device *dev = rockchip->pci.dev;
+	u32 perst;
+
+	perst = gpiod_get_value(rockchip->perst_gpio);
+	if (perst) {
+		dev_dbg(dev, "PERST asserted by host. Shutting down the PCIe link!\n");
+	} else {
+		dev_dbg(dev, "PERST de-asserted by host. Starting link training!\n");
+		rockchip_pcie_perst_deassert(rockchip);
+	}
+
+	irq_set_irq_type(gpiod_to_irq(rockchip->perst_gpio),
+			 (perst ? IRQF_TRIGGER_HIGH : IRQF_TRIGGER_LOW));
+
+	return IRQ_HANDLED;
+}
+
 static irqreturn_t rockchip_pcie_sys_irq_handler(int irq, void *arg)
 {
 	struct rockchip_pcie *rockchip = arg;
@@ -679,6 +744,18 @@ static int rockchip_pcie_init_host(struct rockchip_pcie *rockchip)
 {
 	struct device *dev = rockchip->pci.dev;
 	int ret;
+
+	if (rockchip->ep_power_independent && gpiod_get_value(rockchip->perst_gpio)) {
+		init_completion(&rockchip->ep_perst_deassert_complete);
+		dev_info(dev, "Waiting for perst# de-assert\n");
+		enable_irq(rockchip->perst_irq);
+		ret = wait_for_completion_timeout(&rockchip->ep_perst_deassert_complete, 30 * HZ);
+		if (!ret) {
+			dev_err(dev, "Not waiting for a valid PERST signal\n");
+			return ret;
+		}
+		dev_info(dev, "perst# de-assert\n");
+	}
 
 	ret = clk_bulk_prepare_enable(rockchip->clk_cnt, rockchip->clks);
 	if (ret)
@@ -1337,11 +1414,54 @@ deinit_host:
 	return ret;
 }
 
+static int __maybe_unused rockchip_dw_pcie_suspend(struct device *dev)
+{
+	struct rockchip_pcie *rockchip = dev_get_drvdata(dev);
+
+	rockchip_pcie_deinit_host(rockchip);
+
+	return 0;
+}
+
+static int __maybe_unused rockchip_dw_pcie_resume(struct device *dev)
+{
+	struct rockchip_pcie *rockchip = dev_get_drvdata(dev);
+	int ret;
+
+	ret = rockchip_pcie_init_host(rockchip);
+	if (ret) {
+		dev_err(dev, "Failed to init host!\n");
+		return ret;
+	}
+
+	ret = rockchip_pcie_config_host(rockchip);
+	if (ret) {
+		dev_err(dev, "Failed to config host!\n");
+		goto deinit_host;
+	}
+
+	gpiod_set_value_cansleep(rockchip->wake_gpio, 0);
+	usleep_range(PCIE_WAKE_DELAY_US, PCIE_WAKE_DELAY_US + 500);
+	gpiod_set_value_cansleep(rockchip->wake_gpio, 1);
+
+	return ret;
+deinit_host:
+	rockchip_pcie_deinit_host(rockchip);
+
+	return ret;
+}
+
+static const struct dev_pm_ops rockchip_dw_pcie_pm_ops = {
+	SET_NOIRQ_SYSTEM_SLEEP_PM_OPS(rockchip_dw_pcie_suspend,
+				      rockchip_dw_pcie_resume)
+};
+
 static struct platform_driver rk_plat_pcie_driver = {
 	.driver = {
 		.name	= "rk-pcie-ep",
 		.of_match_table = rockchip_pcie_ep_of_match,
 		.suppress_bind_attrs = true,
+		.pm = &rockchip_dw_pcie_pm_ops,
 	},
 	.probe = rockchip_pcie_ep_probe,
 };
