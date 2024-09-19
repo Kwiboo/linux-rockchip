@@ -1949,11 +1949,10 @@ static void vop2_win_disable(struct vop2_win *win, bool skip_splice_win)
 			 *     maybe lead to PD_ESMART closed at wrong time and display error.
 			 * (3) PD_ESMART power up maybe have 4 us delay, this will lead to POST_BUF_EMPTY.
 			 */
-			if (win->pd->data->id == VOP2_PD_ESMART)
-				return;
-
-			vop2_power_domain_put(win->pd);
-			win->pd->vp_mask &= ~win->vp_mask;
+			if (win->pd->data->id != VOP2_PD_ESMART) {
+				vop2_power_domain_put(win->pd);
+				win->pd->vp_mask &= ~win->vp_mask;
+			}
 		}
 	}
 
