@@ -2945,15 +2945,13 @@ dw_hdmi_rockchip_attach_properties(struct drm_connector *connector,
 		drm_object_attach_property(&connector->base, prop, 0);
 	}
 
-	if (!hdmi->is_hdmi_qp) {
-		prop = drm_property_create_enum(connector->dev, 0,
-						"hdmi_quant_range",
-						quant_range_enum_list,
-						ARRAY_SIZE(quant_range_enum_list));
-		if (prop) {
-			hdmi->quant_range = prop;
-			drm_object_attach_property(&connector->base, prop, 0);
-		}
+	prop = drm_property_create_enum(connector->dev, 0,
+					"hdmi_quant_range",
+					quant_range_enum_list,
+					ARRAY_SIZE(quant_range_enum_list));
+	if (prop) {
+		hdmi->quant_range = prop;
+		drm_object_attach_property(&connector->base, prop, 0);
 	}
 
 	prop = connector->dev->mode_config.hdr_output_metadata_property;
@@ -3082,8 +3080,12 @@ dw_hdmi_rockchip_set_property(struct drm_connector *connector,
 		u64 quant_range = hdmi->hdmi_quant_range;
 
 		hdmi->hdmi_quant_range = val;
-		if (quant_range != hdmi->hdmi_quant_range)
-			dw_hdmi_set_quant_range(hdmi->hdmi);
+		if (quant_range != hdmi->hdmi_quant_range) {
+			if (hdmi->is_hdmi_qp)
+				dw_hdmi_qp_set_quant_range(hdmi->hdmi_qp);
+			else
+				dw_hdmi_set_quant_range(hdmi->hdmi);
+		}
 		return 0;
 	} else if (property == config->hdr_output_metadata_property) {
 		return 0;

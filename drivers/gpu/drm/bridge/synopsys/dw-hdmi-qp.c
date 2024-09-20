@@ -3244,6 +3244,21 @@ static void dw_hdmi_connector_atomic_commit(struct drm_connector *connector,
 		set_dw_hdmi_hdcp_enable(hdmi, connector, hdmi->state);
 }
 
+void dw_hdmi_qp_set_quant_range(struct dw_hdmi_qp *hdmi)
+{
+	void *data = hdmi->plat_data->phy_data;
+
+	if (hdmi->disabled)
+		return;
+
+	if (hdmi->plat_data->get_quant_range)
+		hdmi->hdmi_data.quant_range =
+			hdmi->plat_data->get_quant_range(data);
+
+	hdmi_config_AVI(hdmi, hdmi->curr_conn, &hdmi->previous_mode);
+}
+EXPORT_SYMBOL_GPL(dw_hdmi_qp_set_quant_range);
+
 void dw_hdmi_qp_set_output_type(struct dw_hdmi_qp *hdmi, u64 val)
 {
 	hdmi->force_output = val;
