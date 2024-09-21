@@ -31,6 +31,7 @@
 #define FW_RATIO_MAX		8
 #define FW_RATIO_MIN		1
 #define MAXBURST_PER_FIFO	8
+#define FIFO_PER_LANE		32
 
 #define DEFAULT_FS		48000
 #define TIMEOUT_US		1000
@@ -75,6 +76,7 @@ struct rk_sai_dev {
 	bool is_clk_auto;
 	bool is_mclk_calibrate;
 	bool is_tx_auto_gate; /* auto gate clk when TX FIFO empty */
+	bool is_lane_interleaved;
 	bool no_set_mclk;
 };
 
@@ -281,6 +283,33 @@ err_hclk:
 	return ret;
 }
 
+static void rockchip_sai_fifo_level_wdt(struct rk_sai_dev *sai,
+					int stream, bool en)
+{
+	if (sai->version < SAI_VER_2411)
+		return;
+
+	if (stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		regmap_update_bits(sai->regmap, SAI_INTCR,
+				   SAI_INTCR_TXFLC, SAI_INTCR_TXFLC);
+		regmap_update_bits(sai->regmap, SAI_INTCR,
+				   SAI_INTCR_TXFLE_MASK,
+				   SAI_INTCR_TXFLE(en));
+		regmap_update_bits(sai->regmap, SAI_TXCR,
+				   SAI_XCR_FLE_MASK,
+				   SAI_XCR_FLE(en));
+	} else {
+		regmap_update_bits(sai->regmap, SAI_INTCR,
+				   SAI_INTCR_RXFLC, SAI_INTCR_RXFLC);
+		regmap_update_bits(sai->regmap, SAI_INTCR,
+				   SAI_INTCR_RXFLE_MASK,
+				   SAI_INTCR_RXFLE(en));
+		regmap_update_bits(sai->regmap, SAI_RXCR,
+				   SAI_XCR_FLE_MASK,
+				   SAI_XCR_FLE(en));
+	}
+}
+
 static void rockchip_sai_fifo_xrun_detect(struct rk_sai_dev *sai,
 					  int stream, bool en)
 {
@@ -408,12 +437,14 @@ static void rockchip_sai_xfer_stop(struct rk_sai_dev *sai, int stream)
 
 static void rockchip_sai_start(struct rk_sai_dev *sai, int stream)
 {
+	rockchip_sai_fifo_level_wdt(sai, stream, 1);
 	rockchip_sai_dma_ctrl(sai, stream, 1);
 	rockchip_sai_xfer_start(sai, stream);
 }
 
 static void rockchip_sai_stop(struct rk_sai_dev *sai, int stream)
 {
+	rockchip_sai_fifo_level_wdt(sai, stream, 0);
 	rockchip_sai_dma_ctrl(sai, stream, 0);
 	rockchip_sai_xfer_stop(sai, stream);
 }
@@ -546,6 +577,21 @@ static unsigned int rockchip_sai_lanes_auto(struct snd_pcm_hw_params *params,
 	return lanes;
 }
 
+static int rockchip_fifo_cfg(struct snd_pcm_substream *substream,
+			     struct snd_soc_dai *dai)
+{
+	struct rk_sai_dev *sai = snd_soc_dai_get_drvdata(dai);
+
+	if (sai->version < SAI_VER_2411)
+		return 0;
+
+	if (!sai->is_lane_interleaved)
+		regmap_update_bits(sai->regmap, SAI_FIFO_CFG,
+				   SAI_FIFO_CHG_MASK, SAI_FIFO_CHG_EN);
+
+	return 0;
+}
+
 static int rockchip_sai_hw_params(struct snd_pcm_substream *substream,
 				  struct snd_pcm_hw_params *params,
 				  struct snd_soc_dai *dai)
@@ -605,6 +651,8 @@ static int rockchip_sai_hw_params(struct snd_pcm_substream *substream,
 
 	slot_width = SAI_XCR_SBW_V(val);
 	ch_per_lane = params_channels(params) / lanes;
+
+	rockchip_fifo_cfg(substream, dai);
 
 	regmap_update_bits(sai->regmap, reg, SAI_XCR_SNB_MASK,
 			   SAI_XCR_SNB(ch_per_lane));
@@ -1072,6 +1120,7 @@ static bool rockchip_sai_wr_reg(struct device *dev, unsigned int reg)
 	case SAI_DMACR:
 	case SAI_INTCR:
 	case SAI_TXDR:
+	case SAI_TXDR2:
 	case SAI_PATH_SEL:
 	case SAI_TX_SLOT_MASK0:
 	case SAI_TX_SLOT_MASK1:
@@ -1086,6 +1135,10 @@ static bool rockchip_sai_wr_reg(struct device *dev, unsigned int reg)
 	case SAI_FSXN:
 	case SAI_FS_TIMEOUT:
 	case SAI_LOOPBACK_LR:
+	case SAI_FIFO_CFG:
+	case SAI_TXFL_TIMEOUT:
+	case SAI_RXFL_TIMEOUT:
+	case SAI_DEBUG:
 		return true;
 	default:
 		return false;
@@ -1109,6 +1162,8 @@ static bool rockchip_sai_rd_reg(struct device *dev, unsigned int reg)
 	case SAI_INTSR:
 	case SAI_TXDR:
 	case SAI_RXDR:
+	case SAI_TXDR2:
+	case SAI_RXDR2:
 	case SAI_PATH_SEL:
 	case SAI_TX_SLOT_MASK0:
 	case SAI_TX_SLOT_MASK1:
@@ -1127,6 +1182,11 @@ static bool rockchip_sai_rd_reg(struct device *dev, unsigned int reg)
 	case SAI_FSXN:
 	case SAI_FS_TIMEOUT:
 	case SAI_LOOPBACK_LR:
+	case SAI_FIFO_CFG:
+	case SAI_TXFL_TIMEOUT:
+	case SAI_RXFL_TIMEOUT:
+	case SAI_DEBUG:
+	case SAI_TXDATA0 ... SAI_RXDATA3:
 		return true;
 	default:
 		return false;
@@ -1144,10 +1204,13 @@ static bool rockchip_sai_volatile_reg(struct device *dev, unsigned int reg)
 	case SAI_RXFIFOLR:
 	case SAI_TXDR:
 	case SAI_RXDR:
+	case SAI_TXDR2:
+	case SAI_RXDR2:
 	case SAI_TX_DATA_CNT:
 	case SAI_RX_DATA_CNT:
 	case SAI_STATUS:
 	case SAI_VERSION:
+	case SAI_TXDATA0 ... SAI_RXDATA3:
 		return true;
 	default:
 		return false;
@@ -1158,6 +1221,7 @@ static bool rockchip_sai_precious_reg(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
 	case SAI_RXDR:
+	case SAI_RXDR2:
 		return true;
 	default:
 		return false;
@@ -1175,7 +1239,7 @@ static const struct regmap_config rockchip_sai_regmap_config = {
 	.reg_bits = 32,
 	.reg_stride = 4,
 	.val_bits = 32,
-	.max_register = SAI_LOOPBACK_LR,
+	.max_register = SAI_RXDR2,
 	.reg_defaults = rockchip_sai_reg_defaults,
 	.num_reg_defaults = ARRAY_SIZE(rockchip_sai_reg_defaults),
 	.writeable_reg = rockchip_sai_wr_reg,
@@ -1236,7 +1300,11 @@ static int rockchip_sai_init_dai(struct rk_sai_dev *sai, struct resource *res,
 					SNDRV_PCM_FMTBIT_S32_LE |
 					SNDRV_PCM_FMTBIT_IEC958_SUBFRAME_LE;
 
-		sai->playback_dma_data.addr = res->start + SAI_TXDR;
+		if (sai->version >= SAI_VER_2411)
+			sai->playback_dma_data.addr = res->start + SAI_TXDR2;
+		else
+			sai->playback_dma_data.addr = res->start + SAI_TXDR;
+
 		sai->playback_dma_data.addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
 		sai->playback_dma_data.maxburst = MAXBURST_PER_FIFO;
 	}
@@ -1252,9 +1320,25 @@ static int rockchip_sai_init_dai(struct rk_sai_dev *sai, struct resource *res,
 				       SNDRV_PCM_FMTBIT_S32_LE |
 				       SNDRV_PCM_FMTBIT_IEC958_SUBFRAME_LE;
 
-		sai->capture_dma_data.addr = res->start + SAI_RXDR;
+		if (sai->version >= SAI_VER_2411)
+			sai->capture_dma_data.addr = res->start + SAI_RXDR2;
+		else
+			sai->capture_dma_data.addr = res->start + SAI_RXDR;
+
 		sai->capture_dma_data.addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
 		sai->capture_dma_data.maxburst = MAXBURST_PER_FIFO;
+	}
+
+	if (sai->version >= SAI_VER_2411) {
+		regmap_update_bits(sai->regmap, SAI_TXCR,
+				   SAI_XCR_FPC_MASK | SAI_XCR_SFC_MASK,
+				   SAI_XCR_FPC_EN | SAI_XCR_SFC_ONE);
+		regmap_update_bits(sai->regmap, SAI_RXCR,
+				   SAI_XCR_FPC_MASK | SAI_XCR_SFC_MASK,
+				   SAI_XCR_FPC_EN | SAI_XCR_SFC_ONE);
+		/* The counter is driven by HCLK */
+		regmap_write(sai->regmap, SAI_TXFL_TIMEOUT, 0x1000000);
+		regmap_write(sai->regmap, SAI_RXFL_TIMEOUT, 0x1000000);
 	}
 
 	regmap_update_bits(sai->regmap, SAI_DMACR, SAI_DMACR_TDL_MASK,
@@ -1290,6 +1374,7 @@ static const char * const sbw_text[] = {
 	"25", "26", "27", "28", "29", "30", "31", "32", };
 
 static const char * const mono_text[] = { "Disable", "Enable" };
+static const char * const dbg_text[] = { "Disable", "Enable" };
 
 static DECLARE_TLV_DB_SCALE(rmss_tlv, 0, 128, 0);
 
@@ -1379,6 +1464,9 @@ static SOC_ENUM_SINGLE_DECL(lp3lr_switch, SAI_LOOPBACK_LR, 3, lplr_text);
 static SOC_ENUM_SINGLE_DECL(lp2lr_switch, SAI_LOOPBACK_LR, 2, lplr_text);
 static SOC_ENUM_SINGLE_DECL(lp1lr_switch, SAI_LOOPBACK_LR, 1, lplr_text);
 static SOC_ENUM_SINGLE_DECL(lp0lr_switch, SAI_LOOPBACK_LR, 0, lplr_text);
+
+/* DEBUG */
+static SOC_ENUM_SINGLE_DECL(__maybe_unused dbg_switch, SAI_DEBUG, 0, dbg_text);
 
 static int __maybe_unused rockchip_sai_fpw_get(struct snd_kcontrol *kcontrol,
 					       struct snd_ctl_elem_value *ucontrol)
@@ -1702,6 +1790,8 @@ static const struct snd_kcontrol_new rockchip_sai_controls[] = {
 		       0, 8192, 0, fs_shift_right_tlv),
 	SOC_SINGLE_TLV("Receive Frame Shift Right Select", SAI_RX_SHIFT,
 		       0, 8192, 0, fs_shift_right_tlv),
+
+	SOC_ENUM("Data Debug Switch", dbg_switch),
 #endif
 	SOC_ENUM("Transmit Start Mode Sel", tsl_enum),
 	SOC_ENUM("Receive Start Mode Sel", rsl_enum),
@@ -1808,6 +1898,25 @@ static irqreturn_t rockchip_sai_isr(int irq, void *devid)
 		regmap_update_bits(sai->regmap, SAI_INTCR,
 				   SAI_INTCR_FSLOST_MASK,
 				   SAI_INTCR_FSLOST(0));
+	}
+
+	if (val & SAI_INTSR_TXFLI_ACT) {
+		dev_warn_ratelimited(sai->dev, "TX FIFO Level Err\n");
+		regmap_update_bits(sai->regmap, SAI_INTCR,
+				   SAI_INTCR_TXFLC, SAI_INTCR_TXFLC);
+		regmap_update_bits(sai->regmap, SAI_INTCR,
+				   SAI_INTCR_TXFLE_MASK,
+				   SAI_INTCR_TXFLE(0));
+
+	}
+
+	if (val & SAI_INTSR_RXFLI_ACT) {
+		dev_warn_ratelimited(sai->dev, "RX FIFO Level Err\n");
+		regmap_update_bits(sai->regmap, SAI_INTCR,
+				   SAI_INTCR_RXFLC, SAI_INTCR_RXFLC);
+		regmap_update_bits(sai->regmap, SAI_INTCR,
+				   SAI_INTCR_RXFLE_MASK,
+				   SAI_INTCR_RXFLE(0));
 	}
 
 	return IRQ_HANDLED;
@@ -1960,6 +2069,9 @@ static int rockchip_sai_probe(struct platform_device *pdev)
 			return ret;
 		}
 	}
+
+	sai->is_lane_interleaved =
+		device_property_read_bool(&pdev->dev, "rockchip,lane-interleaved");
 
 	sai->is_mclk_calibrate =
 		device_property_read_bool(&pdev->dev, "rockchip,mclk-calibrate");
