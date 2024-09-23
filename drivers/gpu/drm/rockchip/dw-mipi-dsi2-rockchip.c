@@ -915,12 +915,16 @@ static void dw_mipi_dsi2_enable(struct dw_mipi_dsi2 *dsi2)
 	dw_mipi_dsi2_ipi_set(dsi2);
 
 	if (dsi2->auto_calc_mode) {
+		regmap_update_bits(dsi2->regmap, DSI2_DSI_GENERAL_CFG, BTA_EN, 0);
+
 		regmap_write(dsi2->regmap, DSI2_MODE_CTRL, AUTOCALC_MODE);
 		ret = regmap_read_poll_timeout(dsi2->regmap, DSI2_MODE_STATUS,
 					       mode, mode == IDLE_MODE,
 					       1000, MODE_STATUS_TIMEOUT_US);
 		if (ret < 0)
 			dev_err(dsi2->dev, "auto calculation training failed\n");
+
+		regmap_update_bits(dsi2->regmap, DSI2_DSI_GENERAL_CFG, BTA_EN, BTA_EN);
 	}
 
 	if (dsi2->mode_flags & MIPI_DSI_MODE_VIDEO)
