@@ -52,6 +52,10 @@
 #define SC431HAI_MODE_SW_STANDBY	0x0
 #define SC431HAI_MODE_STREAMING		BIT(0)
 
+#define SC431HAI_REG_MIPI_CTRL		0x3019
+#define SC431HAI_MIPI_CTRL_ON		0x0c
+#define SC431HAI_MIPI_CTRL_OFF		0xff
+
 #define SC431HAI_REG_EXPOSURE_H		0x3e00
 #define SC431HAI_REG_EXPOSURE_M		0x3e01
 #define SC431HAI_REG_EXPOSURE_L		0x3e02
@@ -63,7 +67,7 @@
 #define SC431HAI_REG_DIG_FINE_GAIN	0x3e07
 #define SC431HAI_REG_ANA_GAIN		0x3e08
 #define SC431HAI_REG_ANA_FINE_GAIN	0x3e09
-#define SC431HAI_GAIN_MIN		0x40	//0x0080
+#define SC431HAI_GAIN_MIN		0x40	//1*1*64
 #define SC431HAI_GAIN_MAX		49674   //48.510*16*64
 #define SC431HAI_GAIN_STEP		1
 #define SC431HAI_GAIN_DEFAULT		0x40 // Note that the benchmark is 0x40
@@ -159,9 +163,11 @@ struct sc431hai {
 	const char		*module_name;
 	const char		*len_name;
 	u32			cur_vts;
+	u32			standby_soft;
 	bool			has_init_exp;
 	bool			is_thunderboot;
 	bool			is_first_streamoff;
+	bool			is_standby;
 	struct preisp_hdrae_exp_s init_hdrae_exp;
 	struct cam_sw_info *cam_sw_inf;
 };
@@ -268,12 +274,12 @@ static const struct regval sc431hai_linear_10_1280x720_112fps_regs[] = {
 	{0x3692, 0x55},
 	{0x3693, 0x88},
 	{0x3694, 0xb8},
-	{0x3696, 0x87},
-	{0x3697, 0x85},
-	{0x3698, 0x87},
-	{0x3699, 0x8d},
-	{0x369a, 0xa5},
-	{0x369b, 0xe6},
+	{0x3696, 0x80},
+	{0x3697, 0x83},
+	{0x3698, 0x81},
+	{0x3699, 0x81},
+	{0x369a, 0x84},
+	{0x369b, 0x82},
 	{0x36a2, 0x80},
 	{0x36a3, 0x88},
 	{0x36a4, 0xf8},
@@ -286,6 +292,7 @@ static const struct regval sc431hai_linear_10_1280x720_112fps_regs[] = {
 	{0x36ed, 0x18},
 	{0x370f, 0x01},
 	{0x3722, 0x03},
+	{0x3724, 0x92},
 	{0x3727, 0x14},
 	{0x37b0, 0x17},
 	{0x37b1, 0x9b},
@@ -304,14 +311,21 @@ static const struct regval sc431hai_linear_10_1280x720_112fps_regs[] = {
 	{0x3936, 0x2d},
 	{0x3937, 0x64},
 	{0x3938, 0x62},
+	{0x393d, 0x02},
+	{0x393e, 0x00},
 	{0x3e00, 0x00},
 	{0x3e01, 0x5d},
 	{0x3e02, 0x10},
+	{0x3e16, 0x00},
+	{0x3e17, 0xc5},
+	{0x3e18, 0x00},
+	{0x3e19, 0xc5},
 	{0x4509, 0x20},
 	{0x450d, 0x0b},
 	{0x5000, 0x46},
 	{0x5780, 0x76},
-	{0x5784, 0x10},
+	{0x5784, 0x0a},
+	{0x5785, 0x04},
 	{0x5787, 0x0a},
 	{0x5788, 0x0a},
 	{0x5789, 0x08},
@@ -414,12 +428,12 @@ static const struct regval sc431hai_linear_10_2560x1440_30fps_regs[] = {
 	{0x3692, 0x54},
 	{0x3693, 0x88},
 	{0x3694, 0x98},
-	{0x3696, 0x87},
-	{0x3697, 0x85},
-	{0x3698, 0x87},
-	{0x3699, 0x8d},
-	{0x369a, 0xa5},
-	{0x369b, 0xe6},
+	{0x3696, 0x80},
+	{0x3697, 0x83},
+	{0x3698, 0x81},
+	{0x3699, 0x81},
+	{0x369a, 0x84},
+	{0x369b, 0x82},
 	{0x36a2, 0x80},
 	{0x36a3, 0x88},
 	{0x36a4, 0xf8},
@@ -432,6 +446,7 @@ static const struct regval sc431hai_linear_10_2560x1440_30fps_regs[] = {
 	{0x36ed, 0x18},
 	{0x370f, 0x01},
 	{0x3722, 0x03},
+	{0x3724, 0x92},
 	{0x3727, 0x14},
 	{0x37b0, 0x17},
 	{0x37b1, 0x9b},
@@ -445,27 +460,38 @@ static const struct regval sc431hai_linear_10_2560x1440_30fps_regs[] = {
 	{0x391f, 0x41},
 	{0x3926, 0xe0},
 	{0x3933, 0x80},
-	{0x3934, 0xf9},
+	{0x3934, 0xf8},
 	{0x3935, 0x00},
-	{0x3936, 0x55},
-	{0x3937, 0x63},
-	{0x3938, 0x61},
+	{0x3936, 0x45},
+	{0x3937, 0x66},
+	{0x3938, 0x66},
+	{0x3939, 0x00},
+	{0x393a, 0x03},
+	{0x393b, 0x00},
+	{0x393c, 0x00},
+	{0x393d, 0x02},
+	{0x393e, 0x80},
 	{0x3e00, 0x00},
 	{0x3e01, 0xba},
 	{0x3e02, 0xd0},
+	{0x3e16, 0x00},
+	{0x3e17, 0xc5},
+	{0x3e18, 0x00},
+	{0x3e19, 0xc5},
 	{0x4509, 0x20},
-	{0x450d, 0x0d},
+	{0x450d, 0x0b},
 	{0x4819, 0x08},
 	{0x481b, 0x05},
 	{0x481d, 0x11},
 	{0x481f, 0x04},
 	{0x4821, 0x09},
-	{0x4823, 0x04},
+	{0x4823, 0x05},
 	{0x4825, 0x04},
 	{0x4827, 0x04},
 	{0x4829, 0x07},
 	{0x5780, 0x76},
-	{0x5784, 0x10},
+	{0x5784, 0x0a},
+	{0x5785, 0x04},
 	{0x5787, 0x0a},
 	{0x5788, 0x0a},
 	{0x5789, 0x08},
@@ -623,65 +649,65 @@ static int sc431hai_set_gain_reg(struct sc431hai *sc431hai, u32 gain)
 	u32 coarse_again = 0, coarse_dgain = 0, fine_again = 0, fine_dgain = 0;
 	int ret = 0, gain_factor;
 
-	if (gain < 64)
-		gain = 64;
+	if (gain < SC431HAI_GAIN_MIN)
+		gain = SC431HAI_GAIN_MIN;
 	else if (gain > SC431HAI_GAIN_MAX)
 		gain = SC431HAI_GAIN_MAX;
 
 	gain_factor = gain * 1000 / 64;
-	if (gain_factor < 1540) {
+	if (gain_factor < 1540) {		/* 1.0x ~ 1.54x */
 		coarse_again = 0x00;
 		coarse_dgain = 0x00;
 		fine_dgain = 0x80;
-		fine_again = gain_factor * 64 / 1000;
-	} else if (gain_factor < 3080) {//mark
+		fine_again = gain_factor * 32 / 1000;
+	} else if (gain_factor < 3080) {	/* 1.54x ~ 3.08x */
 		coarse_again = 0x80;
 		coarse_dgain = 0x00;
 		fine_dgain = 0x80;
-		fine_again = gain_factor * 64 / 1540;
-	} else if (gain_factor < 6160) {
+		fine_again = gain_factor * 32 / 1540;
+	} else if (gain_factor < 6160) {	/* 3.08x ~ 6.16x */
 		coarse_again = 0x81;
 		coarse_dgain = 0x00;
 		fine_dgain = 0x80;
-		fine_again = gain_factor * 64 / 3080;
-	} else if (gain_factor < 12320) {
+		fine_again = gain_factor * 32 / 3080;
+	} else if (gain_factor < 12320) {	/* 6.16x ~ 12.32x */
 		coarse_again = 0x83;
 		coarse_dgain = 0x00;
 		fine_dgain = 0x80;
-		fine_again = gain_factor * 64 / 6160;
-	} else if (gain_factor < 24640) {
+		fine_again = gain_factor * 32 / 6160;
+	} else if (gain_factor < 24640) {	/* 12.32x ~ 24.64x */
 		coarse_again = 0x87;
 		coarse_dgain = 0x00;
 		fine_dgain = 0x80;
-		fine_again = gain_factor * 64 / 12320;
-	} else if (gain_factor < 48510) {
+		fine_again = gain_factor * 32 / 12320;
+	} else if (gain_factor < 48510) {	/* 24.64x ~ 48.510x */
 		coarse_again = 0x8f;
 		coarse_dgain = 0x00;
 		fine_dgain = 0x80;
-		fine_again = gain_factor * 64 / 24640;
-	} else if (gain_factor < 48510 * 2) {
+		fine_again = gain_factor * 32 / 24640;
+	} else if (gain_factor < 48510 * 2) {	/* 1.0x ~ 2.0x */
 		//open dgain begin  max digital gain 4X
 		coarse_again = 0x8f;
 		coarse_dgain = 0x00;
 		fine_again = 0x3f;
 		fine_dgain = gain_factor * 128 / 48510;
-	} else if (gain_factor < 48510 * 4) {
+	} else if (gain_factor < 48510 * 4) {	/* 2.0x ~ 4.0x */
 		coarse_again = 0x8f;
 		coarse_dgain = 0x01;
 		fine_again = 0x3f;
 		fine_dgain = gain_factor * 128 / 48510 / 2;
-	} else if (gain_factor < 48510 * 8) {
+	} else if (gain_factor < 48510 * 8) {	/* 4.0x ~ 8.0x */
 		coarse_again = 0x8f;
 		coarse_dgain = 0x03;
 		fine_again = 0x3f;
 		fine_dgain = gain_factor * 128 / 48510 / 4;
-	} else if (gain_factor < 48510 * 16) {
+	} else if (gain_factor < 48510 * 16) {	/* 8.0x ~ 16.0x */
 		coarse_again = 0x8f;
 		coarse_dgain = 0x07;
 		fine_again = 0x3f;
 		fine_dgain = gain_factor * 128 / 48510 / 8;
 	}
-	dev_dbg(&client->dev, "c_again: 0x%x, c_dgain: 0x%x, f_again: 0x%x, f_dgain: 0x%0x\n",
+	dev_dbg(&client->dev, "again: 0x%x, dgain: 0x%x, again_fine: 0x%x, dgain_fine: 0x%0x\n",
 		    coarse_again, coarse_dgain, fine_again, fine_dgain);
 
 	ret = sc431hai_write_reg(sc431hai->client,
@@ -725,7 +751,7 @@ sc431hai_find_best_fit(struct v4l2_subdev_format *fmt)
 			cur_best_fit_dist = dist;
 			cur_best_fit = i;
 		} else if (dist == cur_best_fit_dist &&
-			   framefmt->code == supported_modes[i].bus_fmt) {
+			framefmt->code == supported_modes[i].bus_fmt) {
 			cur_best_fit = i;
 			break;
 		}
@@ -983,6 +1009,7 @@ static long sc431hai_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	int cur_best_fit = -1;
 	int cur_best_fit_dist = -1;
 	int cur_dist, cur_fps, dst_fps;
+	u32 val = 0;
 
 	switch (cmd) {
 	case RKMODULE_GET_MODULE_INFO:
@@ -1037,15 +1064,58 @@ static long sc431hai_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	case PREISP_CMD_SET_HDRAE_EXP:
 		break;
 	case RKMODULE_SET_QUICK_STREAM:
-
 		stream = *((u32 *)arg);
-
-		if (stream)
-			ret = sc431hai_write_reg(sc431hai->client, SC431HAI_REG_CTRL_MODE,
-				 SC431HAI_REG_VALUE_08BIT, SC431HAI_MODE_STREAMING);
-		else
-			ret = sc431hai_write_reg(sc431hai->client, SC431HAI_REG_CTRL_MODE,
-				 SC431HAI_REG_VALUE_08BIT, SC431HAI_MODE_SW_STANDBY);
+		if (stream) {
+			// according sensor FAE: to save power to set 0x302c,0x363c,0x36e9,0x37f9
+			ret = sc431hai_write_reg(sc431hai->client, 0x302c,
+						 SC431HAI_REG_VALUE_08BIT, 0x00);
+			ret |= sc431hai_write_reg(sc431hai->client, SC431HAI_REG_MIPI_CTRL,
+						  SC431HAI_REG_VALUE_08BIT, SC431HAI_MIPI_CTRL_ON);
+			//ret |= sc431hai_write_reg(sc431hai->client, 0x363c,
+			//			  SC431HAI_REG_VALUE_08BIT, 0x8e);
+			ret |= sc431hai_read_reg(sc431hai->client, 0x36e9,
+						  SC431HAI_REG_VALUE_08BIT, &val);
+			val &= 0x7f;	//set bit7 to 0
+			ret |= sc431hai_write_reg(sc431hai->client, 0x36e9,
+						  SC431HAI_REG_VALUE_08BIT, val);
+			ret |= sc431hai_read_reg(sc431hai->client, 0x37f9,
+						  SC431HAI_REG_VALUE_08BIT, &val);
+			val &= 0x7f;	//set bit7 to 0
+			ret |= sc431hai_write_reg(sc431hai->client, 0x37f9,
+						  SC431HAI_REG_VALUE_08BIT, val);
+			ret |= sc431hai_write_reg(sc431hai->client, 0x3018,
+						  SC431HAI_REG_VALUE_08BIT, 0x3a);
+			ret |= sc431hai_write_reg(sc431hai->client, SC431HAI_REG_CTRL_MODE,
+						  SC431HAI_REG_VALUE_08BIT,
+						  SC431HAI_MODE_STREAMING);
+			sc431hai->is_standby = false;
+		} else {
+			if (sc431hai->is_standby == true)
+				break;
+			// according sensor FAE: to save power to set 0x302c,0x363c,0x36e9,0x37f9
+			ret = sc431hai_write_reg(sc431hai->client, 0x302c,
+						  SC431HAI_REG_VALUE_08BIT, 0x0f);
+			ret |= sc431hai_write_reg(sc431hai->client, SC431HAI_REG_MIPI_CTRL,
+						  SC431HAI_REG_VALUE_08BIT, SC431HAI_MIPI_CTRL_OFF);
+			//ret |= sc431hai_write_reg(sc431hai->client, 0x363c,
+			//			  SC431HAI_REG_VALUE_08BIT, 0xae);
+			ret |= sc431hai_read_reg(sc431hai->client, 0x36e9,
+						  SC431HAI_REG_VALUE_08BIT, &val);
+			val |= 0x80;	//set bit7 to 1
+			ret |= sc431hai_write_reg(sc431hai->client, 0x36e9,
+						  SC431HAI_REG_VALUE_08BIT, val);
+			ret |= sc431hai_read_reg(sc431hai->client, 0x37f9,
+						  SC431HAI_REG_VALUE_08BIT, &val);
+			val |= 0x80;	//set bit7 to 1
+			ret |= sc431hai_write_reg(sc431hai->client, 0x37f9,
+						  SC431HAI_REG_VALUE_08BIT, val);
+			ret |= sc431hai_write_reg(sc431hai->client, 0x3018,
+						  SC431HAI_REG_VALUE_08BIT, 0x3f);
+			ret |= sc431hai_write_reg(sc431hai->client, SC431HAI_REG_CTRL_MODE,
+						  SC431HAI_REG_VALUE_08BIT,
+						  SC431HAI_MODE_SW_STANDBY);
+			sc431hai->is_standby = true;
+		}
 		break;
 	default:
 		ret = -ENOIOCTLCMD;
@@ -1359,6 +1429,11 @@ static int __maybe_unused sc431hai_resume(struct device *dev)
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct sc431hai *sc431hai = to_sc431hai(sd);
 
+	if (sc431hai->standby_soft) {
+		dev_info(dev, "resume standby!");
+		return 0;
+	}
+
 	cam_sw_prepare_wakeup(sc431hai->cam_sw_inf, dev);
 
 	usleep_range(4000, 5000);
@@ -1384,6 +1459,11 @@ static int __maybe_unused sc431hai_suspend(struct device *dev)
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct sc431hai *sc431hai = to_sc431hai(sd);
 
+	if (sc431hai->standby_soft) {
+		dev_info(dev, "suspend standby!");
+		return 0;
+	}
+
 	cam_sw_write_array_cb_init(sc431hai->cam_sw_inf, client,
 				   (void *)sc431hai->cur_mode->reg_list,
 				   (sensor_write_array)sc431hai_write_array);
@@ -1391,9 +1471,6 @@ static int __maybe_unused sc431hai_suspend(struct device *dev)
 
 	return 0;
 }
-#else
-#define sc431hai_resume NULL
-#define sc431hai_suspend NULL
 #endif
 
 static int __maybe_unused sc431hai_runtime_resume(struct device *dev)
@@ -1456,7 +1533,9 @@ static int sc431hai_enum_frame_interval(struct v4l2_subdev *sd,
 static const struct dev_pm_ops sc431hai_pm_ops = {
 	SET_RUNTIME_PM_OPS(sc431hai_runtime_suspend,
 			   sc431hai_runtime_resume, NULL)
+#if IS_REACHABLE(CONFIG_VIDEO_CAM_SLEEP_WAKEUP)
 	SET_LATE_SYSTEM_SLEEP_PM_OPS(sc431hai_suspend, sc431hai_resume)
+#endif
 };
 
 #ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
@@ -1525,6 +1604,11 @@ static int sc431hai_set_ctrl(struct v4l2_ctrl *ctrl)
 
 	if (!pm_runtime_get_if_in_use(&client->dev))
 		return 0;
+
+	if (sc431hai->standby_soft && sc431hai->is_standby) {
+		dev_dbg(&client->dev, "%s: is_standby = true, will return\n", __func__);
+		return 0;
+	}
 
 	switch (ctrl->id) {
 	case V4L2_CID_EXPOSURE:
@@ -1668,6 +1752,7 @@ static int sc431hai_initialize_controls(struct sc431hai *sc431hai)
 	sc431hai->subdev.ctrl_handler = handler;
 	sc431hai->has_init_exp = false;
 	sc431hai->cur_fps = mode->max_fps;
+	sc431hai->is_standby = false;
 
 	return 0;
 
@@ -1696,7 +1781,7 @@ static int sc431hai_check_sensor_id(struct sc431hai *sc431hai,
 		return -ENODEV;
 	}
 
-	dev_info(dev, "Detected OV%06x sensor\n", CHIP_ID);
+	dev_info(dev, "Detected SC%06x sensor\n", CHIP_ID);
 
 	return 0;
 }
@@ -1741,6 +1826,8 @@ static int sc431hai_probe(struct i2c_client *client,
 				       &sc431hai->module_name);
 	ret |= of_property_read_string(node, RKMODULE_CAMERA_LENS_NAME,
 				       &sc431hai->len_name);
+	of_property_read_u32(node, RKMODULE_CAMERA_STANDBY_HW,
+				       &sc431hai->standby_soft);
 	if (ret) {
 		dev_err(dev, "could not get module information!\n");
 		return -EINVAL;
