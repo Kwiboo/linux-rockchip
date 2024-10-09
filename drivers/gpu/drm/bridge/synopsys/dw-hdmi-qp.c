@@ -3503,9 +3503,21 @@ static void dw_hdmi_qp_bridge_atomic_disable(struct drm_bridge *bridge,
 	struct dw_hdmi_qp *hdmi = bridge->driver_private;
 	void *data = hdmi->plat_data->phy_data;
 	const struct drm_connector_state *conn_state = hdmi->curr_conn->state;
+	struct dw_hdmi_link_config *link_cfg = NULL;
 
 	if (hdmi->panel)
 		drm_panel_disable(hdmi->panel);
+
+	if (hdmi->plat_data->get_link_cfg)
+		link_cfg = hdmi->plat_data->get_link_cfg(data);
+
+	if (!link_cfg) {
+		dev_err(hdmi->dev, "link_cfg is null\n");
+		return;
+	}
+
+	if (link_cfg->dsc_mode)
+		hdmi->frl_switch = false;
 
 	/* set avmute */
 	hdmi_writel(hdmi, 1, PKTSCHED_PKT_CONTROL0);
