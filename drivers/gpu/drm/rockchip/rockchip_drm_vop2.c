@@ -4237,6 +4237,18 @@ static void vop2_power_domain_off_by_disabled_vp(struct vop2_power_domain *pd)
 		if (ret < 0)
 			DRM_DEV_ERROR(vop2->dev, "failed to enable dclk for video port%d - %d\n",
 				      vp->id, ret);
+		/*
+		 * When the dclk source is hdmi phy pll, it clock rate may be 0
+		 * if the vp is disabled, which will cause timeout when disable
+		 * the pd. To avoid this issue happen, set a clock rate when the
+		 * vp dclk rate is 0.
+		 */
+		if (vp->dclk_switch) {
+			if (!clk_get_rate(vp->dclk_switch))
+				clk_set_rate(vp->dclk_switch, 148500000);
+		}
+		if (!clk_get_rate(vp->dclk))
+			clk_set_rate(vp->dclk, 148500000);
 		crtc = &vp->rockchip_crtc.crtc;
 		VOP_MODULE_SET(vop2, vp, standby, 0);
 		vop2_power_domain_off(pd);
