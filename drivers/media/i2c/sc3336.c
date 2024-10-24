@@ -328,7 +328,7 @@ static const struct regval sc3336_linear_10_2304x1296_30fps_regs[] = {
 	{0x301f, 0x02},
 	{0x30b8, 0x33},
 	{0x320e, 0x05},
-	{0x320f, 0x50},
+	{0x320f, 0x3c},
 	{0x3253, 0x10},
 	{0x325f, 0x20},
 	{0x3301, 0x04},
@@ -469,7 +469,7 @@ static const struct sc3336_mode supported_modes[] = {
 			.denominator = 250000,
 		},
 		.exp_def = 0x0080,
-		.hts_def = 0x05dc,
+		.hts_def = 0x04e2 * 2,
 		.vts_def = 0x0654,
 		.bus_fmt = MEDIA_BUS_FMT_SBGGR10_1X10,
 		.reg_list = sc3336_linear_10_2304x1296_25fps_regs,
@@ -487,7 +487,7 @@ static const struct sc3336_mode supported_modes[] = {
 		},
 		.exp_def = 0x0080,
 		.hts_def = 0x0578 * 2,
-		.vts_def = 0x0550,
+		.vts_def = 0x053c,
 		.bus_fmt = MEDIA_BUS_FMT_SBGGR10_1X10,
 		.reg_list = sc3336_linear_10_2304x1296_30fps_regs,
 		.hdr_mode = NO_HDR,
@@ -1421,7 +1421,7 @@ static int sc3336_set_ctrl(struct v4l2_ctrl *ctrl)
 	struct i2c_client *client = sc3336->client;
 	s64 max;
 	int ret = 0;
-	u32 val = 0;
+	u32 val = 0, vts = 0;
 
 	/* Propagate change of current control to all related controls */
 	switch (ctrl->id) {
@@ -1464,18 +1464,17 @@ static int sc3336_set_ctrl(struct v4l2_ctrl *ctrl)
 			ret = sc3336_set_gain_reg(sc3336, ctrl->val);
 		break;
 	case V4L2_CID_VBLANK:
-		dev_dbg(&client->dev, "set vblank 0x%x\n", ctrl->val);
+		vts = ctrl->val + sc3336->cur_mode->height;
+		dev_dbg(&client->dev, "set vblank 0x%x vts = 0x%04x\n", ctrl->val, vts);
 		ret = sc3336_write_reg(sc3336->client,
 					SC3336_REG_VTS_H,
 					SC3336_REG_VALUE_08BIT,
-					(ctrl->val + sc3336->cur_mode->height)
-					>> 8);
+					(vts >> 8) & 0xff);
 		ret |= sc3336_write_reg(sc3336->client,
 					 SC3336_REG_VTS_L,
 					 SC3336_REG_VALUE_08BIT,
-					 (ctrl->val + sc3336->cur_mode->height)
-					 & 0xff);
-		sc3336->cur_vts = ctrl->val + sc3336->cur_mode->height;
+					 vts & 0xff);
+		sc3336->cur_vts = vts;
 		sc3336_modify_fps_info(sc3336);
 		break;
 	case V4L2_CID_TEST_PATTERN:
@@ -1533,13 +1532,16 @@ static int sc3336_initialize_controls(struct sc3336 *sc3336)
 	if (sc3336->link_freq)
 		sc3336->link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
-	dst_link_freq = mode->link_freq_idx;
+	if (mode->link_freq_idx == 0)
+		dst_link_freq = PIXEL_RATE_WITH_253M_10BIT;
+	else if (mode->link_freq_idx == 1)
+		dst_link_freq = PIXEL_RATE_WITH_255M_10BIT;
 	dst_pixel_rate = (u32)link_freq_menu_items[mode->link_freq_idx] /
 					 SC3336_BITS_PER_SAMPLE * 2 * SC3336_LANES;
 	sc3336->pixel_rate = v4l2_ctrl_new_std(handler, NULL, V4L2_CID_PIXEL_RATE,
-			  0, PIXEL_RATE_WITH_255M_10BIT, 1, dst_pixel_rate);
+			  0, dst_link_freq, 1, dst_pixel_rate);
 
-	__v4l2_ctrl_s_ctrl(sc3336->link_freq, dst_link_freq);
+	__v4l2_ctrl_s_ctrl(sc3336->link_freq, mode->link_freq_idx);
 
 	h_blank = mode->hts_def - mode->width;
 	sc3336->hblank = v4l2_ctrl_new_std(handler, NULL, V4L2_CID_HBLANK,
