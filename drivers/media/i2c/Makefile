@@ -186,6 +186,7 @@ obj-$(CONFIG_VIDEO_SC5336) += sc5336.o
 obj-$(CONFIG_VIDEO_SC5336P) += sc5336p.o
 obj-$(CONFIG_VIDEO_SC830AI) += sc830ai.o
 obj-$(CONFIG_VIDEO_SC831AI) += sc831ai.o
+obj-$(CONFIG_VIDEO_SC835HAI) += sc835hai.o
 obj-$(CONFIG_VIDEO_SC850SL) += sc850sl.o
 obj-$(CONFIG_VIDEO_SENSOR_ADAPTER)	+= sensor_adapter.o
 obj-$(CONFIG_VIDEO_SP5508) += sp5508.o
