@@ -1393,6 +1393,7 @@ static void repo_hpd_event(struct work_struct *p_work)
 	change = drm_helper_hpd_irq_event(hdmi->drm_dev);
 	if (change) {
 		dev_dbg(hdmi->dev, "hpd stat changed:%d\n", hdmi->hpd_stat);
+		dw_hdmi_qp_handle_hpd(hdmi->hdmi_qp, hdmi->hpd_stat);
 		dw_hdmi_qp_cec_set_hpd(hdmi->hdmi_qp, hdmi->hpd_stat, change);
 	}
 }

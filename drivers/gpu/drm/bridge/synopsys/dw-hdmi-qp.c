@@ -2875,6 +2875,64 @@ void dw_hdmi_qp_set_allm_enable(struct dw_hdmi_qp *hdmi, bool enable)
 }
 EXPORT_SYMBOL_GPL(dw_hdmi_qp_set_allm_enable);
 
+/*
+ * If userspace don't disable hdmi output when hdmi plug out,
+ * turn off hdmi signal output. Recovering hdmi status that
+ * before plug out via turn on hdmi signal output and do scdc
+ * communication when hdmi plug in.
+ */
+void dw_hdmi_qp_handle_hpd(struct dw_hdmi_qp *hdmi, bool enable)
+{
+	bool is_hdmi14 = false;
+
+	mutex_lock(&hdmi->mutex);
+	/* hdmi2.1 don't support keep vop output in current version */
+	if (hdmi->hdmi_data.video_mode.mtmdsclock > 600000000)
+		goto out;
+
+	mutex_lock(&hdmi->audio_mutex);
+	if (!hdmi->dclk_en)
+		goto err_dclk;
+
+	if (!enable && !hdmi->disabled) {
+		hdmi_writel(hdmi, 1, PKTSCHED_PKT_CONTROL0);
+		hdmi_modb(hdmi, PKTSCHED_GCP_TX_EN, PKTSCHED_GCP_TX_EN, PKTSCHED_PKT_EN);
+		msleep(50);
+		hdmi->phy.ops->disable(hdmi, hdmi->phy.data);
+		hdmi->disabled = true;
+		goto err_dclk;
+	}
+
+	if (hdmi->hdmi_data.video_mode.mtmdsclock <= 340000000)
+		is_hdmi14 = true;
+
+	if (enable && hdmi->disabled) {
+		if (!is_hdmi14) {
+			drm_scdc_set_high_tmds_clock_ratio(hdmi->ddc, 1);
+			drm_scdc_set_scrambling(hdmi->ddc, 1);
+			hdmi_writel(hdmi, 1, SCRAMB_CONFIG0);
+			/* Wait for resuming transmission of TMDS clock and data */
+			msleep(100);
+		} else {
+			drm_scdc_set_high_tmds_clock_ratio(hdmi->ddc, 0);
+			drm_scdc_set_scrambling(hdmi->ddc, 0);
+			hdmi_writel(hdmi, 0, SCRAMB_CONFIG0);
+		}
+
+		hdmi->phy.ops->init(hdmi, hdmi->phy.data, &hdmi->previous_mode);
+		hdmi->disabled = false;
+		msleep(50);
+		hdmi_writel(hdmi, 2, PKTSCHED_PKT_CONTROL0);
+		hdmi_modb(hdmi, PKTSCHED_GCP_TX_EN, PKTSCHED_GCP_TX_EN, PKTSCHED_PKT_EN);
+	}
+
+err_dclk:
+	mutex_unlock(&hdmi->audio_mutex);
+out:
+	mutex_unlock(&hdmi->mutex);
+}
+EXPORT_SYMBOL_GPL(dw_hdmi_qp_handle_hpd);
+
 static int
 dw_hdmi_atomic_connector_set_property(struct drm_connector *connector,
 				      struct drm_connector_state *state,
