@@ -117,6 +117,9 @@
 #define OF_CAMERA_PINCTRL_STATE_SLEEP	"rockchip,camera_sleep"
 #define OF_CAMERA_HDR_MODE		"rockchip,camera-hdr-mode"
 #define SC850SL_NAME			"sc850sl"
+#define ENABLE_NR			1
+#define SC850SL_LGAIN			0
+#define SC850SL_SGAIN			1
 
 static const char * const sc850sl_supply_names[] = {
 	"dvdd",		// Digital core power
@@ -789,68 +792,148 @@ static void sc850sl_get_module_inf(struct sc850sl *sc850sl,
 	strscpy(inf->base.lens, sc850sl->len_name, sizeof(inf->base.lens));
 }
 
-static void sc850sl_get_gain_reg(u32 val, u32 *again_reg, u32 *again_fine_reg,
-				 u32 *dgain_reg, u32 *dgain_fine_reg)
+/* mode: 0 = lgain  1 = sgain */
+static int sc850sl_set_gain_reg(struct sc850sl *sc850sl, u32 gain, int mode)
 {
-	u8 u8Reg0x3e09 = 0x40, u8Reg0x3e08 = 0x03;
-	u32 aCoarseGain = 0;
-	u32 aFineGain = 0;
-	u32 again = 0;
-	u32 dgain = 0;
+	u32 ANA_Fine_gainx64 = 1;
+	u32 Dcg_gainx1000;
+	u8 Coarse_gain = 1, DIG_gain = 1;
+	u8 ANA_Fine_gain_reg = 0x40, DIG_Fine_gain_reg = 0;
+	u8 Coarse_gain_reg, DIG_gain_reg;
+	int ret = 0;
+	u64 val = 0;
 
-	if (val < 64)
-		val = 64;
-	else if (val > SC850SL_GAIN_MAX)
-		val = SC850SL_GAIN_MAX;
+	gain = gain * 16;
+	if (gain <= 1024)
+		gain = 1024;
+	else if (gain > SC850SL_GAIN_MAX * 16)
+		gain = SC850SL_GAIN_MAX * 16;
 
-	if (val <= 3199) {
-		again = val;
-		dgain = 1;
+	if (gain < 2048) { // start again  2 * 1024
+		Dcg_gainx1000 = 1000;
+		Coarse_gain = 1;
+		DIG_gain = 1;
+		Coarse_gain_reg = 0x03;
+		DIG_gain_reg = 0x0;
+		DIG_Fine_gain_reg = 0x80;
+	} else if (gain < 3200) {// 3.125 * 1024
+		Dcg_gainx1000 = 1000;
+		Coarse_gain = 2;
+		DIG_gain = 1;
+		Coarse_gain_reg = 0x07;
+		DIG_gain_reg = 0x0;
+		DIG_Fine_gain_reg = 0x80;
+	} else if (gain < 6400) {// 6.25 * 1024
+		Dcg_gainx1000 = 3125;
+		Coarse_gain = 1;
+		DIG_gain = 1;
+		Coarse_gain_reg = 0x23;
+		DIG_gain_reg = 0x0;
+		DIG_Fine_gain_reg = 0x80;
+	} else if (gain < 12800) {// 12.5 * 1024
+		Dcg_gainx1000 = 3125;
+		Coarse_gain = 2;
+		DIG_gain = 1;
+		Coarse_gain_reg = 0x27;
+		DIG_gain_reg = 0x0;
+		DIG_Fine_gain_reg = 0x80;
+	} else if (gain < 25600) {// 25 * 1024
+		Dcg_gainx1000 = 3125;
+		Coarse_gain = 4;
+		DIG_gain = 1;
+		Coarse_gain_reg = 0x2f;
+		DIG_gain_reg = 0x0;
+		DIG_Fine_gain_reg = 0x80;
+	} else if (gain < 51200) {// 50 * 1024 // end again
+		Dcg_gainx1000 = 3125;
+		Coarse_gain = 8;
+		DIG_gain = 1;
+		Coarse_gain_reg = 0x3f;
+		DIG_gain_reg = 0x0;
+		DIG_Fine_gain_reg = 0x80;
+	} else if (gain < 50800 * 2) {// start dgain
+		Dcg_gainx1000 = 3125;
+		Coarse_gain = 8;
+		DIG_gain = 1;
+		ANA_Fine_gainx64 = 127;
+		Coarse_gain_reg = 0x3f;
+		DIG_gain_reg = 0x0;
+		ANA_Fine_gain_reg = 0x7f;
+	} else if (gain < 50800 * 4) {
+		Dcg_gainx1000 = 3125;
+		Coarse_gain = 8;
+		DIG_gain = 2;
+		ANA_Fine_gainx64 = 127;
+		Coarse_gain_reg = 0x3f;
+		DIG_gain_reg = 0x1;
+		ANA_Fine_gain_reg = 0x7f;
+	} else if (gain < 50800 * 8) {
+		Dcg_gainx1000 = 3125;
+		Coarse_gain = 8;
+		DIG_gain = 4;
+		ANA_Fine_gainx64 = 127;
+		Coarse_gain_reg = 0x3f;
+		DIG_gain_reg = 0x3;
+		ANA_Fine_gain_reg = 0x7f;
 	} else {
-		again = 3199;
-		dgain = val / again;
+		Dcg_gainx1000 = 3125;
+		Coarse_gain = 8;
+		DIG_gain = 8;
+		ANA_Fine_gainx64 = 127;
+		Coarse_gain_reg = 0x3f;
+		DIG_gain_reg = 0x7;
+		ANA_Fine_gain_reg = 0x7f;
 	}
 
-	//again
-	if (again <= 200) {
-		//a_gain < 3.125x
-		for (aCoarseGain = 1; aCoarseGain <= 2; aCoarseGain = aCoarseGain * 2) {
-			//1,2,4,8,16
-			if (again < (64 * 2 * aCoarseGain))
-				break;
-		}
-		aFineGain = again / aCoarseGain;
+	if (gain < 2048) {
+		val = div_u64(1000ULL * gain, (Dcg_gainx1000 * Coarse_gain));
+		ANA_Fine_gain_reg = div_u64(val, 16);
+	} else if (gain == 3200) {
+		ANA_Fine_gain_reg = 0x40;
+	} else if (gain < 51200) {
+		val = div_u64(1000ULL * gain, (Dcg_gainx1000 * Coarse_gain));
+		ANA_Fine_gain_reg = div_u64(val, 16);
+	} else if (gain < 50800 * 8) {
+		val = div_u64(8000ULL * gain, (Dcg_gainx1000 * Coarse_gain * DIG_gain));
+		DIG_Fine_gain_reg = div_u64(val, ANA_Fine_gainx64);
 	} else {
-		for (aCoarseGain = 1; aCoarseGain <= 8; aCoarseGain = aCoarseGain * 2) {
-			//1,2,4,8
-			if (again < (64 * 2 * aCoarseGain * 3125 / 1000))
-				break;
-		}
-		aFineGain = 1000 * again / aCoarseGain / 3125;
-	}
-	for ( ; aCoarseGain >= 2; aCoarseGain = aCoarseGain / 2)
-		u8Reg0x3e08 = (u8Reg0x3e08 << 1) | 0x01;
-
-	u8Reg0x3e09 = aFineGain;
-	//dcg = 2.72  -->  2.72*1024=2785.28
-	u8Reg0x3e08 = (again > 200) ? (u8Reg0x3e08 | 0x20) : (u8Reg0x3e08 & 0x1f);
-	*dgain_fine_reg = val * 128 / again / dgain;
-	//dgain
-	if (dgain < 2) {	/*1x ~ 2x*/
-		*dgain_reg = 0x00;
-	} else if (dgain < 4) { /*2x ~ 4x*/
-		*dgain_reg = 0x01;
-		*dgain_fine_reg += (dgain - 2) * 64;
-	} else if (dgain < 8) { /*4x ~ 8x*/
-		*dgain_reg = 0x03;
-		*dgain_fine_reg += (dgain - 4) * 32;
-	} else {
-		*dgain_reg = 0x07;
-		*dgain_fine_reg = 0x80;
+		DIG_Fine_gain_reg = 0x80;
 	}
 
-	*again_reg = u8Reg0x3e08;
-	*again_fine_reg = u8Reg0x3e09;
+	if (mode == SC850SL_LGAIN) {
+		ret = sc850sl_write_reg(sc850sl->client,
+					SC850SL_REG_DGAIN,
+					SC850SL_REG_VALUE_08BIT,
+					DIG_gain_reg & 0xF);
+		ret |= sc850sl_write_reg(sc850sl->client,
+					 SC850SL_REG_DGAIN_FINE,
+					 SC850SL_REG_VALUE_08BIT,
+					 DIG_Fine_gain_reg);
+		ret |= sc850sl_write_reg(sc850sl->client,
+					 SC850SL_REG_AGAIN,
+					 SC850SL_REG_VALUE_08BIT,
+					 Coarse_gain_reg);
+		ret |= sc850sl_write_reg(sc850sl->client,
+					 SC850SL_REG_AGAIN_FINE,
+					 SC850SL_REG_VALUE_08BIT,
+					 ANA_Fine_gain_reg);
+	}
+#if ENABLE_NR
+	if (gain < 2048)
+		ret |= sc850sl_write_reg(sc850sl->client,
+					 0x363c,
+					 SC850SL_REG_VALUE_08BIT,
+					 0x05);
+	else
+		ret |= sc850sl_write_reg(sc850sl->client,
+					 0x363c,
+					 SC850SL_REG_VALUE_08BIT,
+					 0x07);
+#endif
+	dev_dbg(&sc850sl->client->dev,
+		"recv_gain:%d set again 0x%x, again_fine 0x%x, set dgain 0x%x, dgain_fine 0x%x\n",
+		gain / 16, Coarse_gain_reg, ANA_Fine_gain_reg, DIG_gain_reg, DIG_Fine_gain_reg);
+	return ret;
 }
 
 static int sc850sl_get_channel_info(struct sc850sl *sc850sl, struct rkmodule_channel_info *ch_info)
@@ -1545,7 +1628,6 @@ static int sc850sl_set_ctrl(struct v4l2_ctrl *ctrl)
 					     struct sc850sl, ctrl_handler);
 	struct i2c_client *client = sc850sl->client;
 	s64 max;
-	u32 again, again_fine, dgain, dgain_fine;
 	int ret = 0;
 	u32 val;
 
@@ -1587,27 +1669,8 @@ static int sc850sl_set_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_ANALOGUE_GAIN:
 		if (sc850sl->cur_mode->hdr_mode != NO_HDR)
 			goto out_ctrl;
-		sc850sl_get_gain_reg(ctrl->val, &again, &again_fine, &dgain, &dgain_fine);
-		dev_dbg(&client->dev,
-			"recv_gain:%d set again 0x%x, again_fine 0x%x, set dgain 0x%x, dgain_fine 0x%x\n",
-			ctrl->val, again, again_fine, dgain, dgain_fine);
+		ret = sc850sl_set_gain_reg(sc850sl, ctrl->val, SC850SL_LGAIN);
 
-		ret |= sc850sl_write_reg(sc850sl->client,
-					SC850SL_REG_AGAIN,
-					SC850SL_REG_VALUE_08BIT,
-					again);
-		ret |= sc850sl_write_reg(sc850sl->client,
-					SC850SL_REG_AGAIN_FINE,
-					SC850SL_REG_VALUE_08BIT,
-					again_fine);
-		ret |= sc850sl_write_reg(sc850sl->client,
-					SC850SL_REG_DGAIN,
-					SC850SL_REG_VALUE_08BIT,
-					dgain);
-		ret |= sc850sl_write_reg(sc850sl->client,
-					SC850SL_REG_DGAIN_FINE,
-					SC850SL_REG_VALUE_08BIT,
-					dgain_fine);
 		break;
 	case V4L2_CID_VBLANK:
 		ret = sc850sl_write_reg(sc850sl->client, SC850SL_REG_VTS,
