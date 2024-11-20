@@ -250,11 +250,13 @@ struct rockchip_hdmi {
 	struct drm_property *mode_color_capacity;
 	struct drm_property *hdr_panel_dovi_vsdb;
 	struct drm_property *vsif_data;
+	struct drm_property *hdr10_plus_vsdb;
 
 	struct drm_property_blob *mode_color_caps_ptr;
 	struct drm_property_blob *hdr_panel_blob_ptr;
 	struct drm_property_blob *hdr_panel_dovi_vsdb_ptr;
 	struct drm_property_blob *vsif_data_ptr;
+	struct drm_property_blob *hdr10_plus_vsdb_ptr;
 
 	unsigned int colordepth;
 	unsigned int colorimetry;
@@ -271,6 +273,7 @@ struct rockchip_hdmi {
 	u8 edid_colorimetry;
 	u8 hdcp_status;
 	u8 dovi_vsdb[DOVI_VSDB_LEN];
+	struct hdr10_plus_vsdb hdr10_plus_data;
 	struct rockchip_drm_dsc_cap dsc_cap;
 	struct dw_hdmi_link_config link_cfg;
 	struct gpio_desc *enable_gpio;
@@ -2607,6 +2610,31 @@ dw_hdmi_rockchip_get_edid_dsc_info(void *data, struct edid *edid, struct drm_dis
 }
 
 static int
+dw_hdmi_rockchip_get_hdr10_plus_vsdb(void *data, const struct edid *edid,
+				     struct drm_connector *connector)
+{
+	int ret;
+	struct rockchip_hdmi *hdmi = (struct rockchip_hdmi *)data;
+	struct drm_property *property = hdmi->hdr10_plus_vsdb;
+	u8 hdr10_plus;
+
+	if (!edid || !connector)
+		return -ENOMEM;
+
+	hdr10_plus = rockchip_drm_parse_hdr10_plus_vsdb(edid);
+
+	hdmi->hdr10_plus_data.application_version = hdr10_plus & 0x3;
+	hdmi->hdr10_plus_data.full_frame_peak_luminance_index = hdr10_plus & 0xc;
+	hdmi->hdr10_plus_data.peak_luminance_index = hdr10_plus & 0xf0;
+
+	ret = drm_property_replace_global_blob(connector->dev, &hdmi->hdr10_plus_vsdb_ptr,
+					       3, &hdmi->hdr10_plus_data, &connector->base,
+					       property);
+
+	return ret;
+}
+
+static int
 dw_hdmi_rockchip_get_dovi_data(void *data, struct edid *edid,
 			       struct drm_connector *connector)
 {
@@ -3097,6 +3125,15 @@ dw_hdmi_rockchip_attach_properties(struct drm_connector *connector,
 			drm_object_attach_property(&connector->base, prop, 0);
 		}
 		hdmi->enable_allm = allm_en;
+
+		prop = drm_property_create(connector->dev,
+					DRM_MODE_PROP_BLOB |
+					DRM_MODE_PROP_IMMUTABLE,
+					"HDR10_PLUS_VSDB", 0);
+		if (prop) {
+			hdmi->hdr10_plus_vsdb = prop;
+			drm_object_attach_property(&connector->base, prop, 0);
+		}
 	}
 
 	prop = drm_property_create_enum(connector->dev, 0,
@@ -3251,6 +3288,11 @@ dw_hdmi_rockchip_destroy_properties(struct drm_connector *connector,
 		drm_property_destroy(connector->dev, hdmi->vsif_data);
 		hdmi->vsif_data = NULL;
 	}
+
+	if (hdmi->hdr10_plus_vsdb) {
+		drm_property_destroy(connector->dev, hdmi->hdr10_plus_vsdb);
+		hdmi->hdr10_plus_vsdb = NULL;
+	}
 }
 
 static int
@@ -3331,6 +3373,8 @@ dw_hdmi_rockchip_set_property(struct drm_connector *connector,
 								&hdmi->vsif_data_ptr,
 								val, -1, -1, &replaced);
 		return ret;
+	} else if (property == hdmi->hdr10_plus_vsdb) {
+		return 0;
 	}
 
 	DRM_ERROR("Unknown property [PROP:%d:%s]\n",
@@ -3422,6 +3466,9 @@ dw_hdmi_rockchip_get_property(struct drm_connector *connector,
 		return 0;
 	} else if (property == hdmi->vsif_data) {
 		*val = (hdmi->vsif_data_ptr) ? hdmi->vsif_data_ptr->base.id : 0;
+		return 0;
+	} else if (property == hdmi->hdr10_plus_vsdb) {
+		*val = (hdmi->hdr10_plus_vsdb_ptr) ? hdmi->hdr10_plus_vsdb_ptr->base.id : 0;
 		return 0;
 	}
 
@@ -3920,6 +3967,8 @@ static int dw_hdmi_rockchip_bind(struct device *dev, struct device *master,
 		dw_hdmi_rockchip_get_colorimetry;
 	plat_data->get_dovi_vsif =
 		dw_hdmi_rockchip_get_vsif_data;
+	plat_data->get_hdr10_plus_vsdb =
+		dw_hdmi_rockchip_get_hdr10_plus_vsdb;
 	plat_data->get_link_cfg = dw_hdmi_rockchip_get_link_cfg;
 	plat_data->set_hdcp2_enable = rk3588_set_hdcp2_enable;
 	plat_data->set_hdcp_status = rk3588_set_hdcp_status;

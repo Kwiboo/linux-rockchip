@@ -634,6 +634,7 @@ int rockchip_drm_parse_cea_ext(struct rockchip_drm_dsc_cap *dsc_cap, struct drm_
 			       const struct edid *edid);
 int rockchip_drm_parse_dovi(u8 *sink_data, const struct edid *edid);
 int rockchip_drm_parse_colorimetry_data_block(u8 *colorimetry, const struct edid *edid);
+u8 rockchip_drm_parse_hdr10_plus_vsdb(const struct edid *edid);
 long rockchip_drm_dclk_round_rate(u32 version, struct clk *dclk, unsigned long rate);
 int rockchip_drm_dclk_set_rate(u32 version, struct clk *dclk, unsigned long rate);
 const char *rockchip_drm_modifier_to_string(uint64_t modifier);

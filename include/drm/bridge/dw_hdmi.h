@@ -148,6 +148,12 @@ struct dovi_vsif_data {
 	u8 pb[28];
 };
 
+struct hdr10_plus_vsdb {
+	u8 application_version;
+	u8 full_frame_peak_luminance_index;
+	u8 peak_luminance_index;
+};
+
 struct dw_hdmi_phy_ops {
 	int (*init)(struct dw_hdmi *hdmi, void *data,
 		    const struct drm_display_info *display,
@@ -272,6 +278,8 @@ struct dw_hdmi_plat_data {
 	void (*force_frl_rate)(void *data, u8 rate);
 	void (*get_mode_color_caps)(struct drm_connector *connector, struct drm_display_info *info,
 				    void *data);
+	int (*get_hdr10_plus_vsdb)(void *data, const struct edid *edid,
+				   struct drm_connector *connector);
 
 	/* Vendor Property support */
 	const struct dw_hdmi_property_ops *property_ops;
