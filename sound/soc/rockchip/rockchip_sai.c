@@ -60,6 +60,8 @@ struct rk_sai_dev {
 	unsigned int wait_time[SNDRV_PCM_STREAM_LAST + 1];
 	unsigned int tx_lanes;
 	unsigned int rx_lanes;
+	unsigned int tx_mask_slots;
+	unsigned int rx_mask_slots;
 	unsigned int sdi[MAX_LANES];
 	unsigned int sdo[MAX_LANES];
 	unsigned int quirks;
@@ -599,7 +601,7 @@ static int rockchip_sai_hw_params(struct snd_pcm_substream *substream,
 	struct rk_sai_dev *sai = snd_soc_dai_get_drvdata(dai);
 	struct snd_dmaengine_dai_dma_data *dma_data;
 	unsigned int mclk_rate, mclk_req_rate, bclk_rate, div_bclk;
-	unsigned int ch_per_lane, lanes, slot_width;
+	unsigned int ch_per_lane, lanes, slot_width, mask_slots;
 	unsigned int val, fscr, reg, fifo;
 
 	if (!rockchip_sai_stream_valid(substream, dai))
@@ -617,11 +619,13 @@ static int rockchip_sai_hw_params(struct snd_pcm_substream *substream,
 		if (sai->tx_lanes)
 			lanes = sai->tx_lanes;
 		fifo = SAI_DMACR_TDL_V(val) * lanes;
+		mask_slots = sai->tx_mask_slots;
 	} else {
 		reg = SAI_RXCR;
 		if (sai->rx_lanes)
 			lanes = sai->rx_lanes;
 		fifo = SAI_DMACR_TDL_V(val) * lanes;
+		mask_slots = sai->rx_mask_slots;
 	}
 
 	switch (params_format(params)) {
@@ -650,7 +654,7 @@ static int rockchip_sai_hw_params(struct snd_pcm_substream *substream,
 	regmap_read(sai->regmap, reg, &val);
 
 	slot_width = SAI_XCR_SBW_V(val);
-	ch_per_lane = params_channels(params) / lanes;
+	ch_per_lane = (params_channels(params) + mask_slots) / lanes;
 
 	rockchip_fifo_cfg(substream, dai);
 
@@ -1082,9 +1086,13 @@ static int rockchip_sai_set_tdm_slot(struct snd_soc_dai *dai,
 			   SAI_XCR_SBW(slot_width));
 	regmap_update_bits(sai->regmap, SAI_RXCR, SAI_XCR_SBW_MASK,
 			   SAI_XCR_SBW(slot_width));
+	regmap_write(sai->regmap, SAI_TX_SLOT_MASK0, tx_mask);
+	regmap_write(sai->regmap, SAI_RX_SLOT_MASK0, rx_mask);
 	pm_runtime_put(dai->dev);
 
 	sai->is_tdm = true;
+	sai->rx_mask_slots = hweight32(rx_mask);
+	sai->tx_mask_slots = hweight32(tx_mask);
 
 	return 0;
 }
