@@ -2712,6 +2712,8 @@ isp_hdrdrc_config(struct rkisp_isp_params_vdev *params_vdev,
 		value = ISP_PACK_2SHORT(arg->min_ogain, arg->iir_weight);
 	else
 		value = ISP_PACK_2SHORT(arg->min_ogain, 0);
+	if (params_vdev->dev->hw_dev->is_multi_overflow)
+		value &= ~ISP3X_DRC_IIR_WEIGHT_MASK;
 	isp3_param_write(params_vdev, value, ISP3X_DRC_IIRWG_GAIN, id);
 
 	value = arg->gas_t & 0x1fff;
@@ -2856,11 +2858,19 @@ isp_dhaz_config(struct rkisp_isp_params_vdev *params_vdev,
 	value = (arg->iir_wt_sigma & 0x07FF) << 16 |
 		(arg->iir_sigma & 0xFF) << 8 |
 		(arg->stab_fnum & 0x1F);
+	if (params_vdev->dev->hw_dev->is_multi_overflow) {
+		value &= ~ISP3X_DHAZ_STAB_FNUM_MASK;
+		value |= 1;
+	}
 	isp3_param_write(params_vdev, value, ISP3X_DHAZ_IIR0, id);
 
 	value = (arg->iir_pre_wet & 0x0F) << 24 |
 		(arg->iir_tmax_sigma & 0x7FF) << 8 |
 		(arg->iir_air_sigma & 0xFF);
+	if (params_vdev->dev->hw_dev->is_multi_overflow) {
+		value &= ~ISP3X_DHAZ_IIR_PRE_WET_MASK;
+		value |= BIT(24);
+	}
 	isp3_param_write(params_vdev, value, ISP3X_DHAZ_IIR1, id);
 
 	value = (arg->cfg_wt & 0x01FF) << 16 |

@@ -849,14 +849,14 @@ run_next:
 			else
 				val |= ISP3X_CNR_FST_FRAME;
 			rkisp_unite_clear_bits(dev, ISP3X_ISP_CTRL1, val, false);
-			val = rkisp_read_reg_cache(dev, ISP3X_DRC_IIRWG_GAIN);
-			writel(val, hw->base_addr + ISP3X_DRC_IIRWG_GAIN);
-			if (hw->unite == ISP_UNITE_TWO)
-				writel(val, hw->base_next_addr + ISP3X_DRC_IIRWG_GAIN);
 			val = rkisp_read_reg_cache(dev, ISP3X_DRC_EXPLRATIO);
 			writel(val, hw->base_addr + ISP3X_DRC_EXPLRATIO);
 			if (hw->unite == ISP_UNITE_TWO)
 				writel(val, hw->base_next_addr + ISP3X_DRC_EXPLRATIO);
+			val = rkisp_read_reg_cache(dev, ISP3X_DHAZ_BF_WET);
+			writel(val, hw->base_addr + ISP3X_DHAZ_BF_WET);
+			if (hw->unite == ISP_UNITE_TWO)
+				writel(val, hw->base_next_addr + ISP3X_DHAZ_BF_WET);
 			val = rkisp_read_reg_cache(dev, ISP3X_YNR_GLOBAL_CTRL);
 			writel(val, hw->base_addr + ISP3X_YNR_GLOBAL_CTRL);
 			if (hw->unite == ISP_UNITE_TWO)
@@ -878,18 +878,18 @@ run_next:
 			else
 				val |= ISP3X_CNR_FST_FRAME;
 			rkisp_unite_set_bits(dev, ISP3X_ISP_CTRL1, 0, val, false);
-			/* ADRC low iir thumb weight for first sensor switch */
-			val = rkisp_read_reg_cache(dev, ISP3X_DRC_IIRWG_GAIN);
-			val &= ~ISP3X_DRC_IIR_WEIGHT_MASK;
-			writel(val, hw->base_addr + ISP3X_DRC_IIRWG_GAIN);
-			if (hw->unite == ISP_UNITE_TWO)
-				writel(val, hw->base_next_addr + ISP3X_DRC_IIRWG_GAIN);
 			/* ADRC iir5x5 and cur3x3 weight */
 			val = rkisp_read_reg_cache(dev, ISP3X_DRC_EXPLRATIO);
 			val &= ~ISP3X_DRC_WEIPRE_FRAME_MASK;
 			writel(val, hw->base_addr + ISP3X_DRC_EXPLRATIO);
 			if (hw->unite == ISP_UNITE_TWO)
 				writel(val, hw->base_next_addr + ISP3X_DRC_EXPLRATIO);
+			/* DHAZ bf_weight */
+			val = rkisp_read_reg_cache(dev, ISP3X_DHAZ_BF_WET);
+			val &= ~ISP3X_DHAZ_BF_WEIGHT_MASK;
+			writel(val, hw->base_addr + ISP3X_DHAZ_BF_WET);
+			if (hw->unite == ISP_UNITE_TWO)
+				writel(val, hw->base_next_addr + ISP3X_DHAZ_BF_WET);
 			/* YNR_THUMB_MIX_CUR_EN for thumb read addr to 0 */
 			val = rkisp_read_reg_cache(dev, ISP3X_YNR_GLOBAL_CTRL);
 			val |= ISP3X_YNR_THUMB_MIX_CUR_EN;
