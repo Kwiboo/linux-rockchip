@@ -25,7 +25,7 @@
 #include "rk_crypto_v1.h"
 #include "rk_crypto_v2.h"
 #include "rk_crypto_v3.h"
-#include "cryptodev_linux/rk_cryptodev.h"
+#include "../cryptodev_linux/rk_cryptodev.h"
 #include "procfs.h"
 
 #define CRYPTO_NAME	"rkcrypto"
