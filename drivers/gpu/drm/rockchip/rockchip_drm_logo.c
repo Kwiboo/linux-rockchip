@@ -702,11 +702,22 @@ static void rockchip_drm_mode_fixup(struct drm_crtc_state *crtc_state,
 	const struct drm_crtc_helper_funcs *crtc_funcs;
 	struct drm_encoder *encoder = conn_state->best_encoder;
 	struct drm_crtc *crtc = crtc_state->crtc;
+	struct drm_bridge *bridge;
+	struct drm_bridge_state *bridge_state;
 	int ret;
 
 	ret = drm_atomic_set_mode_for_crtc(crtc_state, adj_mode);
 	if (ret)
 		return;
+
+	bridge = drm_bridge_chain_get_first_bridge(encoder);
+	if (bridge) {
+		bridge_state = drm_atomic_get_bridge_state(crtc_state->state, bridge);
+		if (IS_ERR(bridge_state))
+			return;
+
+		drm_atomic_bridge_chain_check(bridge, crtc_state, conn_state);
+	}
 
 	encoder_funcs = encoder->helper_private;
 	if (encoder_funcs && encoder_funcs->atomic_check)
