@@ -50,6 +50,7 @@
 #define VOP_FEATURE_ALPHA_SCALE		BIT(2)
 #define VOP_FEATURE_HDR10		BIT(3)
 #define VOP_FEATURE_NEXT_HDR		BIT(4)
+#define VOP_FEATURE_DOVI		BIT(4)
 /* a feature to splice two windows and two vps to support resolution > 4096 */
 #define VOP_FEATURE_SPLICE		BIT(5)
 #define VOP_FEATURE_OVERSCAN		BIT(6)
