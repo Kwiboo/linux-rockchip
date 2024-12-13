@@ -4602,15 +4602,15 @@ static int vop_crtc_create_feature_property(struct vop *vop, struct drm_crtc *cr
 	static const struct drm_prop_enum_list props[] = {
 		{ ROCKCHIP_DRM_CRTC_FEATURE_ALPHA_SCALE, "ALPHA_SCALE" },
 		{ ROCKCHIP_DRM_CRTC_FEATURE_HDR10, "HDR10" },
-		{ ROCKCHIP_DRM_CRTC_FEATURE_NEXT_HDR, "NEXT_HDR" },
+		{ ROCKCHIP_DRM_CRTC_FEATURE_DOVI, "DOVI" },
 	};
 
 	if (vop_data->feature & VOP_FEATURE_ALPHA_SCALE)
 		feature |= BIT(ROCKCHIP_DRM_CRTC_FEATURE_ALPHA_SCALE);
 	if (vop_data->feature & VOP_FEATURE_HDR10)
 		feature |= BIT(ROCKCHIP_DRM_CRTC_FEATURE_HDR10);
-	if (vop_data->feature & VOP_FEATURE_NEXT_HDR)
-		feature |= BIT(ROCKCHIP_DRM_CRTC_FEATURE_NEXT_HDR);
+	if (vop_data->feature & VOP_FEATURE_DOVI)
+		feature |= BIT(ROCKCHIP_DRM_CRTC_FEATURE_DOVI);
 
 	prop = drm_property_create_bitmask(vop->drm_dev,
 					   DRM_MODE_PROP_IMMUTABLE, "FEATURE",
