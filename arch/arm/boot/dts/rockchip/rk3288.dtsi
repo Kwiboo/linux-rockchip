@@ -1294,6 +1294,7 @@
 		clock-names = "aclk", "iface";
 		#iommu-cells = <0>;
 		power-domains = <&power RK3288_PD_VIDEO>;
+		status = "disabled";
 	};
 
 	hevc: hevc@ff9c0000 {
