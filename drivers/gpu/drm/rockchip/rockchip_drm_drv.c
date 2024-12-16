@@ -1585,7 +1585,7 @@ static int rockchip_drm_create_properties(struct drm_device *dev)
 	struct rockchip_drm_private *private = dev->dev_private;
 
 	prop = drm_property_create_range(dev, DRM_MODE_PROP_ATOMIC,
-					 "EOTF", 0, 5);
+					 "EOTF", 0, HDMI_EOTF_DOVI);
 	if (!prop)
 		return -ENOMEM;
 	private->eotf_prop = prop;
@@ -1628,6 +1628,12 @@ static int rockchip_drm_create_properties(struct drm_device *dev)
 					  DRM_MODE_PROP_ATOMIC | DRM_MODE_PROP_IMMUTABLE,
 					  "PORT_ID", DRM_MODE_OBJECT_CRTC);
 	private->port_id_prop = prop;
+
+	prop = drm_property_create_range(dev, DRM_MODE_PROP_ATOMIC,
+					 "DOVI_INPUT_TYPE", 0, DOVI_ENHANCE_LAYER);
+	if (!prop)
+		return -ENOMEM;
+	private->dovi_input_type_prop = prop;
 
 	private->aclk_prop = drm_property_create_range(dev, 0, "ACLK", 0, UINT_MAX);
 	private->bg_prop = drm_property_create_range(dev, 0, "BACKGROUND", 0, UINT_MAX);
