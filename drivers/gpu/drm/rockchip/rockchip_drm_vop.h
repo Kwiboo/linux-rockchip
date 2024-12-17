@@ -811,6 +811,7 @@ struct vop2_win_regs {
 	struct vop_reg global_alpha_val;
 	struct vop_reg color_key;
 	struct vop_reg color_key_en;
+	struct vop_reg background;
 	struct vop_reg dither_up;
 	struct vop_reg axi_id;
 	struct vop_reg axi_yrgb_id;

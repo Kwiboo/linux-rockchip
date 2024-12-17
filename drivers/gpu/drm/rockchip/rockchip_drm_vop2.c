@@ -359,6 +359,7 @@ struct vop2_plane_state {
 	int color_space;
 	int global_alpha;
 	int blend_mode;
+	uint32_t background;
 	uint64_t color_key;
 	unsigned long offset;
 	int pdaf_data_type;
@@ -5667,6 +5668,36 @@ static void vop2_plane_atomic_disable(struct drm_plane *plane, struct drm_plane_
 }
 
 /*
+ * The background value is 10 bit, convert from 8 bit to 10 bit here,
+ * and the bit[31] is bg_en control bit.
+ */
+static void vop2_plane_setup_background(struct drm_plane *plane)
+{
+	struct drm_plane_state *pstate = plane->state;
+	struct vop2_plane_state *vpstate = to_vop2_plane_state(pstate);
+	struct vop2_win *win = to_vop2_win(plane);
+	struct vop2 *vop2 = win->vop2;
+	uint32_t r, g, b, bg_val;
+
+	if (win->regs->background.mask == 0)
+		return;
+
+	if (vpstate->background == 0) {
+		VOP_WIN_SET(vop2, win, background, 0);
+
+		return;
+	}
+
+	r = (vpstate->background & 0xff0000) >> 16;
+	g = (vpstate->background & 0xff00) >> 8;
+	b = (vpstate->background & 0xff);
+
+	bg_val = BIT(31) | (r << 20) | (g << 10) | b;
+
+	VOP_WIN_SET(vop2, win, background, bg_val);
+}
+
+/*
  * The color key is 10 bit, so all format should
  * convert to 10 bit here.
  */
@@ -6048,6 +6079,7 @@ static void vop2_win_atomic_update(struct vop2_win *win, struct drm_rect *src, s
 		VOP_WIN_SET(vop2, win, yrgb_vir, stride);
 
 	vop2_setup_scale(vop2, win, actual_w, actual_h, dsp_w, dsp_h, pstate);
+	vop2_plane_setup_background(&win->base);
 	vop2_plane_setup_color_key(&win->base);
 	VOP_WIN_SET(vop2, win, act_info, act_info);
 	VOP_WIN_SET(vop2, win, dsp_info, dsp_info);
@@ -6348,6 +6380,11 @@ static int vop2_atomic_plane_set_property(struct drm_plane *plane,
 		return 0;
 	}
 
+	if (property == private->bg_prop) {
+		vpstate->background = val;
+		return 0;
+	}
+
 	if (property == win->color_key_prop) {
 		vpstate->color_key = val;
 		return 0;
@@ -6398,6 +6435,11 @@ static int vop2_atomic_plane_get_property(struct drm_plane *plane,
 				return 0;
 			}
 		}
+	}
+
+	if (property == private->bg_prop) {
+		*val = vpstate->background;
+		return 0;
 	}
 
 	if (property == win->color_key_prop) {
@@ -12099,6 +12141,8 @@ static int vop2_plane_init(struct vop2 *vop2, struct vop2_win *win, unsigned lon
 	drm_object_attach_property(&win->base.base, private->eotf_prop, 0);
 	drm_object_attach_property(&win->base.base, private->color_space_prop, 0);
 	drm_object_attach_property(&win->base.base, private->async_commit_prop, 0);
+	if (win->regs->background.mask && !win->parent)
+		drm_object_attach_property(&win->base.base, private->bg_prop, 0);
 
 	if (win->feature & (WIN_FEATURE_CLUSTER_SUB | WIN_FEATURE_CLUSTER_MAIN))
 		drm_object_attach_property(&win->base.base, private->share_id_prop, win->plane_id);
