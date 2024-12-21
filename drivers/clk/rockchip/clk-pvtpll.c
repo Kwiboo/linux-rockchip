@@ -30,6 +30,7 @@
 #define RV1103B_GCK_RING_LEN_SEL_MASK		0x1ff
 #define RV1103B_GCK_RING_SEL_OFFSET		10
 #define RV1103B_GCK_RING_SEL_MASK		0x07
+#define RV1103B_PVTPLL_MAX_LENGTH		0x1ff
 
 #define RK3506_GRF_CORE_PVTPLL_CON0_L		0x00
 #define RK3506_GRF_CORE_PVTPLL_CON0_H		0x04
@@ -56,6 +57,7 @@ struct rockchip_clock_pvtpll_info {
 	struct pvtpll_table *table;
 	unsigned int jm_table_size;
 	struct pvtpll_table *jm_table;
+	unsigned int pvtpll_adjust_factor;
 	int (*config)(struct rockchip_clock_pvtpll *pvtpll,
 		      struct pvtpll_table *table);
 	int (*pvtpll_volt_sel_adjust)(struct rockchip_clock_pvtpll *pvtpll,
@@ -105,13 +107,13 @@ struct otp_opp_info {
 
 static struct pvtpll_table rv1103b_core_pvtpll_table[] = {
 	/* rate_hz, ring_sel, length */
-	ROCKCHIP_PVTPLL(1608000000, 1, 6),
-	ROCKCHIP_PVTPLL(1512000000, 1, 6),
-	ROCKCHIP_PVTPLL(1416000000, 1, 6),
-	ROCKCHIP_PVTPLL(1296000000, 1, 6),
-	ROCKCHIP_PVTPLL(1200000000, 1, 14),
-	ROCKCHIP_PVTPLL(1008000000, 1, 32),
-	ROCKCHIP_PVTPLL(816000000, 1, 60),
+	ROCKCHIP_PVTPLL_VOLT_SEL(1608000000, 1, 6, 7),
+	ROCKCHIP_PVTPLL_VOLT_SEL(1512000000, 1, 6, 6),
+	ROCKCHIP_PVTPLL_VOLT_SEL(1416000000, 1, 6, 6),
+	ROCKCHIP_PVTPLL_VOLT_SEL(1296000000, 1, 6, 5),
+	ROCKCHIP_PVTPLL_VOLT_SEL(1200000000, 1, 6, 3),
+	ROCKCHIP_PVTPLL_VOLT_SEL(1008000000, 1, 26, 3),
+	ROCKCHIP_PVTPLL_VOLT_SEL(816000000, 1, 50, 3),
 };
 
 static struct pvtpll_table rv1103b_enc_pvtpll_table[] = {
@@ -126,10 +128,10 @@ static struct pvtpll_table rv1103b_isp_pvtpll_table[] = {
 
 static struct pvtpll_table rv1103b_npu_pvtpll_table[] = {
 	/* rate_hz, ring_se, length */
-	ROCKCHIP_PVTPLL(1000000000, 1, 12),
-	ROCKCHIP_PVTPLL(900000000, 1, 12),
-	ROCKCHIP_PVTPLL(800000000, 1, 16),
-	ROCKCHIP_PVTPLL(700000000, 1, 36),
+	ROCKCHIP_PVTPLL_VOLT_SEL(1000000000, 1, 12, 7),
+	ROCKCHIP_PVTPLL_VOLT_SEL(900000000, 1, 12, 6),
+	ROCKCHIP_PVTPLL_VOLT_SEL(800000000, 1, 12, 4),
+	ROCKCHIP_PVTPLL_VOLT_SEL(700000000, 1, 32, 4),
 };
 
 static struct pvtpll_table rk3506_core_pvtpll_table[] = {
@@ -312,12 +314,13 @@ static int clock_pvtpll_regitstor(struct device *dev,
 				   pvtpll->pvtpll_out);
 }
 
-static int rk3506_pvtpll_volt_sel_adjust(struct rockchip_clock_pvtpll *pvtpll,
+static int pvtpll_volt_sel_adjust_linear(struct rockchip_clock_pvtpll *pvtpll,
 					 u32 clock_id,
 					 u32 volt_sel)
 {
 	struct pvtpll_table *table = pvtpll->info->table;
 	unsigned int size = pvtpll->info->table_size;
+	unsigned int factor = pvtpll->info->pvtpll_adjust_factor;
 	uint32_t delta_len = 0;
 	int i;
 
@@ -325,10 +328,14 @@ static int rk3506_pvtpll_volt_sel_adjust(struct rockchip_clock_pvtpll *pvtpll,
 		if (!table[i].volt_sel_thr)
 			continue;
 		if (volt_sel >= table[i].volt_sel_thr) {
-			delta_len = volt_sel - table[i].volt_sel_thr + 1;
+			delta_len = (volt_sel - table[i].volt_sel_thr + 1) * factor;
 			table[i].length += delta_len;
 			if (table[i].length > RK3506_PVTPLL_MAX_LENGTH)
 				table[i].length = RK3506_PVTPLL_MAX_LENGTH;
+
+			/* update new pvtpll config for current rate */
+			if (table[i].rate == pvtpll->cur_rate)
+				pvtpll->info->config(pvtpll, table + i);
 		}
 	}
 
@@ -436,6 +443,8 @@ static const struct rockchip_clock_pvtpll_info rv1103b_core_pvtpll_data = {
 	.config = rv1103b_pvtpll_configs,
 	.table_size = ARRAY_SIZE(rv1103b_core_pvtpll_table),
 	.table = rv1103b_core_pvtpll_table,
+	.pvtpll_adjust_factor = 4,
+	.pvtpll_volt_sel_adjust = pvtpll_volt_sel_adjust_linear,
 };
 
 static const struct rockchip_clock_pvtpll_info rv1103b_enc_pvtpll_data = {
@@ -454,6 +463,8 @@ static const struct rockchip_clock_pvtpll_info rv1103b_npu_pvtpll_data = {
 	.config = rv1103b_pvtpll_configs,
 	.table_size = ARRAY_SIZE(rv1103b_npu_pvtpll_table),
 	.table = rv1103b_npu_pvtpll_table,
+	.pvtpll_adjust_factor = 6,
+	.pvtpll_volt_sel_adjust = pvtpll_volt_sel_adjust_linear,
 };
 
 static const struct rockchip_clock_pvtpll_info rk3506_core_pvtpll_data = {
@@ -462,7 +473,8 @@ static const struct rockchip_clock_pvtpll_info rk3506_core_pvtpll_data = {
 	.table = rk3506_core_pvtpll_table,
 	.jm_table_size = ARRAY_SIZE(rk3506j_core_pvtpll_table),
 	.jm_table = rk3506j_core_pvtpll_table,
-	.pvtpll_volt_sel_adjust = rk3506_pvtpll_volt_sel_adjust,
+	.pvtpll_adjust_factor = 1,
+	.pvtpll_volt_sel_adjust = pvtpll_volt_sel_adjust_linear,
 };
 
 static const struct of_device_id rockchip_clock_pvtpll_match[] = {
