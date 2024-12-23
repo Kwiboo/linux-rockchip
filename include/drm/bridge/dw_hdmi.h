@@ -80,6 +80,7 @@ struct platform_device;
  */
 
 #define SUPPORT_HDMI_ALLM	BIT(1)
+#define DOVI_VSIF_LEN		8
 
 enum {
 	DW_HDMI_RES_8,
@@ -140,6 +141,11 @@ struct dw_hdmi_link_config {
 	int hcactive;
 	u8 add_func;
 	u8 pps_payload[128];
+};
+
+struct dovi_vsif_data {
+	u8 header[3];
+	u8 pb[28];
 };
 
 struct dw_hdmi_phy_ops {
@@ -242,8 +248,9 @@ struct dw_hdmi_plat_data {
 	int (*get_yuv422_format)(struct drm_connector *connector,
 				 struct edid *edid);
 	int (*get_edid_dsc_info)(void *data, struct edid *edid);
-	int (*get_next_hdr_data)(void *data, struct edid *edid,
-				 struct drm_connector *connector);
+	int (*get_dovi_data)(void *data, struct edid *edid,
+			     struct drm_connector *connector);
+	void (*get_dovi_vsif)(void *data, u32 *buf);
 	struct dw_hdmi_link_config *(*get_link_cfg)(void *data);
 	void (*set_hdcp_status)(void *data, u8 status);
 	void (*set_hdcp2_enable)(void *data, bool enable);

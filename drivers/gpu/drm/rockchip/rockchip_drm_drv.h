@@ -78,6 +78,7 @@ struct iommu_domain;
 #define HDMI_EOTF_HDR10PLUS	0x10
 #define HDMI_EOTF_HDRVIVID	0x11
 #define HDMI_EOTF_DOVI		0x12
+#define DOVI_VSDB_LEN		26
 
 enum rockchip_drm_debug_category {
 	VOP_DEBUG_PLANE		= BIT(0),
@@ -631,8 +632,7 @@ int rockchip_drm_get_yuv422_format(struct drm_connector *connector,
 int rockchip_drm_parse_cea_ext(struct rockchip_drm_dsc_cap *dsc_cap,
 			       u8 *max_frl_rate_per_lane, u8 *max_lanes, u8 *add_func,
 			       const struct edid *edid);
-int rockchip_drm_parse_next_hdr(struct next_hdr_sink_data *sink_data,
-				const struct edid *edid);
+int rockchip_drm_parse_dovi(u8 *sink_data, const struct edid *edid);
 int rockchip_drm_parse_colorimetry_data_block(u8 *colorimetry, const struct edid *edid);
 long rockchip_drm_dclk_round_rate(u32 version, struct clk *dclk, unsigned long rate);
 int rockchip_drm_dclk_set_rate(u32 version, struct clk *dclk, unsigned long rate);

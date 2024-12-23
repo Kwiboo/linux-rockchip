@@ -576,9 +576,9 @@ cea_db_payload_len(const u8 *db)
 	     (i) < (end) && (i) + cea_db_payload_len(&(cea)[(i)]) < (end); \
 	     (i) += cea_db_payload_len(&(cea)[(i)]) + 1)
 
-#define HDMI_NEXT_HDR_VSDB_OUI 0xd04601
+#define HDMI_DOVI_VSDB_OUI 0xd04601
 
-static bool cea_db_is_hdmi_next_hdr_block(const u8 *db)
+static bool cea_db_is_hdmi_dovi_block(const u8 *db)
 {
 	unsigned int oui;
 
@@ -589,8 +589,7 @@ static bool cea_db_is_hdmi_next_hdr_block(const u8 *db)
 		return false;
 
 	oui = db[3] << 16 | db[2] << 8 | db[1];
-
-	return oui == HDMI_NEXT_HDR_VSDB_OUI;
+	return oui == HDMI_DOVI_VSDB_OUI;
 }
 
 static bool cea_db_is_hdmi_forum_vsdb(const u8 *db)
@@ -1005,150 +1004,16 @@ static void parse_hdmi_forum_scds(struct rockchip_drm_dsc_cap *dsc_cap,
 	}
 }
 
-enum {
-	VER_26_BYTE_V0,
-	VER_15_BYTE_V1,
-	VER_12_BYTE_V1,
-	VER_12_BYTE_V2,
-};
-
-static int check_next_hdr_version(const u8 *next_hdr_db)
-{
-	u16 ver;
-
-	ver = (next_hdr_db[5] & 0xf0) << 8 | next_hdr_db[0];
-
-	switch (ver) {
-	case 0x00f9:
-		return VER_26_BYTE_V0;
-	case 0x20ee:
-		return VER_15_BYTE_V1;
-	case 0x20eb:
-		return VER_12_BYTE_V1;
-	case 0x40eb:
-		return VER_12_BYTE_V2;
-	default:
-		return -ENOENT;
-	}
-}
-
-static void parse_ver_26_v0_data(struct ver_26_v0 *hdr, const u8 *data)
-{
-	hdr->yuv422_12bit = data[5] & BIT(0);
-	hdr->support_2160p_60 = (data[5] & BIT(1)) >> 1;
-	hdr->global_dimming = (data[5] & BIT(2)) >> 2;
-
-	hdr->dm_major_ver = (data[21] & 0xf0) >> 4;
-	hdr->dm_minor_ver = data[21] & 0xf;
-
-	hdr->t_min_pq = (data[19] << 4) | ((data[18] & 0xf0) >> 4);
-	hdr->t_max_pq = (data[20] << 4) | (data[18] & 0xf);
-
-	hdr->rx = (data[7] << 4) | ((data[6] & 0xf0) >> 4);
-	hdr->ry = (data[8] << 4) | (data[6] & 0xf);
-	hdr->gx = (data[10] << 4) | ((data[9] & 0xf0) >> 4);
-	hdr->gy = (data[11] << 4) | (data[9] & 0xf);
-	hdr->bx = (data[13] << 4) | ((data[12] & 0xf0) >> 4);
-	hdr->by = (data[14] << 4) | (data[12] & 0xf);
-	hdr->wx = (data[16] << 4) | ((data[15] & 0xf0) >> 4);
-	hdr->wy = (data[17] << 4) | (data[15] & 0xf);
-}
-
-static void parse_ver_15_v1_data(struct ver_15_v1 *hdr, const u8 *data)
-{
-	hdr->yuv422_12bit = data[5] & BIT(0);
-	hdr->support_2160p_60 = (data[5] & BIT(1)) >> 1;
-	hdr->global_dimming = data[6] & BIT(0);
-
-	hdr->dm_version = (data[5] & 0x1c) >> 2;
-
-	hdr->colorimetry = data[7] & BIT(0);
-
-	hdr->t_max_lum = (data[6] & 0xfe) >> 1;
-	hdr->t_min_lum = (data[7] & 0xfe) >> 1;
-
-	hdr->rx = data[9];
-	hdr->ry = data[10];
-	hdr->gx = data[11];
-	hdr->gy = data[12];
-	hdr->bx = data[13];
-	hdr->by = data[14];
-}
-
-static void parse_ver_12_v1_data(struct ver_12_v1 *hdr, const u8 *data)
-{
-	hdr->yuv422_12bit = data[5] & BIT(0);
-	hdr->support_2160p_60 = (data[5] & BIT(1)) >> 1;
-	hdr->global_dimming = data[6] & BIT(0);
-
-	hdr->dm_version = (data[5] & 0x1c) >> 2;
-
-	hdr->colorimetry = data[7] & BIT(0);
-
-	hdr->t_max_lum = (data[6] & 0xfe) >> 1;
-	hdr->t_min_lum = (data[7] & 0xfe) >> 1;
-
-	hdr->low_latency = data[8] & 0x3;
-
-	hdr->unique_rx = (data[11] & 0xf8) >> 3;
-	hdr->unique_ry = (data[11] & 0x7) << 2 | (data[10] & BIT(0)) << 1 |
-		(data[9] & BIT(0));
-	hdr->unique_gx = (data[9] & 0xfe) >> 1;
-	hdr->unique_gy = (data[10] & 0xfe) >> 1;
-	hdr->unique_bx = (data[8] & 0xe0) >> 5;
-	hdr->unique_by = (data[8] & 0x1c) >> 2;
-}
-
-static void parse_ver_12_v2_data(struct ver_12_v2 *hdr, const u8 *data)
-{
-	hdr->yuv422_12bit = data[5] & BIT(0);
-	hdr->backlt_ctrl = (data[5] & BIT(1)) >> 1;
-	hdr->global_dimming = (data[6] & BIT(2)) >> 2;
-
-	hdr->dm_version = (data[5] & 0x1c) >> 2;
-	hdr->backlt_min_luma = data[6] & 0x3;
-	hdr->interface = data[7] & 0x3;
-	hdr->yuv444_10b_12b = (data[8] & BIT(0)) << 1 | (data[9] & BIT(0));
-
-	hdr->t_min_pq_v2 = (data[6] & 0xf8) >> 3;
-	hdr->t_max_pq_v2 = (data[7] & 0xf8) >> 3;
-
-	hdr->unique_rx = (data[10] & 0xf8) >> 3;
-	hdr->unique_ry = (data[11] & 0xf8) >> 3;
-	hdr->unique_gx = (data[8] & 0xfe) >> 1;
-	hdr->unique_gy = (data[9] & 0xfe) >> 1;
-	hdr->unique_bx = data[10] & 0x7;
-	hdr->unique_by = data[11] & 0x7;
-}
-
 static
-void parse_next_hdr_block(struct next_hdr_sink_data *sink_data,
-			  const u8 *next_hdr_db)
+int parse_dovi_block(u8 *sink_data, const u8 *dovi_db)
 {
-	int version;
+	u8 length = (dovi_db[0] & 0x1f) + 1;
 
-	version = check_next_hdr_version(next_hdr_db);
-	if (version < 0)
-		return;
+	if (length > DOVI_VSDB_LEN)
+		return -EINVAL;
 
-	sink_data->version = version;
-
-	switch (version) {
-	case VER_26_BYTE_V0:
-		parse_ver_26_v0_data(&sink_data->ver_26_v0, next_hdr_db);
-		break;
-	case VER_15_BYTE_V1:
-		parse_ver_15_v1_data(&sink_data->ver_15_v1, next_hdr_db);
-		break;
-	case VER_12_BYTE_V1:
-		parse_ver_12_v1_data(&sink_data->ver_12_v1, next_hdr_db);
-		break;
-	case VER_12_BYTE_V2:
-		parse_ver_12_v2_data(&sink_data->ver_12_v2, next_hdr_db);
-		break;
-	default:
-		break;
-	}
+	memcpy(sink_data, dovi_db, length);
+	return 0;
 }
 
 int rockchip_drm_parse_cea_ext(struct rockchip_drm_dsc_cap *dsc_cap,
@@ -1183,16 +1048,15 @@ int rockchip_drm_parse_cea_ext(struct rockchip_drm_dsc_cap *dsc_cap,
 }
 EXPORT_SYMBOL(rockchip_drm_parse_cea_ext);
 
-int rockchip_drm_parse_next_hdr(struct next_hdr_sink_data *sink_data,
-				const struct edid *edid)
+int rockchip_drm_parse_dovi(u8 *sink_data, const struct edid *edid)
 {
 	const u8 *edid_ext;
-	int i, start, end;
+	int i, start, end, ret;
 
 	if (!sink_data || !edid)
 		return -EINVAL;
 
-	memset(sink_data, 0, sizeof(struct next_hdr_sink_data));
+	memset(sink_data, 0, DOVI_VSDB_LEN);
 
 	edid_ext = find_cea_extension(edid);
 	if (!edid_ext)
@@ -1204,13 +1068,16 @@ int rockchip_drm_parse_next_hdr(struct next_hdr_sink_data *sink_data,
 	for_each_cea_db(edid_ext, i, start, end) {
 		const u8 *db = &edid_ext[i];
 
-		if (cea_db_is_hdmi_next_hdr_block(db))
-			parse_next_hdr_block(sink_data, db);
+		if (cea_db_is_hdmi_dovi_block(db)) {
+			ret = parse_dovi_block(sink_data, db);
+			if (ret)
+				return ret;
+		}
 	}
 
 	return 0;
 }
-EXPORT_SYMBOL(rockchip_drm_parse_next_hdr);
+EXPORT_SYMBOL(rockchip_drm_parse_dovi);
 
 #define COLORIMETRY_DATA_BLOCK		0x5
 #define USE_EXTENDED_TAG		0x07

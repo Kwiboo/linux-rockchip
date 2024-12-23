@@ -274,6 +274,7 @@ struct dw_hdmi_qp {
 
 	u8 edid[HDMI_EDID_LEN];
 	u8 vendor_info[VENDOR_INFO_LEN];
+	u32 dovi_vsif[DOVI_VSIF_LEN];
 
 	struct {
 		const struct dw_hdmi_qp_phy_ops *ops;
@@ -1568,10 +1569,18 @@ static void hdmi_config_vendor_specific_infoframe(struct dw_hdmi_qp *hdmi,
 	struct dw_hdmi_link_config *link_cfg = NULL;
 	void *data = hdmi->plat_data->phy_data;
 
+	hdmi_modb(hdmi, 0, PKTSCHED_VSI_TX_EN, PKTSCHED_PKT_EN);
+
+	if (hdmi->dovi_vsif[0]) {
+		for (i = 0; i < 8; i++)
+			hdmi_writel(hdmi, hdmi->dovi_vsif[i], PKT_VSI_CONTENTS0 + i * 4);
+
+		goto out;
+	}
+
 	if (hdmi->plat_data->get_link_cfg)
 		link_cfg = hdmi->plat_data->get_link_cfg(data);
 
-	hdmi_modb(hdmi, 0, PKTSCHED_VSI_TX_EN, PKTSCHED_PKT_EN);
 	for (i = 0; i <= 7; i++)
 		hdmi_writel(hdmi, 0, PKT_VSI_CONTENTS0 + i * 4);
 
@@ -1637,6 +1646,7 @@ static void hdmi_config_vendor_specific_infoframe(struct dw_hdmi_qp *hdmi,
 
 	hdmi_writel(hdmi, 0, PKT_VSI_CONTENTS7);
 
+out:
 	hdmi_modb(hdmi, 0, PKTSCHED_VSI_FIELDRATE, PKTSCHED_PKT_CONFIG1);
 	hdmi_modb(hdmi, PKTSCHED_VSI_TX_EN, PKTSCHED_VSI_TX_EN,
 		  PKTSCHED_PKT_EN);
@@ -2740,6 +2750,8 @@ static int dw_hdmi_connector_get_modes(struct drm_connector *connector)
 		if (hdmi->plat_data->get_edid_dsc_info)
 			hdmi->plat_data->get_edid_dsc_info(data, edid);
 		memcpy(hdmi->vendor_info, &raw_edid[8], VENDOR_INFO_LEN);
+		if (hdmi->plat_data->get_dovi_data)
+			hdmi->plat_data->get_dovi_data(data, edid, connector);
 		ret = drm_add_edid_modes(connector, edid);
 		if (hdmi->plat_data->get_colorimetry)
 			hdmi->plat_data->get_colorimetry(data, edid);
@@ -3075,6 +3087,27 @@ static void set_dw_hdmi_hdcp_enable(struct dw_hdmi_qp *hdmi,
 	}
 }
 
+static bool dovi_vsif_equal(struct dw_hdmi_qp *hdmi)
+{
+	void *data = hdmi->plat_data->phy_data;
+	int ret;
+	u32 vsif[DOVI_VSIF_LEN] = {0};
+
+	if (!hdmi->plat_data->get_dovi_vsif)
+		return true;
+
+	hdmi->plat_data->get_dovi_vsif(data, vsif);
+
+	ret = memcmp(hdmi->dovi_vsif, vsif, DOVI_VSIF_LEN * 4);
+
+	if (ret) {
+		memcpy(hdmi->dovi_vsif, vsif, DOVI_VSIF_LEN * 4);
+		return false;
+	} else {
+		return true;
+	}
+}
+
 static int dw_hdmi_connector_atomic_check(struct drm_connector *connector,
 					  struct drm_atomic_state *state)
 {
@@ -3240,8 +3273,12 @@ static void dw_hdmi_connector_atomic_commit(struct drm_connector *connector,
 		hdmi->update = false;
 	}
 
-	if (!hdmi->disabled)
+	if (!hdmi->disabled) {
 		set_dw_hdmi_hdcp_enable(hdmi, connector, hdmi->state);
+		if (!dovi_vsif_equal(hdmi))
+			hdmi_config_vendor_specific_infoframe(hdmi, hdmi->curr_conn,
+							      &hdmi->previous_mode);
+	}
 }
 
 void dw_hdmi_qp_set_quant_range(struct dw_hdmi_qp *hdmi)
@@ -3485,6 +3522,7 @@ static void dw_hdmi_qp_bridge_atomic_disable(struct drm_bridge *bridge,
 	}
 
 	hdmi->curr_conn = NULL;
+	hdmi->update = false;
 	mutex_unlock(&hdmi->mutex);
 
 	cancel_work_sync(&hdmi->flt_work);
