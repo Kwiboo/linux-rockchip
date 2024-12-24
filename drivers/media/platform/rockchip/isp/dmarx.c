@@ -487,18 +487,10 @@ static void dmarx_buf_to_vicap(struct rkisp_stream *stream, struct rkisp_buffer 
 				dev->params_vdev.rdbk_times = 2;
 			}
 		}
-		dev_info(dev->dev,
-			 "switch online seq:%d mode:0x%x\n", rx_buf->sequence, dev->rd_mode);
-		if (dev->hw_dev->is_single || atomic_read(&dev->hw_dev->refcnt) == 1) {
-			/* fast offline switch to online for multi sensor or unite mode
-			 * one isp running first and switch to online, then other isp running
-			 */
-			if (!dev->hw_dev->is_single) {
-				dev->hw_dev->is_idle = false;
-				rkisp_online_update_reg(dev, false, false);
-			}
+		dev_info(dev->dev, "switch online seq:%d mode:0x%x refcnt:%d\n",
+			 rx_buf->sequence, dev->rd_mode, atomic_read(&dev->hw_dev->refcnt));
+		if (dev->hw_dev->is_single)
 			v4l2_subdev_call(sd, core, ioctl, RKISP_VICAP_CMD_HW_LINK, &on);
-		}
 	}
 	rx_buf->runtime_us = dev->isp_sdev.dbg.interval / 1000;
 	v4l2_subdev_call(sd, video, s_rx_buffer, rx_buf, NULL);

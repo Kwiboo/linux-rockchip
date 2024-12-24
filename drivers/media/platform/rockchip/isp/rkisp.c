@@ -1043,7 +1043,14 @@ static void rkisp_rdbk_trigger_handle(struct rkisp_device *dev, u32 cmd)
 		hw->is_idle = true;
 		hw->pre_dev_id = dev->dev_id;
 
-		isp = hw->isp[!dev->dev_id];
+		/* fast offline switch to online for multi sensor or unite mode
+		 * one isp running first and switch to online, then other isp running
+		 */
+		if (!IS_HDR_RDBK(dev->rd_mode) &&
+		    (dev->unite_div > ISP_UNITE_DIV1 || atomic_read(&hw->refcnt) == 1))
+			isp = dev;
+		else
+			isp = hw->isp[!dev->dev_id];
 		if (isp &&
 		    isp->isp_state & ISP_START &&
 		    !IS_HDR_RDBK(isp->rd_mode)) {
@@ -1330,11 +1337,7 @@ void rkisp_check_idle(struct rkisp_device *dev, u32 irq)
 		/* FALLTHROUGH */
 	}
 	rkisp2_rawrd_isr(val, dev);
-	/* fast maybe switch online after rkisp2_rawrd_isr */
-	if (!IS_HDR_RDBK(dev->rd_mode)) {
-		dev->irq_ends = 0;
-		return;
-	}
+
 end:
 	dev->irq_ends = 0;
 	if (dev->is_wait_aiq &&
