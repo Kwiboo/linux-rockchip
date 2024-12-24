@@ -267,11 +267,11 @@ static int es8156_set_bias_level(struct snd_soc_component *component,
 			if (!IS_ERR(priv->mclk)) {
 				ret = clk_prepare_enable(priv->mclk);
 				snd_soc_component_write(component, ES8156_SCLK_MODE_REG02, 0x04);
-				snd_soc_component_write(component, ES8156_ANALOG_SYS1_REG20, 0x2A);
-				snd_soc_component_write(component, ES8156_ANALOG_SYS2_REG21, 0x3C);
-				snd_soc_component_write(component, ES8156_ANALOG_SYS3_REG22, 0x08);
+				snd_soc_component_write(component, ES8156_ANALOG_SYS1_REG20, 0x3e);
+				snd_soc_component_write(component, ES8156_ANALOG_SYS2_REG21, 0x3d);
+				snd_soc_component_write(component, ES8156_ANALOG_SYS3_REG22, 0x02);
 				snd_soc_component_write(component, ES8156_ANALOG_LP_REG24, 0x07);
-				snd_soc_component_write(component, ES8156_ANALOG_SYS4_REG23, 0x00);
+				snd_soc_component_write(component, ES8156_ANALOG_SYS4_REG23, 0x38);
 				snd_soc_component_write(component, ES8156_TIME_CONTROL1_REG0A, 0x01);
 				snd_soc_component_write(component, ES8156_TIME_CONTROL2_REG0B, 0x01);
 				snd_soc_component_write(component, ES8156_VOLUME_CONTROL_REG14, 0xBF);
@@ -280,7 +280,7 @@ static int es8156_set_bias_level(struct snd_soc_component *component,
 				snd_soc_component_write(component, ES8156_MISC_CONTROL3_REG18, 0x00);
 				snd_soc_component_write(component, ES8156_CLOCK_ON_OFF_REG08, 0x3F);
 				snd_soc_component_write(component, ES8156_RESET_REG00, 0x02);
-				snd_soc_component_write(component, ES8156_RESET_REG00, 0x03);
+				snd_soc_component_write(component, ES8156_RESET_REG00, 0x01);
 				snd_soc_component_write(component, ES8156_ANALOG_SYS5_REG25, 0x20);
 				if (ret) {
 					dev_err(component->dev,
@@ -293,13 +293,12 @@ static int es8156_set_bias_level(struct snd_soc_component *component,
 		break;
 
 	case SND_SOC_BIAS_OFF:
-		snd_soc_component_write(component,  ES8156_VOLUME_CONTROL_REG14, 0xBF);
+		snd_soc_component_write(component,  ES8156_VOLUME_CONTROL_REG14, 0x00);
 		snd_soc_component_write(component,  ES8156_EQ_CONTROL1_REG19, 0x02);
 		snd_soc_component_write(component,  ES8156_ANALOG_SYS2_REG21, 0x1F);
 		snd_soc_component_write(component,  ES8156_ANALOG_SYS3_REG22, 0x02);
 		snd_soc_component_write(component,  ES8156_ANALOG_SYS5_REG25, 0x21);
-		snd_soc_component_write(component,  ES8156_ANALOG_SYS5_REG25, 0x01);
-		snd_soc_component_write(component,  ES8156_ANALOG_SYS5_REG25, 0x87);
+
 		snd_soc_component_write(component,  ES8156_MISC_CONTROL3_REG18, 0x01);
 		snd_soc_component_write(component,  ES8156_MISC_CONTROL2_REG09, 0x02);
 		snd_soc_component_write(component,  ES8156_MISC_CONTROL2_REG09, 0x01);
@@ -348,11 +347,11 @@ static int es8156_init_regs(struct snd_soc_component *component)
 	 *set clock and analog power
 	 */
 	snd_soc_component_write(component, ES8156_SCLK_MODE_REG02, 0x04);
-	snd_soc_component_write(component, ES8156_ANALOG_SYS1_REG20, 0x2A);
-	snd_soc_component_write(component, ES8156_ANALOG_SYS2_REG21, 0x3C);
-	snd_soc_component_write(component, ES8156_ANALOG_SYS3_REG22, 0x08);
+	snd_soc_component_write(component, ES8156_ANALOG_SYS1_REG20, 0x3e);
+	snd_soc_component_write(component, ES8156_ANALOG_SYS2_REG21, 0x3d);
+	snd_soc_component_write(component, ES8156_ANALOG_SYS3_REG22, 0x02);
 	snd_soc_component_write(component, ES8156_ANALOG_LP_REG24, 0x07);
-	snd_soc_component_write(component, ES8156_ANALOG_SYS4_REG23, 0x00);
+	snd_soc_component_write(component, ES8156_ANALOG_SYS4_REG23, 0x38);
 	/*
 	 *set powerup time
 	 */
@@ -370,7 +369,7 @@ static int es8156_init_regs(struct snd_soc_component *component)
 	snd_soc_component_write(component, ES8156_MISC_CONTROL3_REG18, 0x00);
 	snd_soc_component_write(component, ES8156_CLOCK_ON_OFF_REG08, 0x3F);
 	snd_soc_component_write(component, ES8156_RESET_REG00, 0x02);
-	snd_soc_component_write(component, ES8156_RESET_REG00, 0x03);
+	snd_soc_component_write(component, ES8156_RESET_REG00, 0x01);
 	snd_soc_component_write(component, ES8156_ANALOG_SYS5_REG25, 0x20);
 
 	return 0;
@@ -397,9 +396,11 @@ static int es8156_probe(struct snd_soc_component *component)
 	if (PTR_ERR(es8156->mclk) == -EPROBE_DEFER)
 		return -EPROBE_DEFER;
 	printk("%s start 11", __func__);
+	es8156_reset(component);
+	msleep(20);
 	ret = clk_prepare_enable(es8156->mclk);
-		es8156_reset(component);
-		es8156_init_regs(component);
+	es8156_init_regs(component);
+
 	return ret;
 }
 
