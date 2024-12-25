@@ -406,7 +406,9 @@ int rockchip_ecc_verify(int group_id, uint8_t *hash, uint32_t hash_len,
 
 	ret = rockchip_ecc_request_trigger();
 exit:
-	if (ret || rk_word_cmp_zero(ecc_st->v, RK_ECP_MAX_WORDS)) {
+	if (ret ||
+	    rk_word_cmp_zero(ecc_st->v, RK_ECP_MAX_WORDS) ||
+	    rk_word_cmp_zero(ecc_st->r_, RK_ECP_MAX_WORDS) == 0) {
 		ret = -EKEYREJECTED;
 		dump_ecc_sram();
 	}
