@@ -237,11 +237,12 @@ static void rockchip_rgb_encoder_enable(struct drm_encoder *encoder)
 	}
 }
 
-static void rockchip_rgb_encoder_disable(struct drm_encoder *encoder)
+static void rockchip_rgb_encoder_atomic_disable(struct drm_encoder *encoder,
+						struct drm_atomic_state *state)
 {
 	struct rockchip_rgb *rgb = encoder_to_rgb(encoder);
-	struct drm_crtc *crtc = encoder->crtc;
-	struct rockchip_crtc_state *s = to_rockchip_crtc_state(crtc->state);
+	struct drm_crtc *old_crtc, *new_crtc;
+	struct rockchip_crtc_state *s;
 
 	if (rgb->panel) {
 		drm_panel_disable(rgb->panel);
@@ -258,8 +259,14 @@ static void rockchip_rgb_encoder_disable(struct drm_encoder *encoder)
 
 	pinctrl_pm_select_sleep_state(rgb->dev);
 
-	if (crtc->state->active_changed)
+	old_crtc = rockchip_drm_encoder_get_old_crtc(encoder, state);
+	new_crtc = rockchip_drm_encoder_get_new_crtc(encoder, state);
+
+	if (old_crtc && old_crtc != new_crtc) {
+		s = to_rockchip_crtc_state(old_crtc->state);
+
 		s->output_if &= ~(VOP_OUTPUT_IF_RGB | VOP_OUTPUT_IF_BT656 | VOP_OUTPUT_IF_BT1120);
+	}
 }
 
 static int
@@ -407,7 +414,7 @@ rockchip_rgb_encoder_mode_valid(struct drm_encoder *encoder,
 static const
 struct drm_encoder_helper_funcs rockchip_rgb_encoder_helper_funcs = {
 	.enable = rockchip_rgb_encoder_enable,
-	.disable = rockchip_rgb_encoder_disable,
+	.atomic_disable = rockchip_rgb_encoder_atomic_disable,
 	.atomic_check = rockchip_rgb_encoder_atomic_check,
 	.mode_valid = rockchip_rgb_encoder_mode_valid,
 };
