@@ -379,30 +379,33 @@ static void rockchip_dp_drm_encoder_disable(struct drm_encoder *encoder,
 					    struct drm_atomic_state *state)
 {
 	struct rockchip_dp_device *dp = to_dp(encoder);
-	struct drm_crtc *crtc;
-	struct drm_crtc *old_crtc = encoder->crtc;
+	struct drm_crtc *old_crtc, *new_crtc;
 	struct drm_crtc_state *new_crtc_state = NULL;
-	struct rockchip_crtc_state *s = to_rockchip_crtc_state(old_crtc->state);
+	struct rockchip_crtc_state *s;
 	int ret;
 
-	if (old_crtc->state->active_changed) {
+	old_crtc = rockchip_drm_encoder_get_old_crtc(encoder, state);
+	new_crtc = rockchip_drm_encoder_get_new_crtc(encoder, state);
+
+	if (old_crtc && old_crtc != new_crtc) {
+		s = to_rockchip_crtc_state(old_crtc->state);
+
 		if (dp->plat_data.split_mode)
 			s->output_if &= ~(VOP_OUTPUT_IF_eDP1 | VOP_OUTPUT_IF_eDP0);
 		else
 			s->output_if &= ~(dp->id ? VOP_OUTPUT_IF_eDP1 : VOP_OUTPUT_IF_eDP0);
 	}
 
-	crtc = rockchip_drm_encoder_get_new_crtc(encoder, state);
 	/* No crtc means we're doing a full shutdown */
-	if (!crtc)
+	if (!new_crtc)
 		return;
 
-	new_crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
+	new_crtc_state = drm_atomic_get_new_crtc_state(state, new_crtc);
 	/* If we're not entering self-refresh, no need to wait for vact */
 	if (!new_crtc_state || !new_crtc_state->self_refresh_active)
 		return;
 
-	ret = rockchip_drm_wait_vact_end(crtc, PSR_WAIT_LINE_FLAG_TIMEOUT_MS);
+	ret = rockchip_drm_wait_vact_end(new_crtc, PSR_WAIT_LINE_FLAG_TIMEOUT_MS);
 	if (ret)
 		DRM_DEV_ERROR(dp->dev, "line flag irq timed out\n");
 }
