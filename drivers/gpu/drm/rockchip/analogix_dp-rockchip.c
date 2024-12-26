@@ -347,24 +347,6 @@ static void rockchip_dp_drm_encoder_mode_set(struct drm_encoder *encoder,
 	/* do nothing */
 }
 
-static
-struct drm_crtc *rockchip_dp_drm_get_new_crtc(struct drm_encoder *encoder,
-					      struct drm_atomic_state *state)
-{
-	struct drm_connector *connector;
-	struct drm_connector_state *conn_state;
-
-	connector = drm_atomic_get_new_connector_for_encoder(state, encoder);
-	if (!connector)
-		return NULL;
-
-	conn_state = drm_atomic_get_new_connector_state(state, connector);
-	if (!conn_state)
-		return NULL;
-
-	return conn_state->crtc;
-}
-
 static void rockchip_dp_drm_encoder_enable(struct drm_encoder *encoder,
 					   struct drm_atomic_state *state)
 {
@@ -373,7 +355,7 @@ static void rockchip_dp_drm_encoder_enable(struct drm_encoder *encoder,
 	struct drm_crtc_state *old_crtc_state;
 	int ret;
 
-	crtc = rockchip_dp_drm_get_new_crtc(encoder, state);
+	crtc = rockchip_drm_encoder_get_new_crtc(encoder, state);
 	if (!crtc)
 		return;
 
@@ -410,7 +392,7 @@ static void rockchip_dp_drm_encoder_disable(struct drm_encoder *encoder,
 			s->output_if &= ~(dp->id ? VOP_OUTPUT_IF_eDP1 : VOP_OUTPUT_IF_eDP0);
 	}
 
-	crtc = rockchip_dp_drm_get_new_crtc(encoder, state);
+	crtc = rockchip_drm_encoder_get_new_crtc(encoder, state);
 	/* No crtc means we're doing a full shutdown */
 	if (!crtc)
 		return;
