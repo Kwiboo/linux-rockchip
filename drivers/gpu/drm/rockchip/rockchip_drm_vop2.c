@@ -9028,8 +9028,14 @@ static int vop2_zpos_cmp(const void *a, const void *b)
 		return pa->plane->base.id - pb->plane->base.id;
 }
 
-static bool vop_hdr_ext_data_equal(struct drm_crtc_state *old_state,
-				   struct drm_crtc_state *new_state)
+/*
+ * Check hdr_ext_data switch from valid to NULL or
+ * NULL to valid.
+ * This is used to check a switch from dynamic HDR2SDR
+ * or SDR2HDR output mode switch.
+ */
+static bool vop_hdr_ext_data_switch(struct drm_crtc_state *old_state,
+				    struct drm_crtc_state *new_state)
 {
 	struct rockchip_crtc_state *new_vcstate = to_rockchip_crtc_state(new_state);
 	struct rockchip_crtc_state *old_vcstate = to_rockchip_crtc_state(old_state);
@@ -9054,7 +9060,7 @@ static int vop2_crtc_atomic_check(struct drm_crtc *crtc,
 	struct rockchip_crtc_state *new_vcstate = to_rockchip_crtc_state(crtc_state);
 	struct drm_display_mode *adjusted_mode = &crtc->state->adjusted_mode;
 	struct drm_display_mode *new_adjusted_mode = &crtc_state->adjusted_mode;
-	bool hdr_ext_data_change;
+	bool hdr_mode_change;
 
 	if (vop2_has_feature(vop2, VOP_FEATURE_SPLICE)) {
 		if (adjusted_mode->hdisplay > VOP2_MAX_VP_OUTPUT_WIDTH) {
@@ -9077,9 +9083,9 @@ static int vop2_crtc_atomic_check(struct drm_crtc *crtc,
 			vp->refresh_rate_change = false;
 	}
 
-	hdr_ext_data_change = !vop_hdr_ext_data_equal(crtc->state, crtc_state) |
-					crtc_state->active_changed;
-	if (hdr_ext_data_change)
+	hdr_mode_change = !vop_hdr_ext_data_switch(crtc->state, crtc_state) |
+			  crtc_state->active_changed;
+	if (hdr_mode_change)
 		crtc_state->mode_changed = true;
 
 	return 0;
