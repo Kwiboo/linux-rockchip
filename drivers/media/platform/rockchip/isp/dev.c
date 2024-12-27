@@ -290,7 +290,7 @@ static int rkisp_pipeline_open(struct rkisp_pipeline *p,
 {
 	struct rkisp_device *dev = container_of(p, struct rkisp_device, pipe);
 	struct rkisp_hw_dev *hw = dev->hw_dev;
-	int ret;
+	int i, ret;
 
 	if (WARN_ON(!p || !me))
 		return -EINVAL;
@@ -306,8 +306,22 @@ static int rkisp_pipeline_open(struct rkisp_pipeline *p,
 			rkisp_vicap_buf[dev->dev_id] = RKISP_VICAP_BUF_CNT_MAX;
 		dev->vicap_buf_cnt = rkisp_vicap_buf[dev->dev_id];
 		dev->is_m_online = rkisp_m_online[dev->dev_id];
-		if (hw->isp_ver != ISP_V33 || hw->is_single)
+		if (hw->isp_ver != ISP_V33 || hw->is_single) {
 			dev->is_m_online = false;
+			rkisp_m_online[dev->dev_id] = false;
+		}
+		if (dev->is_m_online && hw->dev_link_num > 1) {
+			ret = 1;
+			for (i = 0; i < hw->dev_link_num; i++) {
+				if (!rkisp_m_online[i]) {
+					ret = 0;
+					break;
+				}
+			}
+			if (dev->active_sensor)
+				v4l2_subdev_call(dev->active_sensor->sd, core,
+						 ioctl, RKISP_VICAP_CMD_MULTI_ONLINE, &ret);
+		}
 		if (hw->isp_ver == ISP_V33) {
 			if (dev->unite_div != ISP_UNITE_DIV1)
 				rkisp_hdr_wrap_line[dev->dev_id] = 0;
