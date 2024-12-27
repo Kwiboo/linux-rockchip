@@ -656,12 +656,17 @@ static void csi2_dphy_config_dual_mode(struct csi2_dphy *dphy,
 			write_grf_reg(hw, GRF_DPHY_CSI2PHY_CLKLANE_EN, 0x1);
 			if (hw->drv_data->chip_id < CHIP_ID_RK3588) {
 				write_grf_reg(hw, GRF_DPHY_CSI2PHY_LANE_SEL, val);
-				if (is_cif)
+				if (is_cif) {
 					write_grf_reg(hw, GRF_DPHY_CIF_CSI2PHY_SEL,
 						      GRF_CSI2PHY_SEL_SPLIT_0_1);
-				else
+					write_grf_reg(hw, GRF_DPHY_ISP_CSI2PHY_SEL,
+						      GRF_CSI2PHY_SEL_SPLIT_2_3);
+				} else {
 					write_grf_reg(hw, GRF_DPHY_ISP_CSI2PHY_SEL,
 						      GRF_CSI2PHY_SEL_SPLIT_0_1);
+					write_grf_reg(hw, GRF_DPHY_CIF_CSI2PHY_SEL,
+						      GRF_CSI2PHY_SEL_SPLIT_2_3);
+				}
 			} else if (hw->drv_data->chip_id == CHIP_ID_RK3588) {
 				write_sys_grf_reg(hw, GRF_DPHY_CSIHOST2_SEL, 0x0);
 				write_sys_grf_reg(hw, GRF_DPHY_CSI2PHY_LANE_SEL, val);
@@ -682,12 +687,17 @@ static void csi2_dphy_config_dual_mode(struct csi2_dphy *dphy,
 			write_grf_reg(hw, GRF_DPHY_CSI2PHY_CLKLANE1_EN, 0x1);
 			if (hw->drv_data->chip_id < CHIP_ID_RK3588) {
 				write_grf_reg(hw, GRF_DPHY_CSI2PHY_LANE_SEL, val);
-				if (is_cif)
+				if (is_cif) {
 					write_grf_reg(hw, GRF_DPHY_CIF_CSI2PHY_SEL,
-						GRF_CSI2PHY_SEL_SPLIT_2_3);
-				else
+						      GRF_CSI2PHY_SEL_SPLIT_2_3);
 					write_grf_reg(hw, GRF_DPHY_ISP_CSI2PHY_SEL,
-						GRF_CSI2PHY_SEL_SPLIT_2_3);
+						      GRF_CSI2PHY_SEL_SPLIT_0_1);
+				} else {
+					write_grf_reg(hw, GRF_DPHY_ISP_CSI2PHY_SEL,
+						      GRF_CSI2PHY_SEL_SPLIT_2_3);
+					write_grf_reg(hw, GRF_DPHY_CIF_CSI2PHY_SEL,
+						      GRF_CSI2PHY_SEL_SPLIT_0_1);
+				}
 			} else if (hw->drv_data->chip_id == CHIP_ID_RK3588) {
 				write_sys_grf_reg(hw, GRF_DPHY_CSIHOST3_SEL, 0x1);
 				write_sys_grf_reg(hw, GRF_DPHY_CSI2PHY_LANE_SEL, val);
