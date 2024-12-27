@@ -10614,7 +10614,7 @@ static void vop2_crtc_atomic_begin(struct drm_crtc *crtc, struct drm_crtc_state 
 		 */
 		if (vop2->version == VOP_VERSION_RK3588 &&
 		    vop2_is_dovi_mode(vp) && vp->nr_layers > 1) {
-		    	const struct vop2_data *vop2_data = vop2->data;
+			const struct vop2_data *vop2_data = vop2->data;
 			struct vop2_zpos *vop2_zpos_tmp;
 			int i = 0;
 
