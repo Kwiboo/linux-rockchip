@@ -419,9 +419,33 @@ static void rockchip_lvds_encoder_enable(struct drm_encoder *encoder)
 		drm_panel_enable(lvds->panel);
 }
 
-static void rockchip_lvds_encoder_disable(struct drm_encoder *encoder)
+static void rockchip_lvds_encoder_atomic_disable(struct drm_encoder *encoder,
+						 struct drm_atomic_state *state)
 {
 	struct rockchip_lvds *lvds = encoder_to_lvds(encoder);
+	struct drm_crtc *old_crtc, *new_crtc;
+	struct rockchip_crtc_state *s;
+
+	old_crtc = rockchip_drm_encoder_get_old_crtc(encoder, state);
+	new_crtc = rockchip_drm_encoder_get_new_crtc(encoder, state);
+
+	if (old_crtc && old_crtc != new_crtc) {
+		s = to_rockchip_crtc_state(old_crtc->state);
+		switch (lvds->pixel_order) {
+		case ROCKCHIP_LVDS_DUAL_LINK_ODD_EVEN_PIXELS:
+		case ROCKCHIP_LVDS_DUAL_LINK_EVEN_ODD_PIXELS:
+		case ROCKCHIP_LVDS_DUAL_LINK_LEFT_RIGHT_PIXELS:
+		case ROCKCHIP_LVDS_DUAL_LINK_RIGHT_LEFT_PIXELS:
+			s->output_if &= ~(VOP_OUTPUT_IF_LVDS1 | VOP_OUTPUT_IF_LVDS0);
+			break;
+		default:
+			if (lvds->id)
+				s->output_if &= ~VOP_OUTPUT_IF_LVDS1;
+			else
+				s->output_if &= ~VOP_OUTPUT_IF_LVDS0;
+			break;
+		}
+	}
 
 	if (lvds->panel)
 		drm_panel_disable(lvds->panel);
@@ -459,7 +483,7 @@ static int rockchip_lvds_encoder_loader_protect(struct drm_encoder *encoder,
 static const
 struct drm_encoder_helper_funcs rockchip_lvds_encoder_helper_funcs = {
 	.enable = rockchip_lvds_encoder_enable,
-	.disable = rockchip_lvds_encoder_disable,
+	.atomic_disable = rockchip_lvds_encoder_atomic_disable,
 	.atomic_check = rockchip_lvds_encoder_atomic_check,
 	.atomic_mode_set = rockchip_lvds_encoder_atomic_mode_set,
 };
