@@ -7,6 +7,7 @@
  * V0.0X01.0X01 add first implementation.
  * V0.0X01.0X02 add support wake-up/sleep (aov mode).
  * V0.0X01.0X03 add support thunder boot.
+ * V0.0X01.0X04 add support 40fps setting for 4lane.
  */
 
 //#define DEBUG
@@ -17,6 +18,7 @@
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/module.h>
+#include <linux/of_graph.h>
 #include <linux/pm_runtime.h>
 #include <linux/regulator/consumer.h>
 #include <linux/sysfs.h>
@@ -28,24 +30,29 @@
 #include <media/v4l2-async.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-subdev.h>
+#include <media/v4l2-fwnode.h>
 #include <linux/pinctrl/consumer.h>
 #include "../platform/rockchip/isp/rkisp_tb_helper.h"
 #include "cam-tb-setup.h"
 #include "cam-sleep-wakeup.h"
 
-#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x03)
+#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x04)
 
 #ifndef V4L2_CID_DIGITAL_GAIN
 #define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
 #endif
 
-#define GC8613_LANES			2
+// #define GC8613_LANES			2
 #define GC8613_BITS_PER_SAMPLE		10
-#define GC8613_LINK_FREQ_LINEAR		720000000
-#define GC8613_LINK_FREQ_HDR		270000000
+#define GC8613_LINK_FREQ_720		720000000
+#define GC8613_LINK_FREQ_270		270000000
+#define GC8613_LINK_FREQ_729		729000000	//1458Mbps
 
-#define GC8613_PIXEL_RATE_LINEAR	(GC8613_LINK_FREQ_LINEAR * 2 / 10 * 2)
-#define GC8613_PIXEL_RATE_HDR		(GC8613_LINK_FREQ_HDR * 2 / 10 * 2)
+/* 2lane */
+#define GC8613_PIXEL_RATE_720		(GC8613_LINK_FREQ_720 * 2 / 10 * 2)
+#define GC8613_PIXEL_RATE_270		(GC8613_LINK_FREQ_270 * 2 / 10 * 2)
+/* 4lane */
+#define GC8613_PIXEL_RATE_WITH_729M_4L	(GC8613_LINK_FREQ_729 * 2 / 10 * 4)
 
 #define GC8613_XVCLK_FREQ_24M		24000000
 
@@ -63,7 +70,7 @@
 #define GC8613_REG_EXPOSURE_L		0x0203
 #define GC8613_EXPOSURE_MIN		4
 #define GC8613_EXPOSURE_STEP		1
-#define GC8613_VTS_MAX			0x7fff
+#define GC8613_VTS_MAX			0x1fff
 
 #define GC8613_GAIN_MIN			64
 #define GC8613_GAIN_MAX			0xffff
@@ -76,6 +83,8 @@
 
 #define GC8613_REG_VTS_H		0x0340
 #define GC8613_REG_VTS_L		0x0341
+#define GC8613_REG_HTS_H		0x0342
+#define GC8613_REG_HTS_L		0x0343
 
 #define GC8613_OTP_MIRROR_FLIP_REG	0x0a73
 #define GC8613_FLIP_MIRROR_REG		0x022c
@@ -116,9 +125,15 @@ struct gc8613_mode {
 	u32 hts_def;
 	u32 vts_def;
 	u32 exp_def;
+	const struct regval *global_reg_list;
 	const struct regval *reg_list;
 	u32 hdr_mode;
+	u32 mclk;
+	u32 link_freq_idx;
 	u32 vc[PAD_MAX];
+	u8 bpp;
+	u32 cfg_idx;
+	u32 lanes;
 };
 
 struct gc8613 {
@@ -150,6 +165,7 @@ struct gc8613 {
 	struct v4l2_fract	cur_fps;
 	bool			streaming;
 	bool			power_on;
+	const struct gc8613_mode *supported_modes;
 	const struct gc8613_mode *cur_mode;
 	u32			cfg_num;
 	u32			module_index;
@@ -161,6 +177,7 @@ struct gc8613 {
 	u32			cur_link_freq;
 	struct preisp_hdrae_exp_s init_hdrae_exp;
 	struct cam_sw_info	*cam_sw_inf;
+	struct v4l2_fwnode_endpoint bus_cfg;
 	bool			has_init_exp;
 	bool			is_thunderboot;
 	bool			is_first_streamoff;
@@ -172,7 +189,11 @@ struct gc8613 {
 /*
  * Xclk 24Mhz
  */
-static const struct regval gc8613_global_regs[] = {
+static const struct regval gc8613_global_4lane_regs[] = {
+	{REG_NULL, 0x00},
+};
+
+static const struct regval gc8613_global_2lane_regs[] = {
 	{REG_NULL, 0x00},
 };
 
@@ -180,7 +201,8 @@ static __maybe_unused const u32 reg_val_table_hdr[26][7] = {
 	//2b3 2b4  2b8	 2b9 515  519  2d9
 };
 
-static const u32 reg_val_table_liner[26][8] = {
+//release_AEC_v2.1.1_00&01&05&06_liner_GC8613YA.txt
+static const u32 reg_val_table_linear_00[26][8] = {
 	//614  615   225   1467  1468  00b8  00b9  1447
 	{0x00, 0x00, 0x00, 0x07, 0x07, 0x01, 0x00, 0x77},
 	{0x90, 0x02, 0x00, 0x07, 0x07, 0x01, 0x09, 0x77},
@@ -208,6 +230,37 @@ static const u32 reg_val_table_liner[26][8] = {
 	{0x05, 0x00, 0x01, 0x17, 0x17, 0x2F, 0x18, 0x75},
 	{0x95, 0x02, 0x01, 0x19, 0x19, 0x38, 0x09, 0x75},
 	{0x06, 0x00, 0x01, 0x1a, 0x1a, 0x41, 0x37, 0x75},
+};
+
+//release_AEC_v2.1.1_02&03&04_liner_GC8613YA.txt
+static const u32 reg_val_table_linear_02[26][8] = {
+	//0614 0615  0225  1467  1468  00b8  00b9  1447
+	{0x00, 0x00, 0x00, 0x0d, 0x0d, 0x01, 0x00, 0x77},
+	{0x90, 0x02, 0x00, 0x0e, 0x0e, 0x01, 0x09, 0x77},
+	{0x01, 0x00, 0x00, 0x0e, 0x0e, 0x01, 0x19, 0x77},
+	{0x91, 0x02, 0x00, 0x0f, 0x0f, 0x01, 0x2A, 0x77},
+	{0x02, 0x00, 0x00, 0x0f, 0x0f, 0x01, 0x3D, 0x77},
+	{0x00, 0x00, 0x00, 0x0d, 0x0d, 0x02, 0x10, 0x75},
+	{0x90, 0x02, 0x00, 0x0d, 0x0d, 0x02, 0x29, 0x75},
+	{0x01, 0x00, 0x00, 0x0e, 0x0e, 0x03, 0x0B, 0x75},
+	{0x91, 0x02, 0x00, 0x0e, 0x0e, 0x03, 0x2F, 0x75},
+	{0x02, 0x00, 0x00, 0x0f, 0x0f, 0x04, 0x1C, 0x75},
+	{0x92, 0x02, 0x00, 0x0f, 0x0f, 0x05, 0x11, 0x75},
+	{0x03, 0x00, 0x00, 0x10, 0x10, 0x06, 0x20, 0x75},
+	{0x93, 0x02, 0x00, 0x10, 0x10, 0x07, 0x25, 0x75},
+	{0x00, 0x00, 0x01, 0x11, 0x11, 0x08, 0x1E, 0x75},
+	{0x90, 0x02, 0x01, 0x12, 0x12, 0x09, 0x3B, 0x75},
+	{0x01, 0x00, 0x01, 0x13, 0x13, 0x0B, 0x3B, 0x75},
+	{0x91, 0x02, 0x01, 0x14, 0x14, 0x0E, 0x03, 0x75},
+	{0x02, 0x00, 0x01, 0x15, 0x15, 0x10, 0x25, 0x75},
+	{0x92, 0x02, 0x01, 0x16, 0x16, 0x13, 0x35, 0x75},
+	{0x03, 0x00, 0x01, 0x17, 0x17, 0x17, 0x30, 0x75},
+	{0x93, 0x02, 0x01, 0x18, 0x18, 0x1C, 0x06, 0x75},
+	{0x04, 0x00, 0x01, 0x19, 0x19, 0x21, 0x07, 0x75},
+	{0x94, 0x02, 0x01, 0x1a, 0x1a, 0x27, 0x38, 0x75},
+	{0x05, 0x00, 0x01, 0x1d, 0x1d, 0x2F, 0x18, 0x75},
+	{0x95, 0x02, 0x01, 0x1e, 0x1e, 0x38, 0x09, 0x75},
+	{0x06, 0x00, 0x01, 0x21, 0x21, 0x41, 0x37, 0x75},
 };
 
 static const u32 gain_level_table[27] = {
@@ -957,7 +1010,223 @@ static const struct regval gc8613_linear_10bit_3840x2160_20fps_regs[] = {
 	{REG_NULL, 0x00},
 };
 
-static const struct gc8613_mode supported_modes[] = {
+/*
+ * Xclk 24Mhz
+ * max_framerate 40fps
+ * mipi_datarate per lane 1458Mbps, 4lane
+ * 10-bit 3840x2160@40fps
+ * linear mode
+ * release_liner_v2.2.1_04_4lane_raw10_3840x2160_40fps_24mhz_GC8613YA.txt
+ */
+static const struct regval gc8613_linear_10bit_3840x2160_40fps_4lane_regs[] = {
+	{0x03fe, 0xf0},
+	{0x03fe, 0x00},
+	{0x03fe, 0x10},
+	{0x0a38, 0x01},
+	{0x0a20, 0x19},
+	{0x061b, 0x17},
+	{0x061c, 0x44},
+	{0x061d, 0x05},
+	{0x061e, 0x75},
+	{0x061f, 0x04},
+	{0x0a21, 0x10},
+	{0x0a30, 0x00},
+	{0x0a31, 0xf3},
+	{0x0a34, 0x40},
+	{0x0a35, 0x08},
+	{0x0a37, 0x44},
+	{0x0314, 0x50},
+	{0x031c, 0xce},
+	{0x0219, 0x47},
+	{0x0342, 0x03},
+	{0x0343, 0xb4},
+	{0x0259, 0x08},
+	{0x025a, 0x96},
+	{0x0340, 0x09},
+	{0x0341, 0x0a},
+	{0x0351, 0x00},
+	{0x0345, 0x02},
+	{0x0347, 0x02},
+	{0x0348, 0x0f},
+	{0x0349, 0x18},
+	{0x034a, 0x08},
+	{0x034b, 0x88},
+	{0x034f, 0xf0},
+	{0x0094, 0x0f},
+	{0x0095, 0x00},
+	{0x0096, 0x08},
+	{0x0097, 0x70},
+	{0x0099, 0x0c},
+	{0x009b, 0x0c},
+	{0x060c, 0x06},
+	{0x060e, 0x20},
+	{0x060f, 0x0f},
+	{0x070c, 0x06},
+	{0x070e, 0x20},
+	{0x070f, 0x0f},
+	{0x0087, 0x50},
+	{0x141b, 0x03},
+	{0x0901, 0x0e},
+	{0x0907, 0xd5},
+	{0x0909, 0x06},
+	{0x0902, 0x0b},
+	{0x0904, 0x08},
+	{0x0908, 0x09},
+	{0x0903, 0xc5},
+	{0x090c, 0x09},
+	{0x0905, 0x10},
+	{0x0906, 0x00},
+	{0x0724, 0x2b},
+	{0x0727, 0x2b},
+	{0x072b, 0x1a},
+	{0x072a, 0x5e},
+	{0x0601, 0x00},
+	{0x073e, 0x40},
+	{0x0078, 0x88},
+	{0x0618, 0x01},
+	{0x1466, 0x12},
+	{0x1468, 0x07},
+	{0x1467, 0x07},
+	{0x1478, 0x10},
+	{0x1477, 0x10},
+	{0x0709, 0x40},
+	{0x0719, 0x40},
+	{0x1469, 0x80},
+	{0x146a, 0x20},
+	{0x146b, 0x03},
+	{0x1479, 0x80},
+	{0x147a, 0x20},
+	{0x147b, 0x03},
+	{0x1480, 0x02},
+	{0x1481, 0x80},
+	{0x1482, 0x02},
+	{0x1483, 0x80},
+	{0x1484, 0x08},
+	{0x1485, 0xc0},
+	{0x1486, 0x08},
+	{0x1487, 0xc0},
+	{0x1407, 0x10},
+	{0x1408, 0x16},
+	{0x1409, 0x03},
+	{0x1434, 0x04},
+	{0x1447, 0x75},
+	{0x140d, 0x04},
+	{0x1461, 0x10},
+	{0x146c, 0x10},
+	{0x146d, 0x10},
+	{0x146e, 0x2e},
+	{0x146f, 0x30},
+	{0x1474, 0x34},
+	{0x1470, 0x10},
+	{0x1471, 0x13},
+	{0x143a, 0x00},
+	{0x024b, 0x02},
+	{0x0245, 0xc7},
+	{0x025b, 0x07},
+	{0x02bb, 0x77},
+	{0x0612, 0x01},
+	{0x0613, 0x26},
+	{0x0243, 0x66},
+	{0x0087, 0x53},
+	{0x0053, 0x05},
+	{0x0089, 0x02},
+	{0x0002, 0xeb},
+	{0x005a, 0x0c},
+	{0x0040, 0x83},
+	{0x0075, 0x58},
+	{0x0205, 0x0c},
+	{0x0202, 0x06},
+	{0x0203, 0x27},
+	{0x061a, 0x02},
+	{0x0122, 0x12},
+	{0x0123, 0x50},
+	{0x0126, 0x0f},
+	{0x0129, 0x10},
+	{0x012a, 0x20},
+	{0x012b, 0x10},
+	{0x03fe, 0x00},
+	{0x0106, 0x78},
+	{0x0136, 0x00},
+	{0x0181, 0xf0},
+	{0x0185, 0x01},
+	{0x0180, 0x46},
+	{0x0106, 0x38},
+	{0x010d, 0xc0},
+	{0x010e, 0x12},
+	{0x0113, 0x02},
+	{0x0114, 0x03},
+	{0x0100, 0x09},
+	{0x0619, 0x01},
+	{0x023b, 0x58},
+	{0x023e, 0x00},
+	{0x023f, 0x84},
+	{0x0220, 0x80},
+	{0x021b, 0x96},
+	{0x0004, 0x0f},
+	{0x000e, 0x07},
+	{0x0219, 0x47},
+	{0x0054, 0x98},
+	{0x0076, 0x01},
+	{0x0052, 0x02},
+	{0x021a, 0x10},
+	{0x0430, 0x10},
+	{0x0431, 0x10},
+	{0x0432, 0x10},
+	{0x0433, 0x10},
+	{0x0434, 0x6d},
+	{0x0435, 0x6d},
+	{0x0436, 0x6d},
+	{0x0437, 0x6d},
+	{0x0704, 0x03},
+	{0x0706, 0x02},
+	{0x0716, 0x02},
+	{0x0708, 0xc8},
+	{0x0718, 0xc8},
+	{0x071d, 0xdc},
+	{0x071e, 0x05}, //otp autoload
+	{0x031f, 0x01},
+	{0x031f, 0x00},
+	{0x0a67, 0x80},
+	{0x0a54, 0x0e},
+	{0x0a65, 0x10},
+	{0x0a98, 0x04},
+	{0x05be, 0x00},
+	{0x05a9, 0x01},
+	{0x0089, 0x02},
+	{0x0aa0, 0x00},
+	{0x0023, 0x00},
+	{0x0022, 0x00},
+	{0x0025, 0x00},
+	{0x0024, 0x00},
+	{0x0028, 0x0f},
+	{0x0029, 0x18},
+	{0x002a, 0x08},
+	{0x002b, 0x88},
+	{0x0317, 0x1c},
+	{0x0a70, 0x03},
+	{0x0a82, 0x00},
+	{0x0a83, 0xe0},
+	{0x0a71, 0x00},
+	{0x0a72, 0x02},
+	{0x0a73, 0x60},
+	{0x0a75, 0x41},
+	{0x0a70, 0x03},
+	{0x0a5a, 0x80},
+	{REG_DELAY, 0x14}, //sleep 20
+	{0x0089, 0x02},
+	{0x05be, 0x01},
+	{0x0a70, 0x00},
+	{0x0080, 0x02},
+	{0x0a67, 0x00},
+	{0x0020, 0x01},
+	{0x024b, 0x02},
+	{0x0220, 0x80},
+	{0x0058, 0x00},
+	{0x0059, 0x04},
+	{REG_NULL, 0x00},
+};
+
+static const struct gc8613_mode supported_modes_2lane[] = {
 	{/* [0] 3840*2160 @ max 30fps*/
 		.width = 3840,
 		.height = 2160,
@@ -969,9 +1238,15 @@ static const struct gc8613_mode supported_modes[] = {
 		.hts_def = 0x0320,
 		.vts_def = 0x08ca,
 		.bus_fmt = MEDIA_BUS_FMT_SRGGB10_1X10,
+		.global_reg_list = gc8613_global_2lane_regs,
 		.reg_list = gc8613_linear_10bit_3840x2160_30fps_regs,
 		.hdr_mode = NO_HDR,
+		.mclk = 24000000,
+		.link_freq_idx = 0,
+		.bpp = 10,
 		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.cfg_idx = 6,
+		.lanes = 2,
 	},
 	{
 		.width = 3840,
@@ -984,9 +1259,15 @@ static const struct gc8613_mode supported_modes[] = {
 		.hts_def = 0x0320,
 		.vts_def = 0x08ca,
 		.bus_fmt = MEDIA_BUS_FMT_SRGGB10_1X10,
+		.global_reg_list = gc8613_global_2lane_regs,
 		.reg_list = gc8613_linear_10bit_3840x2160_25fps_regs,
 		.hdr_mode = NO_HDR,
+		.mclk = 24000000,
+		.link_freq_idx = 0,
+		.bpp = 10,
 		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.cfg_idx = 6,
+		.lanes = 2,
 	},
 	{
 		.width = 3840,
@@ -999,9 +1280,15 @@ static const struct gc8613_mode supported_modes[] = {
 		.hts_def = 0x0499,
 		.vts_def = 0x08ca,
 		.bus_fmt = MEDIA_BUS_FMT_SRGGB10_1X10,
+		.global_reg_list = gc8613_global_2lane_regs,
 		.reg_list = gc8613_linear_10bit_3840x2160_20fps_regs,
 		.hdr_mode = NO_HDR,
+		.mclk = 24000000,
+		.link_freq_idx = 0,
+		.bpp = 10,
 		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.cfg_idx = 6,
+		.lanes = 2,
 	},
 	{
 		.width = 3840,
@@ -1014,9 +1301,39 @@ static const struct gc8613_mode supported_modes[] = {
 		.hts_def = 0x0640,
 		.vts_def = 0x08ca,
 		.bus_fmt = MEDIA_BUS_FMT_SRGGB10_1X10,
+		.global_reg_list = gc8613_global_2lane_regs,
 		.reg_list = gc8613_linear_10bit_3840x2160_15fps_regs,
 		.hdr_mode = NO_HDR,
+		.mclk = 24000000,
+		.link_freq_idx = 0,
+		.bpp = 10,
 		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.cfg_idx = 6,
+		.lanes = 2,
+	},
+};
+
+static const struct gc8613_mode supported_modes_4lane[] = {
+	{
+		.width = 3840,
+		.height = 2160,
+		.max_fps = {
+			.numerator = 10000,
+			.denominator = 400000,
+		},
+		.exp_def = 0x0100,
+		.hts_def = 0x03b4,
+		.vts_def = 0x090a,
+		.bus_fmt = MEDIA_BUS_FMT_SRGGB10_1X10,
+		.global_reg_list = gc8613_global_4lane_regs,
+		.reg_list = gc8613_linear_10bit_3840x2160_40fps_4lane_regs,
+		.hdr_mode = NO_HDR,
+		.mclk = 24000000,
+		.link_freq_idx = 1,
+		.bpp = 10,
+		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.cfg_idx = 4,
+		.lanes = 4,
 	},
 };
 
@@ -1025,8 +1342,10 @@ static const u32 bus_code[] = {
 };
 
 static const s64 link_freq_menu_items[] = {
-	GC8613_LINK_FREQ_LINEAR,
-	GC8613_LINK_FREQ_HDR,
+	GC8613_LINK_FREQ_720,
+	GC8613_LINK_FREQ_729,
+	GC8613_LINK_FREQ_270,
+
 };
 
 static const char *const gc8613_test_pattern_menu[] = {
@@ -1074,7 +1393,7 @@ static int gc8613_write_array(struct i2c_client *client,
 
 	for (i = 0; ret == 0 && regs[i].addr != REG_NULL; i++) {
 		if (regs[i].addr == REG_DELAY) {
-			usleep_range(regs[i].val * 1000, regs[i].val * 1000);
+			usleep_range(regs[i].val * 1000, regs[i].val * 1000 + 1000);
 			continue;
 		}
 
@@ -1137,18 +1456,18 @@ gc8613_find_best_fit(struct gc8613 *gc8613, struct v4l2_subdev_format *fmt)
 	unsigned int i;
 
 	for (i = 0; i < gc8613->cfg_num; i++) {
-		dist = gc8613_get_reso_dist(&supported_modes[i], framefmt);
+		dist = gc8613_get_reso_dist(&gc8613->supported_modes[i], framefmt);
 		if (cur_best_fit_dist == -1 || dist < cur_best_fit_dist) {
 			cur_best_fit_dist = dist;
 			cur_best_fit = i;
 		} else if (dist == cur_best_fit_dist &&
-			   framefmt->code == supported_modes[i].bus_fmt) {
+			   framefmt->code == gc8613->supported_modes[i].bus_fmt) {
 			cur_best_fit = i;
 			break;
 		}
 	}
 
-	return &supported_modes[cur_best_fit];
+	return &gc8613->supported_modes[cur_best_fit];
 }
 
 static int gc8613_set_fmt(struct v4l2_subdev *sd,
@@ -1158,6 +1477,10 @@ static int gc8613_set_fmt(struct v4l2_subdev *sd,
 	struct gc8613 *gc8613 = to_gc8613(sd);
 	const struct gc8613_mode *mode;
 	s64 h_blank, vblank_def;
+	u64 dst_link_freq = 0;
+	u64 dst_pixel_rate = 0;
+	u8 lanes = gc8613->bus_cfg.bus.mipi_csi2.num_data_lanes;
+
 
 	mutex_lock(&gc8613->mutex);
 
@@ -1183,18 +1506,13 @@ static int gc8613_set_fmt(struct v4l2_subdev *sd,
 					 GC8613_VTS_MAX - mode->height,
 					 1, vblank_def);
 
-		if (mode->hdr_mode == HDR_X2) {
-			gc8613->cur_link_freq = 1;
-			gc8613->cur_pixel_rate = GC8613_PIXEL_RATE_HDR;
-		} else {
-			gc8613->cur_link_freq = 0;
-			gc8613->cur_pixel_rate = GC8613_PIXEL_RATE_LINEAR;
-		}
-
+		dst_link_freq = mode->link_freq_idx;
+		dst_pixel_rate = (u32)link_freq_menu_items[mode->link_freq_idx] /
+				 mode->bpp * 2 * lanes;
 		__v4l2_ctrl_s_ctrl_int64(gc8613->pixel_rate,
-					 gc8613->cur_pixel_rate);
+					 dst_pixel_rate);
 		__v4l2_ctrl_s_ctrl(gc8613->link_freq,
-				   gc8613->cur_link_freq);
+				   dst_link_freq);
 		gc8613->cur_vts = mode->vts_def;
 		gc8613->cur_fps = mode->max_fps;
 	}
@@ -1223,6 +1541,11 @@ static int gc8613_get_fmt(struct v4l2_subdev *sd,
 		fmt->format.height = mode->height;
 		fmt->format.code = mode->bus_fmt;
 		fmt->format.field = V4L2_FIELD_NONE;
+		/* format info: width/height/data type/virtual channel */
+		if (fmt->pad < PAD_MAX && mode->hdr_mode != NO_HDR)
+			fmt->reserved[0] = mode->vc[fmt->pad];
+		else
+			fmt->reserved[0] = mode->vc[PAD0];
 	}
 	mutex_unlock(&gc8613->mutex);
 
@@ -1249,13 +1572,13 @@ static int gc8613_enum_frame_sizes(struct v4l2_subdev *sd,
 	if (fse->index >= gc8613->cfg_num)
 		return -EINVAL;
 
-	if (fse->code != supported_modes[0].bus_fmt)
+	if (fse->code != gc8613->supported_modes[fse->index].bus_fmt)
 		return -EINVAL;
 
-	fse->min_width = supported_modes[fse->index].width;
-	fse->max_width = supported_modes[fse->index].width;
-	fse->max_height = supported_modes[fse->index].height;
-	fse->min_height = supported_modes[fse->index].height;
+	fse->min_width = gc8613->supported_modes[fse->index].width;
+	fse->max_width = gc8613->supported_modes[fse->index].width;
+	fse->max_height = gc8613->supported_modes[fse->index].height;
+	fse->min_height = gc8613->supported_modes[fse->index].height;
 
 	return 0;
 }
@@ -1277,7 +1600,7 @@ static int gc8613_set_gain_reg(struct gc8613 *gc8613, u32 gain)
 {
 	int i;
 	int total;
-	// u32 tol_dig_gain = 0;
+	u32 tol_dig_gain = 0;
 
 	if (gain < 64)
 		gain = 64;
@@ -1287,31 +1610,65 @@ static int gc8613_set_gain_reg(struct gc8613 *gc8613, u32 gain)
 		    gain < gain_level_table[i + 1])
 			break;
 	}
-	// tol_dig_gain = gain * 64 / gain_level_table[i];
+
 	if (i >= total)
 		i = total - 1;
+	tol_dig_gain = gain * 64 / gain_level_table[i];
 
-	// again
-	gc8613_write_reg(gc8613->client, 0x031d,
-			 GC8613_REG_VALUE_08BIT, 0x2d);
-	gc8613_write_reg(gc8613->client, 0x614,
-			 GC8613_REG_VALUE_08BIT, reg_val_table_liner[i][0]);
-	gc8613_write_reg(gc8613->client, 0x615,
-			 GC8613_REG_VALUE_08BIT, reg_val_table_liner[i][1]);
-	gc8613_write_reg(gc8613->client, 0x031d,
-			 GC8613_REG_VALUE_08BIT, 0x28);
-	gc8613_write_reg(gc8613->client, 0x225,
-			 GC8613_REG_VALUE_08BIT, reg_val_table_liner[i][2]);
-	gc8613_write_reg(gc8613->client, 0x1467,
-			 GC8613_REG_VALUE_08BIT, reg_val_table_liner[i][3]);
-	gc8613_write_reg(gc8613->client, 0x1468,
-			 GC8613_REG_VALUE_08BIT, reg_val_table_liner[i][4]);
-	gc8613_write_reg(gc8613->client, 0x00b8,
-			 GC8613_REG_VALUE_08BIT, reg_val_table_liner[i][5]);
-	gc8613_write_reg(gc8613->client, 0x00b9,
-			 GC8613_REG_VALUE_08BIT, reg_val_table_liner[i][6]);
-	gc8613_write_reg(gc8613->client, 0x1447,
-			 GC8613_REG_VALUE_08BIT, reg_val_table_liner[i][7]);
+	if ((gc8613->cur_mode->cfg_idx == 0) || (gc8613->cur_mode->cfg_idx == 1) ||
+		(gc8613->cur_mode->cfg_idx == 5) || (gc8613->cur_mode->cfg_idx == 6)) {
+		// again
+		gc8613_write_reg(gc8613->client, 0x031d,
+				GC8613_REG_VALUE_08BIT, 0x2d);
+		gc8613_write_reg(gc8613->client, 0x614,
+				GC8613_REG_VALUE_08BIT, reg_val_table_linear_00[i][0]);
+		gc8613_write_reg(gc8613->client, 0x615,
+				GC8613_REG_VALUE_08BIT, reg_val_table_linear_00[i][1]);
+		gc8613_write_reg(gc8613->client, 0x031d,
+				GC8613_REG_VALUE_08BIT, 0x28);
+		gc8613_write_reg(gc8613->client, 0x225,
+				GC8613_REG_VALUE_08BIT, reg_val_table_linear_00[i][2]);
+		gc8613_write_reg(gc8613->client, 0x1467,
+				GC8613_REG_VALUE_08BIT, reg_val_table_linear_00[i][3]);
+		gc8613_write_reg(gc8613->client, 0x1468,
+				GC8613_REG_VALUE_08BIT, reg_val_table_linear_00[i][4]);
+		gc8613_write_reg(gc8613->client, 0x00b8,
+				GC8613_REG_VALUE_08BIT, reg_val_table_linear_00[i][5]);
+		gc8613_write_reg(gc8613->client, 0x00b9,
+				GC8613_REG_VALUE_08BIT, reg_val_table_linear_00[i][6]);
+		gc8613_write_reg(gc8613->client, 0x1447,
+				GC8613_REG_VALUE_08BIT, reg_val_table_linear_00[i][7]);
+	} else if ((gc8613->cur_mode->cfg_idx == 2) || (gc8613->cur_mode->cfg_idx == 3) ||
+			(gc8613->cur_mode->cfg_idx == 4)) {
+		// again
+		gc8613_write_reg(gc8613->client, 0x031d,
+				 GC8613_REG_VALUE_08BIT, 0x2d);
+		gc8613_write_reg(gc8613->client, 0x614,
+				 GC8613_REG_VALUE_08BIT, reg_val_table_linear_02[i][0]);
+		gc8613_write_reg(gc8613->client, 0x615,
+				 GC8613_REG_VALUE_08BIT, reg_val_table_linear_02[i][1]);
+		gc8613_write_reg(gc8613->client, 0x031d,
+				 GC8613_REG_VALUE_08BIT, 0x28);
+		gc8613_write_reg(gc8613->client, 0x225,
+				 GC8613_REG_VALUE_08BIT, reg_val_table_linear_02[i][2]);
+		gc8613_write_reg(gc8613->client, 0x1467,
+				 GC8613_REG_VALUE_08BIT, reg_val_table_linear_02[i][3]);
+		gc8613_write_reg(gc8613->client, 0x1468,
+				 GC8613_REG_VALUE_08BIT, reg_val_table_linear_02[i][4]);
+		gc8613_write_reg(gc8613->client, 0x00b8,
+				 GC8613_REG_VALUE_08BIT, reg_val_table_linear_02[i][5]);
+		gc8613_write_reg(gc8613->client, 0x00b9,
+				 GC8613_REG_VALUE_08BIT, reg_val_table_linear_02[i][6]);
+		gc8613_write_reg(gc8613->client, 0x1447,
+				 GC8613_REG_VALUE_08BIT, reg_val_table_linear_02[i][7]);
+	} else {
+		dev_err(&gc8613->client->dev, "sensor cfg_idx error!\n");
+	}
+
+	gc8613_write_reg(gc8613->client, 0x0064,
+			 GC8613_REG_VALUE_08BIT, (tol_dig_gain >> 6));
+	gc8613_write_reg(gc8613->client, 0x0065,
+			 GC8613_REG_VALUE_08BIT, (tol_dig_gain & 0x3f));
 
 	return 0;
 }
@@ -1423,7 +1780,7 @@ static const struct gc8613_mode *gc8613_find_mode(struct gc8613 *gc8613, int fps
 	int i = 0;
 
 	for (i = 0; i < gc8613->cfg_num; i++) {
-		mode = &supported_modes[i];
+		mode = &gc8613->supported_modes[i];
 		if (mode->width == gc8613->cur_mode->width &&
 		    mode->height == gc8613->cur_mode->height &&
 		    mode->hdr_mode == gc8613->cur_mode->hdr_mode &&
@@ -1445,6 +1802,7 @@ static int gc8613_s_frame_interval(struct v4l2_subdev *sd,
 	const struct gc8613_mode *mode = NULL;
 	struct v4l2_fract *fract = &fi->interval;
 	s64 h_blank, vblank_def;
+	u64 pixel_rate = 0;
 	int fps;
 
 	if (gc8613->streaming)
@@ -1473,18 +1831,14 @@ static int gc8613_s_frame_interval(struct v4l2_subdev *sd,
 	__v4l2_ctrl_modify_range(gc8613->vblank, vblank_def,
 				 GC8613_VTS_MAX - mode->height,
 				 1, vblank_def);
-	if (mode->hdr_mode == HDR_X2) {
-		gc8613->cur_link_freq = 1;
-		gc8613->cur_pixel_rate = GC8613_PIXEL_RATE_HDR;
-	} else {
-		gc8613->cur_link_freq = 0;
-		gc8613->cur_pixel_rate = GC8613_PIXEL_RATE_LINEAR;
-	}
+
+	pixel_rate = (u32)link_freq_menu_items[mode->link_freq_idx] /
+		     mode->bpp * 2 * mode->lanes;
 
 	__v4l2_ctrl_s_ctrl_int64(gc8613->pixel_rate,
-				 gc8613->cur_pixel_rate);
+				 pixel_rate);
 	__v4l2_ctrl_s_ctrl(gc8613->link_freq,
-			   gc8613->cur_link_freq);
+			   mode->link_freq_idx);
 	gc8613->cur_fps = mode->max_fps;
 
 	return 0;
@@ -1495,17 +1849,16 @@ static int gc8613_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 {
 	struct gc8613 *gc8613 = to_gc8613(sd);
 	const struct gc8613_mode *mode = gc8613->cur_mode;
-	u32 val = 0;
+	u8 lanes = gc8613->bus_cfg.bus.mipi_csi2.num_data_lanes;
 
-	if (mode->hdr_mode == NO_HDR)
-		val = 1 << (GC8613_LANES - 1) |
-		      V4L2_MBUS_CSI2_CHANNEL_0 |
-		      V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-	if (mode->hdr_mode == HDR_X2)
-		val = 1 << (GC8613_LANES - 1) |
-		      V4L2_MBUS_CSI2_CHANNEL_0 |
-		      V4L2_MBUS_CSI2_CONTINUOUS_CLOCK |
-		      V4L2_MBUS_CSI2_CHANNEL_1;
+	u32 val = 1 << (lanes - 1) |
+		V4L2_MBUS_CSI2_CHANNEL_0 |
+		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
+
+	if (mode->hdr_mode != NO_HDR)
+		val |= V4L2_MBUS_CSI2_CHANNEL_1;
+	if (mode->hdr_mode == HDR_X3)
+		val |= V4L2_MBUS_CSI2_CHANNEL_2;
 
 	config->type = V4L2_MBUS_CSI2_DPHY;
 	config->flags = val;
@@ -1541,7 +1894,11 @@ static long gc8613_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	u32 i, h, w;
 	long ret = 0;
 	u32 stream = 0;
+	u64 dst_link_freq = 0;
+	u64 dst_pixel_rate = 0;
+	u8 lanes = gc8613->bus_cfg.bus.mipi_csi2.num_data_lanes;
 	struct rkmodule_channel_info *ch_info;
+	const struct gc8613_mode *mode;
 	int cur_best_fit = -1;
 	int cur_best_fit_dist = -1;
 	int cur_dist, cur_fps, dst_fps;
@@ -1564,12 +1921,12 @@ static long gc8613_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		dst_fps = DIV_ROUND_CLOSEST(gc8613->cur_mode->max_fps.denominator,
 					    gc8613->cur_mode->max_fps.numerator);
 		for (i = 0; i < gc8613->cfg_num; i++) {
-			if (w == supported_modes[i].width &&
-			    h == supported_modes[i].height &&
-			    supported_modes[i].hdr_mode == hdr->hdr_mode &&
-			    supported_modes[i].bus_fmt == gc8613->cur_mode->bus_fmt) {
-				cur_fps = DIV_ROUND_CLOSEST(supported_modes[i].max_fps.denominator,
-							    supported_modes[i].max_fps.numerator);
+			if (w == gc8613->supported_modes[i].width &&
+			    h == gc8613->supported_modes[i].height &&
+			    gc8613->supported_modes[i].hdr_mode == hdr->hdr_mode &&
+			    gc8613->supported_modes[i].bus_fmt == gc8613->cur_mode->bus_fmt) {
+				cur_fps = DIV_ROUND_CLOSEST(gc8613->supported_modes[i].max_fps.denominator,
+							    gc8613->supported_modes[i].max_fps.numerator);
 				cur_dist = abs(cur_fps - dst_fps);
 				if (cur_best_fit_dist == -1 || cur_dist < cur_best_fit_dist) {
 					cur_best_fit_dist = cur_dist;
@@ -1586,29 +1943,24 @@ static long gc8613_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 				hdr->hdr_mode, w, h);
 			ret = -EINVAL;
 		} else {
-			gc8613->cur_mode = &supported_modes[cur_best_fit];
-			w = gc8613->cur_mode->hts_def -
-			    gc8613->cur_mode->width;
-			h = gc8613->cur_mode->vts_def -
-			    gc8613->cur_mode->height;
+			gc8613->cur_mode = &gc8613->supported_modes[cur_best_fit];
+			mode = gc8613->cur_mode;
+			w = gc8613->cur_mode->hts_def - gc8613->cur_mode->width;
+			h = gc8613->cur_mode->vts_def - gc8613->cur_mode->height;
 			__v4l2_ctrl_modify_range(gc8613->hblank, w, w, 1, w);
 			__v4l2_ctrl_modify_range(gc8613->vblank, h,
-						 GC8613_VTS_MAX -
-						 gc8613->cur_mode->height,
+						 GC8613_VTS_MAX - gc8613->cur_mode->height,
 						 1, h);
-			if (gc8613->cur_mode->hdr_mode == HDR_X2) {
-				gc8613->cur_link_freq = 1;
-				gc8613->cur_pixel_rate = GC8613_PIXEL_RATE_HDR;
-			} else {
-				gc8613->cur_link_freq = 0;
-				gc8613->cur_pixel_rate = GC8613_PIXEL_RATE_LINEAR;
-			}
+			gc8613->cur_fps = gc8613->cur_mode->max_fps;
+
+			dst_link_freq = mode->link_freq_idx;
+			dst_pixel_rate = (u32)link_freq_menu_items[mode->link_freq_idx] /
+					 mode->bpp * 2 * lanes;
 
 			__v4l2_ctrl_s_ctrl_int64(gc8613->pixel_rate,
-						 gc8613->cur_pixel_rate);
+						 dst_pixel_rate);
 			__v4l2_ctrl_s_ctrl(gc8613->link_freq,
-					   gc8613->cur_link_freq);
-			gc8613->cur_vts = gc8613->cur_mode->vts_def;
+					   dst_link_freq);
 		}
 		break;
 	case PREISP_CMD_SET_HDRAE_EXP:
@@ -1863,7 +2215,8 @@ static int gc8613_s_power(struct v4l2_subdev *sd, int on)
 		}
 
 		if (!gc8613->is_thunderboot) {
-			ret = gc8613_write_array(gc8613->client, gc8613_global_regs);
+			ret = gc8613_write_array(gc8613->client,
+						 gc8613->cur_mode->global_reg_list);
 			if (ret) {
 				v4l2_err(sd, "could not set init registers\n");
 				pm_runtime_put_noidle(&client->dev);
@@ -1884,9 +2237,9 @@ unlock_and_return:
 }
 
 /* Calculate the delay in us by clock rate and clock cycles */
-static inline u32 gc8613_cal_delay(u32 cycles)
+static inline u32 gc8613_cal_delay(u32 cycles, struct gc8613 *gc8613)
 {
-	return DIV_ROUND_UP(cycles, GC8613_XVCLK_FREQ_24M / 1000 / 1000);
+	return DIV_ROUND_UP(cycles, gc8613->cur_mode->mclk / 1000 / 1000);
 }
 
 static int __gc8613_power_on(struct gc8613 *gc8613)
@@ -1901,11 +2254,12 @@ static int __gc8613_power_on(struct gc8613 *gc8613)
 		if (ret < 0)
 			dev_err(dev, "could not set pins\n");
 	}
-	ret = clk_set_rate(gc8613->xvclk, GC8613_XVCLK_FREQ_24M);
+	ret = clk_set_rate(gc8613->xvclk, gc8613->cur_mode->mclk);
 	if (ret < 0)
-		dev_warn(dev, "Failed to set xvclk rate (24MHz)\n");
-	if (clk_get_rate(gc8613->xvclk) != GC8613_XVCLK_FREQ_24M)
-		dev_warn(dev, "xvclk mismatched, modes are based on 24MHz\n");
+		dev_warn(dev, "Failed to set xvclk rate (%dHz)\n", gc8613->cur_mode->mclk);
+	if (clk_get_rate(gc8613->xvclk) != gc8613->cur_mode->mclk)
+		dev_warn(dev, "xvclk mismatched, modes are based on %dHz\n",
+			 gc8613->cur_mode->mclk);
 	ret = clk_prepare_enable(gc8613->xvclk);
 	if (ret < 0) {
 		dev_err(dev, "Failed to enable xvclk\n");
@@ -1943,7 +2297,7 @@ static int __gc8613_power_on(struct gc8613 *gc8613)
 		gpiod_set_value_cansleep(gc8613->reset_gpio, 1);
 
 	/* 8192 cycles prior to first SCCB transaction */
-	delay_us = gc8613_cal_delay(8192);
+	delay_us = gc8613_cal_delay(8192, gc8613);
 	usleep_range(delay_us, delay_us * 2);
 
 	return 0;
@@ -2058,7 +2412,7 @@ static int gc8613_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	struct gc8613 *gc8613 = to_gc8613(sd);
 	struct v4l2_mbus_framefmt *try_fmt =
 		v4l2_subdev_get_try_format(sd, fh->pad, 0);
-	const struct gc8613_mode *def_mode = &supported_modes[0];
+	const struct gc8613_mode *def_mode = &gc8613->supported_modes[0];
 
 	mutex_lock(&gc8613->mutex);
 	/* Initialize try_fmt */
@@ -2083,11 +2437,11 @@ static int gc8613_enum_frame_interval(struct v4l2_subdev *sd,
 	if (fie->index >= gc8613->cfg_num)
 		return -EINVAL;
 
-	fie->code = supported_modes[fie->index].bus_fmt;
-	fie->width = supported_modes[fie->index].width;
-	fie->height = supported_modes[fie->index].height;
-	fie->interval = supported_modes[fie->index].max_fps;
-	fie->reserved[0] = supported_modes[fie->index].hdr_mode;
+	fie->code = gc8613->supported_modes[fie->index].bus_fmt;
+	fie->width = gc8613->supported_modes[fie->index].width;
+	fie->height = gc8613->supported_modes[fie->index].height;
+	fie->interval = gc8613->supported_modes[fie->index].max_fps;
+	fie->reserved[0] = gc8613->supported_modes[fie->index].hdr_mode;
 	return 0;
 }
 
@@ -2136,7 +2490,7 @@ static void gc8613_modify_fps_info(struct gc8613 *gc8613)
 {
 	const struct gc8613_mode *mode = gc8613->cur_mode;
 
-	gc8613->cur_fps.denominator = mode->max_fps.denominator * mode->vts_def /
+	gc8613->cur_fps.denominator = mode->max_fps.denominator * mode->vts_def /	//*NOPAD*
 				      gc8613->cur_vts;
 }
 
@@ -2181,6 +2535,7 @@ static int gc8613_set_ctrl(struct v4l2_ctrl *ctrl)
 	s64 max;
 	int mirror = 0, flip = 0;
 	int otp_val = 0, ops_val = 0;
+	int vts_adjust_val = 0;
 	int ret = 0;
 
 	/*Propagate change of current control to all related controls*/
@@ -2208,7 +2563,7 @@ static int gc8613_set_ctrl(struct v4l2_ctrl *ctrl)
 				       ctrl->val >> 8);
 		ret |= gc8613_write_reg(gc8613->client, GC8613_REG_EXPOSURE_L,
 					GC8613_REG_VALUE_08BIT,
-					ctrl->val & 0xfe);
+					ctrl->val & 0xff);
 		break;
 	case V4L2_CID_ANALOGUE_GAIN:
 		ret = gc8613_set_gain_reg(gc8613, ctrl->val);
@@ -2216,12 +2571,21 @@ static int gc8613_set_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_VBLANK:
 		dev_dbg(&client->dev, "set vblank 0x%x\n", ctrl->val);
 		gc8613->cur_vts = ctrl->val + gc8613->cur_mode->height;
+		vts_adjust_val = gc8613->cur_vts - 32;
 		ret = gc8613_write_reg(gc8613->client, GC8613_REG_VTS_H,
 				       GC8613_REG_VALUE_08BIT,
 				       gc8613->cur_vts >> 8);
 		ret |= gc8613_write_reg(gc8613->client, GC8613_REG_VTS_L,
 					GC8613_REG_VALUE_08BIT,
 					gc8613->cur_vts & 0xff);
+
+		ret |= gc8613_write_reg(gc8613->client, 0x0259,
+					GC8613_REG_VALUE_08BIT,
+					vts_adjust_val >> 8);
+		ret |= gc8613_write_reg(gc8613->client, 0x025a,
+					GC8613_REG_VALUE_08BIT,
+					vts_adjust_val & 0xff);
+
 		if (gc8613->cur_vts != gc8613->cur_mode->vts_def)
 			gc8613_modify_fps_info(gc8613);
 		break;
@@ -2318,6 +2682,9 @@ static int gc8613_initialize_controls(struct gc8613 *gc8613)
 	s64 exposure_max, vblank_def;
 	u32 h_blank;
 	int ret;
+	u64 dst_link_freq = 0;
+	u64 dst_pixel_rate = 0;
+	u8 lanes = gc8613->bus_cfg.bus.mipi_csi2.num_data_lanes;
 
 	handler = &gc8613->ctrl_handler;
 	mode = gc8613->cur_mode;
@@ -2328,19 +2695,17 @@ static int gc8613_initialize_controls(struct gc8613 *gc8613)
 
 	gc8613->link_freq = v4l2_ctrl_new_int_menu(handler, NULL, V4L2_CID_LINK_FREQ,
 			    1, 0, link_freq_menu_items);
-	if (mode->hdr_mode == HDR_X2) {
-		gc8613->cur_link_freq = 1;
-		gc8613->cur_pixel_rate = GC8613_PIXEL_RATE_HDR;
-	} else {
-		gc8613->cur_link_freq = 0;
-		gc8613->cur_pixel_rate = GC8613_PIXEL_RATE_LINEAR;
-	}
+	if (gc8613->link_freq)
+		gc8613->link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
-	__v4l2_ctrl_s_ctrl(gc8613->link_freq,
-			   gc8613->cur_link_freq);
-
+	dst_link_freq = mode->link_freq_idx;
+	/* pixel rate = link frequency * 2 * lanes / BITS_PER_SAMPLE */
+	dst_pixel_rate = (u32)link_freq_menu_items[mode->link_freq_idx] /
+					 mode->bpp * 2 * lanes;
 	gc8613->pixel_rate = v4l2_ctrl_new_std(handler, NULL, V4L2_CID_PIXEL_RATE,
-					       0, GC8613_PIXEL_RATE_HDR, 1, GC8613_PIXEL_RATE_HDR);
+					       0, GC8613_PIXEL_RATE_WITH_729M_4L,
+					       1, dst_pixel_rate);
+	__v4l2_ctrl_s_ctrl(gc8613->link_freq, dst_link_freq);
 
 	h_blank = mode->hts_def - mode->width;
 	gc8613->hblank = v4l2_ctrl_new_std(handler, NULL, V4L2_CID_HBLANK,
@@ -2391,6 +2756,7 @@ static int gc8613_initialize_controls(struct gc8613 *gc8613)
 
 	gc8613->subdev.ctrl_handler = handler;
 	gc8613->has_init_exp = false;
+	gc8613->cur_fps = mode->max_fps;
 
 	return 0;
 
@@ -2448,6 +2814,7 @@ static int gc8613_probe(struct i2c_client *client,
 	struct device_node *node = dev->of_node;
 	struct gc8613 *gc8613;
 	struct v4l2_subdev *sd;
+	struct device_node *endpoint;
 	char facing[2];
 	int ret;
 	u32 i, hdr_mode = 0;
@@ -2477,16 +2844,48 @@ static int gc8613_probe(struct i2c_client *client,
 
 	gc8613->is_thunderboot = IS_ENABLED(CONFIG_VIDEO_ROCKCHIP_THUNDER_BOOT_ISP);
 
+	ret = of_property_read_u32(node, OF_CAMERA_HDR_MODE, &hdr_mode);
+	if (ret) {
+		hdr_mode = NO_HDR;
+		dev_warn(dev, "Get hdr mode failed! no hdr default\n");
+	} else {
+		dev_warn(dev, "Get hdr mode success! HDR mode:%d (5:HDR2, 6:HDR3)\n", hdr_mode);
+	}
+
+	endpoint = of_graph_get_next_endpoint(dev->of_node, NULL);
+	if (!endpoint) {
+		dev_err(dev, "Failed to get endpoint\n");
+		return -EINVAL;
+	}
+	ret = v4l2_fwnode_endpoint_parse(of_fwnode_handle(endpoint),
+					 &gc8613->bus_cfg);
+	of_node_put(endpoint);
+	if (ret) {
+		dev_err(dev, "Failed to get bus config\n");
+		return -EINVAL;
+	}
+
+	if (gc8613->bus_cfg.bus.mipi_csi2.num_data_lanes == 4) {
+		gc8613->supported_modes = supported_modes_4lane;
+		gc8613->cfg_num = ARRAY_SIZE(supported_modes_4lane);
+		dev_info(dev, "detect gc8613 lane: %d\n",
+			 gc8613->bus_cfg.bus.mipi_csi2.num_data_lanes);
+	} else {
+		gc8613->supported_modes = supported_modes_2lane;
+		gc8613->cfg_num = ARRAY_SIZE(supported_modes_2lane);
+		dev_info(dev, "detect gc8613 lane: %d\n",
+			 gc8613->bus_cfg.bus.mipi_csi2.num_data_lanes);
+	}
+
 	gc8613->client = client;
-	gc8613->cfg_num = ARRAY_SIZE(supported_modes);
 	for (i = 0; i < gc8613->cfg_num; i++) {
-		if (hdr_mode == supported_modes[i].hdr_mode) {
-			gc8613->cur_mode = &supported_modes[i];
+		if (hdr_mode == gc8613->supported_modes[i].hdr_mode) {
+			gc8613->cur_mode = &gc8613->supported_modes[i];
 			break;
 		}
 	}
 	if (i == gc8613->cfg_num)
-		gc8613->cur_mode = &supported_modes[0];
+		gc8613->cur_mode = &gc8613->supported_modes[0];
 
 	gc8613->xvclk = devm_clk_get(dev, "xvclk");
 	if (IS_ERR(gc8613->xvclk)) {
@@ -2565,7 +2964,8 @@ static int gc8613_probe(struct i2c_client *client,
 
 	if (!gc8613->cam_sw_inf) {
 		gc8613->cam_sw_inf = cam_sw_init();
-		cam_sw_clk_init(gc8613->cam_sw_inf, gc8613->xvclk, GC8613_XVCLK_FREQ_24M);
+		cam_sw_clk_init(gc8613->cam_sw_inf, gc8613->xvclk,
+				gc8613->cur_mode->mclk);
 		cam_sw_reset_pin_init(gc8613->cam_sw_inf, gc8613->reset_gpio, 0);
 		cam_sw_pwdn_pin_init(gc8613->cam_sw_inf, gc8613->pwdn_gpio, 1);
 	}
