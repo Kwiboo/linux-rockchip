@@ -2040,6 +2040,7 @@ static int rockchip_pwm_probe(struct platform_device *pdev)
 	const struct of_device_id *id;
 	struct rockchip_pwm_chip *pc;
 	struct resource *r;
+	unsigned long irq_flags;
 	u32 enable_conf, ctrl, version;
 	bool enabled;
 	int ret, count;
@@ -2138,36 +2139,24 @@ static int rockchip_pwm_probe(struct platform_device *pdev)
 	}
 
 	if (pc->data->funcs.irq_handler) {
-		if (pc->main_version >= 4) {
-			pc->irq = platform_get_irq(pdev, 0);
-			if (pc->irq < 0) {
-				dev_err(&pdev->dev, "Get irq failed\n");
-				ret = pc->irq;
-				goto err_pclk;
-			}
+		/*
+		 * For pwm v1-v3, the older platform may not support interrupt, and
+		 * common continuous mode can still work well without irq.
+		 *
+		 * For pwm v4, each channel of every controller supports independent
+		 * interrupt and the 'interrupts' property is confirmed to be set
+		 * for each pwm node.
+		 */
+		pc->irq = platform_get_irq(pdev, 0);
+		if (pc->irq > 0) {
+			irq_flags = pc->main_version >= 4 ? IRQF_NO_SUSPEND :
+							    IRQF_NO_SUSPEND | IRQF_SHARED;
 
 			ret = devm_request_irq(&pdev->dev, pc->irq, pc->data->funcs.irq_handler,
-					       IRQF_NO_SUSPEND, "rk_pwm_irq", pc);
+					       irq_flags, "rk_pwm_irq", pc);
 			if (ret) {
 				dev_err(&pdev->dev, "Claim IRQ failed\n");
 				goto err_pclk;
-			}
-		} else {
-			if (IS_ENABLED(CONFIG_PWM_ROCKCHIP_ONESHOT)) {
-				pc->irq = platform_get_irq_optional(pdev, 0);
-				if (pc->irq < 0) {
-					dev_warn(&pdev->dev,
-						 "Can't get oneshot mode irq and oneshot interrupt is unsupported\n");
-				} else {
-					ret = devm_request_irq(&pdev->dev, pc->irq,
-							       pc->data->funcs.irq_handler,
-							       IRQF_NO_SUSPEND | IRQF_SHARED,
-							       "rk_pwm_oneshot_irq", pc);
-					if (ret) {
-						dev_err(&pdev->dev, "Claim oneshot IRQ failed\n");
-						goto err_pclk;
-					}
-				}
 			}
 		}
 	}
