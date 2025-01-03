@@ -2,7 +2,7 @@
 /*
  * maxim-max96745.c  --  I2C register interface access for max96745 serdes chip
  *
- * Copyright (c) 2023-2028 Rockchip Electronics Co. Ltd.
+ * Copyright (c) 2023-2028 Rockchip Electronics Co., Ltd.
  *
  * Author:
  */
@@ -415,23 +415,33 @@ static int max96745_bridge_init(struct serdes *serdes)
 
 static bool max96745_bridge_link_locked(struct serdes *serdes)
 {
-	u32 val;
+	u32 val = 0, i;
 
 	if (serdes->lock_gpio) {
-		val = gpiod_get_value_cansleep(serdes->lock_gpio);
-		SERDES_DBG_CHIP("serdes %s:val=%d\n", __func__, val);
-		return val;
+		for (i = 0; i < 3; i++) {
+			val = gpiod_get_value_cansleep(serdes->lock_gpio);
+			if (val)
+				break;
+			msleep(20);
+		}
+
+		SERDES_DBG_CHIP("%s:%s-%s, gpio %s\n", __func__, dev_name(serdes->dev),
+		       serdes->chip_data->name, (val) ? "locked" : "unlocked");
+		if (val)
+			return true;
 	}
 
 	if (serdes_reg_read(serdes, 0x002a, &val)) {
-		SERDES_DBG_CHIP("serdes %s: false val=%d\n", __func__, val);
+		SERDES_DBG_CHIP("serdes %s: unlocked val=0x%x\n", __func__, val);
 		return false;
 	}
 
-	if (!FIELD_GET(LOCKED, val)) {
-		SERDES_DBG_CHIP("serdes %s: false val=%d\n", __func__, val);
+	if (!FIELD_GET(LINK_LOCKED, val)) {
+		SERDES_DBG_CHIP("serdes %s: unlocked val=0x%x\n", __func__, val);
 		return false;
 	}
+
+	SERDES_DBG_CHIP("%s: serdes reg locked 0x%x\n", __func__, val);
 
 	return true;
 }
@@ -492,7 +502,9 @@ max96745_bridge_detect(struct serdes *serdes)
 
 out:
 	serdes_bridge->status = status;
-	SERDES_DBG_CHIP("5 status=%d state=%d\n", status, serdes->extcon->state);
+	SERDES_DBG_CHIP("%s:%s %s, status=%d state=%d\n", __func__, dev_name(serdes->dev),
+			serdes->chip_data->name,
+			status, serdes->extcon->state);
 	return status;
 }
 
@@ -548,6 +560,10 @@ static int max96745_pinctrl_set_mux(struct serdes *serdes,
 					GPIO_A_REG(grp->pins[i] - pinctrl->pin_base),
 					GPIO_OUT_DIS,
 					FIELD_PREP(GPIO_OUT_DIS, data->gpio_out_dis));
+			serdes_set_bits(serdes,
+					GPIO_B_REG(grp->pins[i] - pinctrl->pin_base),
+					OUT_TYPE,
+					FIELD_PREP(OUT_TYPE, 1));
 			if (data->gpio_tx_en_a || data->gpio_tx_en_b)
 				serdes_set_bits(serdes,
 						GPIO_B_REG(grp->pins[i] - pinctrl->pin_base),
@@ -840,6 +856,49 @@ static struct serdes_chip_split_ops max96745_split_ops = {
 	.deselect = max96745_deselect,
 };
 
+static const struct check_reg_data max96745_improtant_reg[10] = {
+	{
+		"MAX96745 LINK LOCK",
+		{ 0x0013, (1 << 3) },
+	}, {
+		"MAX96745 LINKA LOCK",
+		{ 0x002A, (1 << 0) },
+	}, {
+		"MAX96745 LINKB LOCK",
+		{ 0x0034, (1 << 0) },
+	}, {
+		"MAX96745 X PCLK DET",
+		{ 0x0102, (1 << 7) },
+	}, {
+		"MAX96745 Y PCLK DET",
+		{ 0x0112, (1 << 7) },
+	},
+};
+
+static int max96745_check_reg(struct serdes *serdes)
+{
+	int i =  0, ret = 0;
+	unsigned int val = 0;
+
+	for (i = 0; i < ARRAY_SIZE(max96745_improtant_reg); i++) {
+		if (!max96745_improtant_reg[i].seq.reg)
+			break;
+
+		ret = serdes_reg_read(serdes, max96745_improtant_reg[i].seq.reg, &val);
+		if (!ret && !(val & max96745_improtant_reg[i].seq.def)
+		    && (!atomic_read(&serdes->flag_early_suspend)))
+			dev_info(serdes->dev, "warning %s %s reg[0x%x] = 0x%x\n", __func__,
+				 max96745_improtant_reg[i].name,
+				 max96745_improtant_reg[i].seq.reg, val);
+	}
+
+	return 0;
+}
+
+static struct serdes_check_reg_ops max96745_check_reg_ops = {
+	.check_reg = max96745_check_reg,
+};
+
 static int max96745_pm_suspend(struct serdes *serdes)
 {
 	return 0;
@@ -881,6 +940,7 @@ struct serdes_chip_data serdes_max96745_data = {
 	.pinctrl_ops	= &max96745_pinctrl_ops,
 	.gpio_ops	= &max96745_gpio_ops,
 	.split_ops	= &max96745_split_ops,
+	.check_ops	= &max96745_check_reg_ops,
 	.pm_ops		= &max96745_pm_ops,
 	.irq_ops	= &max96745_irq_ops,
 };

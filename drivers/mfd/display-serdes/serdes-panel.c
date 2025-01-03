@@ -2,7 +2,7 @@
 /*
  * serdes-panel.c  --  drm panel access for different serdes chips
  *
- * Copyright (c) 2023-2028 Rockchip Electronics Co. Ltd.
+ * Copyright (c) 2023-2028 Rockchip Electronics Co., Ltd.
  *
  * Author: luowei <lw@rock-chips.com>
  */
@@ -29,6 +29,7 @@ static int serdes_panel_prepare(struct drm_panel *panel)
 	if (serdes->chip_data->panel_ops && serdes->chip_data->panel_ops->prepare)
 		ret = serdes->chip_data->panel_ops->prepare(serdes);
 
+	serdes_set_pinctrl_sleep(serdes);
 	serdes_set_pinctrl_default(serdes);
 
 	SERDES_DBG_MFD("%s: %s\n", __func__, serdes->chip_data->name);
@@ -200,6 +201,7 @@ static int serdes_panel_probe(struct platform_device *pdev)
 	struct serdes *serdes = dev_get_drvdata(pdev->dev.parent);
 	struct device *dev = &pdev->dev;
 	struct serdes_panel *serdes_panel;
+	struct device_node *np = NULL;
 	int ret;
 
 	serdes_panel = devm_kzalloc(dev, sizeof(*serdes_panel), GFP_KERNEL);
@@ -219,10 +221,14 @@ static int serdes_panel_probe(struct platform_device *pdev)
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to parse serdes DT\n");
 
-	serdes_panel->backlight = of_find_backlight_by_node(dev->of_node);
-	if (IS_ERR(serdes_panel->backlight))
-		return dev_err_probe(dev, PTR_ERR(serdes_panel->backlight),
-				     "failed to get serdes backlight\n");
+	np = of_parse_phandle(dev->of_node, "backlight", 0);
+	if (np) {
+		serdes_panel->backlight = of_find_backlight_by_node(np);
+		of_node_put(np);
+		if (!serdes_panel->backlight)
+			return dev_err_probe(dev, -EPROBE_DEFER,
+					     "failed to get serdes backlight\n");
+	}
 
 	if (serdes_panel->parent->chip_data->connector_type) {
 		drm_panel_init(&serdes_panel->panel, dev, &serdes_panel_funcs,

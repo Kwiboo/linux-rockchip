@@ -2,7 +2,7 @@
 /*
  * serdes-core.c  --  Device access for different serdes chips
  *
- * Copyright (c) 2023-2028 Rockchip Electronics Co. Ltd.
+ * Copyright (c) 2023-2028 Rockchip Electronics Co., Ltd.
  *
  * Author: luowei <lw@rock-chips.com>
  */
@@ -39,6 +39,10 @@ static const struct mfd_cell serdes_max96745_devs[] = {
 	{
 		.name = "serdes-bridge",
 		.of_compatible = "maxim,max96745-bridge",
+	},
+	{
+		.name = "serdes-bridge-split",
+		.of_compatible = "maxim,max96745-bridge-split",
 	},
 };
 

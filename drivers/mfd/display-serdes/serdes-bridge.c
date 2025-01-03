@@ -2,10 +2,12 @@
 /*
  * serdes-bridge.c  --  drm bridge access for different serdes chips
  *
- * Copyright (c) 2023-2028 Rockchip Electronics Co. Ltd.
+ * Copyright (c) 2023-2028 Rockchip Electronics Co., Ltd.
  *
  * Author: luowei <lw@rock-chips.com>
  */
+
+#include <linux/string.h>
 
 #include "core.h"
 
@@ -24,7 +26,7 @@ static struct mipi_dsi_device *serdes_attach_dsi(struct serdes_bridge *serdes_br
 	int ret;
 
 	if (serdes->chip_data->name)
-		memcpy(&info.type, serdes->chip_data->name, ARRAY_SIZE(info.type));
+		strscpy(info.type, serdes->chip_data->name, sizeof(info.type));
 
 	SERDES_DBG_MFD("%s: type=%s, name=%s\n", __func__,
 		       info.type, serdes->chip_data->name);
@@ -71,22 +73,10 @@ static int serdes_bridge_attach(struct drm_bridge *bridge,
 		return ret;
 	}
 
-	if (serdes_bridge->sel_mipi) {
-		dev_info(serdes_bridge->dev->parent, "serdes sel_mipi %d\n",
-			 serdes_bridge->sel_mipi);
-		/* Attach primary DSI */
-		serdes_bridge->dsi = serdes_attach_dsi(serdes_bridge, serdes_bridge->remote_node);
-		if (IS_ERR(serdes_bridge->dsi))
-			return PTR_ERR(serdes_bridge->dsi);
-	}
-
 	if (serdes_bridge->next_bridge) {
 		ret = drm_bridge_attach(bridge->encoder, serdes_bridge->next_bridge,
 					bridge, flags);
 		if (ret) {
-			if (serdes_bridge->sel_mipi)
-				mipi_dsi_device_unregister(serdes_bridge->dsi);
-
 			dev_err(serdes_bridge->dev->parent,
 				"failed to attach bridge, ret=%d\n", ret);
 			return ret;
@@ -103,14 +93,12 @@ static int serdes_bridge_attach(struct drm_bridge *bridge,
 
 static void serdes_bridge_detach(struct drm_bridge *bridge)
 {
-	struct serdes_bridge *serdes_bridge = to_serdes_bridge(bridge);
+}
 
-	if (serdes_bridge->sel_mipi) {
-		mipi_dsi_detach(serdes_bridge->dsi);
-		mipi_dsi_device_unregister(serdes_bridge->dsi);
-	}
-
-	SERDES_DBG_MFD("%s\n", __func__);
+static void serdes_detach_dsi(struct serdes_bridge *serdes_bridge)
+{
+	mipi_dsi_detach(serdes_bridge->dsi);
+	mipi_dsi_device_unregister(serdes_bridge->dsi);
 }
 
 static void serdes_bridge_disable(struct drm_bridge *bridge)
@@ -201,13 +189,16 @@ serdes_bridge_detect(struct drm_bridge *bridge)
 	struct serdes_bridge *serdes_bridge = to_serdes_bridge(bridge);
 	struct serdes *serdes = serdes_bridge->parent;
 	enum drm_connector_status status = connector_status_connected;
+	enum drm_connector_status last_status = serdes->serdes_bridge->status;
 
 	if (serdes->chip_data->bridge_ops->detect)
 		status = serdes->chip_data->bridge_ops->detect(serdes);
 
-	SERDES_DBG_MFD("%s:%s %s, %s\n", __func__, dev_name(serdes->dev),
-		       serdes->chip_data->name,
-		       (status == connector_status_connected) ? "connected" : "disconnect");
+	if (status != last_status)
+		dev_info(serdes->dev, "%s: %s, %s\n", __func__, serdes->chip_data->name,
+			 (status == connector_status_connected) ? "connected" : "disconnect");
+
+	serdes->serdes_bridge->status = status;
 	return status;
 }
 
@@ -254,7 +245,7 @@ static int serdes_bridge_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct serdes_bridge *serdes_bridge;
 
-	if (!serdes->dev)
+	if (!serdes->dev || !serdes->chip_data)
 		return -1;
 
 	serdes_bridge = devm_kzalloc(dev, sizeof(*serdes_bridge), GFP_KERNEL);
@@ -301,6 +292,17 @@ static int serdes_bridge_probe(struct platform_device *pdev)
 
 	drm_bridge_add(&serdes_bridge->base_bridge);
 
+	if (serdes_bridge->sel_mipi) {
+		dev_info(serdes_bridge->dev->parent, "serdes sel_mipi %d\n",
+			 serdes_bridge->sel_mipi);
+		/* Attach primary DSI */
+		serdes_bridge->dsi = serdes_attach_dsi(serdes_bridge, serdes_bridge->remote_node);
+		if (IS_ERR(serdes_bridge->dsi)) {
+			drm_bridge_remove(&serdes_bridge->base_bridge);
+			return PTR_ERR(serdes_bridge->dsi);
+		}
+	}
+
 	dev_info(dev, "serdes %s, serdes_bridge_probe successful mipi=%d, of_node=%s\n",
 		 serdes->chip_data->name, serdes_bridge->sel_mipi,
 		 serdes_bridge->base_bridge.of_node->name);
@@ -311,6 +313,9 @@ static int serdes_bridge_probe(struct platform_device *pdev)
 static int serdes_bridge_remove(struct platform_device *pdev)
 {
 	struct serdes_bridge *serdes_bridge = platform_get_drvdata(pdev);
+
+	if (serdes_bridge->sel_mipi)
+		serdes_detach_dsi(serdes_bridge);
 
 	drm_bridge_remove(&serdes_bridge->base_bridge);
 
