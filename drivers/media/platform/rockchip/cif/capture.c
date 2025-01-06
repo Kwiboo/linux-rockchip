@@ -12713,7 +12713,7 @@ static void rkcif_toisp_check_stop_status(struct sditf_priv *priv,
 			      (priv->hdr_cfg.hdr_mode == HDR_X3 && stream->id == 2)))
 				sditf_disable_immediately(priv);
 			cur_time = rkcif_time_get_ns(stream->cifdev);
-			stream->readout.readout_time = cur_time - stream->readout.fs_timestamp;
+			stream->readout.total_time = cur_time - stream->readout.fs_timestamp;
 			stream->readout.fs_timestamp = cur_time;
 			stream->buf_wake_up_cnt++;
 			if (stream->frame_idx % 2)
