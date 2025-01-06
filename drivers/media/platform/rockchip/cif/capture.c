@@ -12113,7 +12113,8 @@ static bool rkcif_check_frame_active(struct rkcif_device *cif_dev)
 {
 	if (cif_dev->sditf[0] &&
 	    cif_dev->sditf[0]->mode.rdbk_mode < RKISP_VICAP_RDBK_AIQ &&
-	    cif_dev->sditf[0]->is_toisp_off)
+	    cif_dev->sditf[0]->is_toisp_off &&
+	    cif_dev->sditf[0]->is_multi_online)
 		return false;
 
 	return true;
@@ -12921,7 +12922,8 @@ static void rkcif_deal_sof(struct rkcif_device *cif_dev)
 								  tmp_dev->stream[0].frame_idx);
 					}
 					if (tmp_dev->sditf[0] &&
-					    tmp_dev->sditf[0]->mode.rdbk_mode < RKISP_VICAP_RDBK_AIQ) {
+					    tmp_dev->sditf[0]->mode.rdbk_mode < RKISP_VICAP_RDBK_AIQ &&
+					    tmp_dev->sditf[0]->is_multi_online) {
 						if (!tmp_dev->sditf[0]->is_toisp_off)
 							tmp_dev->stream[0].frame_idx++;
 					} else {
