@@ -984,6 +984,10 @@ static void mipi_dphy_set_timing(const struct rk628_dsi *dsi)
 	};
 	unsigned int index;
 
+	// These ranges use the controller's internal automatically calculated timing.
+	if (dsi->lane_mbps < 800 || (dsi->lane_mbps >= 900 && dsi->lane_mbps < 1100))
+		return;
+
 	if (dsi->lane_mbps < timing_table[0].min_lane_mbps)
 		return;
 
@@ -994,9 +998,6 @@ static void mipi_dphy_set_timing(const struct rk628_dsi *dsi)
 
 	if (index == ARRAY_SIZE(timing_table))
 		--index;
-
-	if (dsi->lane_mbps < timing_table[index].max_lane_mbps)
-		return;
 
 	testif_set_timing(dsi, 0x60, 0x3f, timing_table[index].clk_lp);
 	testif_set_timing(dsi, 0x61, 0x7f, timing_table[index].clk_hs_prepare);
