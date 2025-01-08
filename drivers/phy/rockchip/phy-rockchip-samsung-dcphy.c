@@ -2186,8 +2186,12 @@ static int samsung_dcphy_rx_stream_on(struct csi2_dphy *dphy,
 		return -ENODEV;
 
 	mutex_lock(&samsung->mutex);
-	if (sensor->mbus.type == V4L2_MBUS_CSI2_CPHY)
+	if (sensor->mbus.type == V4L2_MBUS_CSI2_CPHY) {
 		regmap_write(samsung->grf_regmap, MIPI_DCPHY_GRF_CON0, S_CPHY_MODE);
+		samsung->c_option = true;
+	} else {
+		samsung->c_option = false;
+	}
 
 	if (samsung->s_phy_rst)
 		reset_control_assert(samsung->s_phy_rst);
