@@ -12826,6 +12826,9 @@ static void vop2_dovi_data_init(struct vop2 *vop2)
 	struct vop2_dovi_core *dovi_core;
 	int i;
 
+	if (!vop2_data->dovi)
+		return;
+
 	for (i = 0; i < vop2_data->dovi->nr_dovi_cores; i++) {
 		dovi_core = &vop2->dovi_cores[i];
 		dovi_core_data = &vop2_data->dovi->dovi_core_data[i];
