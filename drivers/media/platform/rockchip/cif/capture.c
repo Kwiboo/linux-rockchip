@@ -6305,6 +6305,7 @@ void rkcif_do_stop_stream(struct rkcif_stream *stream,
 
 			kfifo_free(&stream->dcg_kfifo);
 		}
+		stream->crop_mask = 0;
 	}
 	if (mode == RKCIF_STREAM_MODE_CAPTURE) {
 		tasklet_disable(&stream->vb_done_tasklet);
