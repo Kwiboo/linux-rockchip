@@ -9,6 +9,18 @@
 #include <linux/pwm.h>
 
 /**
+ * enum rockchip_pwm_clk_src_sel - select the clk src of pwm
+ * @PWM_SELECT_CLK_PWM: select clk_pwm as clk src
+ * @PWM_SELECT_CLK_PWM_OSC: select clk_pwm_osc as clk src
+ * @PWM_SELECT_CLK_PWM_RC: select clk_pwm_rc as clk src
+ */
+enum rockchip_pwm_clk_src_sel {
+	PWM_SELECT_CLK_PWM,
+	PWM_SELECT_CLK_PWM_OSC,
+	PWM_SELECT_CLK_PWM_RC,
+};
+
+/**
  * enum rockchip_pwm_global_ctrl_cmd - commands for pwm global ctrl
  * @PWM_GLOBAL_CTRL_JOIN: join the global control group
  * @PWM_GLOBAL_CTRL_EXIT: exit the global control group
@@ -89,6 +101,8 @@ enum rockchip_pwm_wave_update_mode {
  * struct rockchip_pwm_wave_config - wave generator config object
  * @duty_table: the wave table config of duty
  * @period_table: the wave table config of period
+ * @clk_src: the clk src selection in wave generator mode
+ * @mem_clk_src: the memory clk src selection in wave generator mode
  * @enable: enable or disable wave generator
  * @duty_en: to update duty by duty table or not
  * @period_en: to update period by period table or not
@@ -107,6 +121,8 @@ enum rockchip_pwm_wave_update_mode {
 struct rockchip_pwm_wave_config {
 	struct rockchip_pwm_wave_table *duty_table;
 	struct rockchip_pwm_wave_table *period_table;
+	enum rockchip_pwm_clk_src_sel clk_src;
+	enum rockchip_pwm_clk_src_sel mem_clk_src;
 	bool enable;
 	bool duty_en;
 	bool period_en;

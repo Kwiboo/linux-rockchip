@@ -1539,7 +1539,8 @@ static int rockchip_pwm_set_wave_v4(struct pwm_chip *chip, struct pwm_device *pw
 		ctrl = WAVE_DUTY_EN(config->duty_en) |
 		       WAVE_PERIOD_EN(config->period_en) |
 		       WAVE_WIDTH_MODE(config->width_mode) |
-		       WAVE_UPDATE_MODE(config->update_mode);
+		       WAVE_UPDATE_MODE(config->update_mode) |
+		       WAVE_MEM_CLK_SEL(config->mem_clk_src);
 		max_val = config->duty_max * factor << WAVE_DUTY_MAX_SHIFT |
 			  config->period_max * factor << WAVE_PERIOD_MAX_SHIFT;
 		min_val = config->duty_min * factor << WAVE_DUTY_MIN_SHIFT |
@@ -1553,7 +1554,7 @@ static int rockchip_pwm_set_wave_v4(struct pwm_chip *chip, struct pwm_device *pw
 		ctrl = WAVE_DUTY_EN(false) | WAVE_PERIOD_EN(false);
 	}
 
-	writel_relaxed(CLK_SCALE(pc->scaler), pc->base + CLK_CTRL);
+	writel_relaxed(CLK_SCALE(pc->scaler) | CLK_SRC_SEL(config->clk_src), pc->base + CLK_CTRL);
 	writel_relaxed(ctrl, pc->base + WAVE_CTRL);
 	writel_relaxed(max_val, pc->base + WAVE_MAX);
 	writel_relaxed(min_val, pc->base + WAVE_MIN);
