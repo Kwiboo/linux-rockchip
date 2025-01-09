@@ -75,6 +75,7 @@ struct rk_sai_dev {
 	bool is_clk_auto;
 	bool is_mclk_calibrate;
 	bool is_tx_auto_gate; /* auto gate clk when TX FIFO empty */
+	bool no_set_mclk;
 };
 
 static const struct sai_of_quirks {
@@ -630,7 +631,7 @@ static int rockchip_sai_hw_params(struct snd_pcm_substream *substream,
 
 	if (sai->is_master_mode) {
 		bclk_rate = sai->fw_ratio * slot_width * ch_per_lane * params_rate(params);
-		if (sai->is_clk_auto)
+		if (sai->is_clk_auto && !sai->no_set_mclk)
 			clk_set_rate(sai->mclk, bclk_rate);
 
 		mclk_rate = clk_get_rate(sai->mclk);
@@ -921,9 +922,11 @@ static int rockchip_sai_set_sysclk(struct snd_soc_dai *dai, int clk_id,
 		return ret;
 	}
 
-	ret = clk_set_rate(sai->mclk, freq);
-	if (ret)
-		dev_err(sai->dev, "Failed to set mclk %d\n", ret);
+	if (!sai->no_set_mclk) {
+		ret = clk_set_rate(sai->mclk, freq);
+		if (ret)
+			dev_err(sai->dev, "Failed to set mclk %d\n", ret);
+	}
 
 	return ret;
 }
@@ -1972,6 +1975,9 @@ static int rockchip_sai_probe(struct platform_device *pdev)
 
 		dev_info(&pdev->dev, "Have mclk compensation feature\n");
 	}
+
+	sai->no_set_mclk =
+		device_property_read_bool(&pdev->dev, "rockchip,mclk-no-set");
 
 	sai->mclk = devm_clk_get(&pdev->dev, "mclk");
 	if (IS_ERR(sai->mclk)) {
