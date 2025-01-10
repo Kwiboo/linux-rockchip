@@ -13147,8 +13147,6 @@ static void rkcif_sensor_quick_streaming_cb(void *data)
 			 RKMODULE_SET_QUICK_STREAM, &on);
 }
 
-extern void rkcif_set_sensor_streamon_in_sync_mode(struct rkcif_device *cif_dev);
-
 static int rkcif_terminal_sensor_set_stream(struct rkcif_device *cif_dev, int on)
 {
 	struct rkcif_pipeline *p = &cif_dev->pipe;

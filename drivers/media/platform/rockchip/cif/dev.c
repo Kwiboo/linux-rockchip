@@ -2441,7 +2441,7 @@ static void rkcif_init_reset_monitor(struct rkcif_device *dev)
 	INIT_WORK(&dev->reset_work.work, rkcif_reset_work);
 }
 
-void rkcif_set_sensor_stream(struct work_struct *work)
+static void rkcif_set_sensor_stream(struct work_struct *work)
 {
 	struct rkcif_sensor_work *sensor_work = container_of(work,
 						struct rkcif_sensor_work,

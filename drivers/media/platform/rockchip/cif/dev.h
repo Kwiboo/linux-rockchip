@@ -1155,4 +1155,6 @@ void rkcif_reinit_right_half_config(struct rkcif_stream *stream);
 void rkcif_modify_line_int(struct rkcif_stream *stream, bool en);
 
 void rkcif_set_sof(struct rkcif_device *cif_dev, u32 seq);
+
+void rkcif_set_sensor_streamon_in_sync_mode(struct rkcif_device *cif_dev);
 #endif
