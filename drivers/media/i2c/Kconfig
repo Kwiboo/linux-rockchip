@@ -1036,6 +1036,17 @@ config VIDEO_BF2257
 	  To compile this driver as a module, choose M here: the
 	  module will be called bf2257.
 
+config VIDEO_CV2001
+	tristate "CVSENS CV2001 sensor support"
+	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	depends on MEDIA_CAMERA_SUPPORT
+	select V4L2_FWNODE
+	help
+	  Support for the cvsens CV2001 sensor
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called cv2001.
+
 config VIDEO_GC02M2
 	tristate "GalaxyCore GC02M2 sensor support"
 	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
