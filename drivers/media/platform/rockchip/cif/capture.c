@@ -10779,6 +10779,10 @@ static void rkcif_line_wake_up_rdbk(struct rkcif_stream *stream, int mipi_id)
 			stream->cur_stream_mode |= RKCIF_STREAM_MODE_TOISP;
 			stream->cifdev->wait_line = 0;
 			stream->is_line_wake_up = false;
+			v4l2_dbg(3, rkcif_debug, &stream->cifdev->v4l2_dev,
+				 "stream[%d] frame_idx %d, last_rx_buf_idx %d cur dma buf %x,  change to online\n",
+				 stream->id, stream->frame_idx, stream->last_rx_buf_idx,
+				 (u32)active_buf->dummy.dma_addr);
 			if (stream->cifdev->hdr.hdr_mode == NO_HDR ||
 			    (priv->hdr_cfg.hdr_mode == HDR_X2 && stream->id == 1) ||
 			    (priv->hdr_cfg.hdr_mode == HDR_X3 && stream->id == 2)) {
@@ -14108,7 +14112,10 @@ void rkcif_irq_pingpong_v1(struct rkcif_device *cif_dev)
 					} else {
 						spin_lock_irqsave(&stream->fps_lock, flags);
 						stream->readout.fs_timestamp = rkcif_time_get_ns(cif_dev);
-						stream->frame_idx++;
+						if (cif_dev->hdr.hdr_mode == HDR_X2 || cif_dev->hdr.hdr_mode == HDR_X3)
+							stream->frame_idx = cif_dev->stream[0].frame_idx;
+						else
+							stream->frame_idx++;
 						if (cif_dev->channels[0].capture_info.mode == RKMODULE_MULTI_CH_TO_MULTI_ISP &&
 						    cif_dev->sditf[stream->id])
 							sditf_event_inc_sof(cif_dev->sditf[stream->id]);

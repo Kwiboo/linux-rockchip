@@ -1303,8 +1303,8 @@ static int sditf_s_rx_buffer(struct v4l2_subdev *sd,
 	}
 
 	rx_buf = to_cif_rx_buf(dbufs);
-	v4l2_dbg(3, rkcif_debug, &cif_dev->v4l2_dev, "buf back to vicap 0x%x\n",
-		 (u32)rx_buf->dummy.dma_addr);
+	v4l2_dbg(3, rkcif_debug, &cif_dev->v4l2_dev, "type %d buf back to vicap 0x%x, is_switch %d\n",
+		 dbufs->type, (u32)rx_buf->dummy.dma_addr, dbufs->is_switch);
 	spin_lock_irqsave(&stream->vbq_lock, flags);
 	stream->last_rx_buf_idx = dbufs->sequence + 1;
 	atomic_inc(&stream->buf_cnt);
