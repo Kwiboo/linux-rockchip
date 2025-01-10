@@ -1047,6 +1047,17 @@ config VIDEO_CV2001
 	  To compile this driver as a module, choose M here: the
 	  module will be called cv2001.
 
+config VIDEO_CV2003
+	tristate "CVSENS CV2003 sensor support"
+	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	depends on MEDIA_CAMERA_SUPPORT
+	select V4L2_FWNODE
+	help
+	  Support for the cvsens CV2003 sensor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called cv2003.
+
 config VIDEO_CV3001
 	tristate "CVSENS CV3001 sensor support"
 	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
