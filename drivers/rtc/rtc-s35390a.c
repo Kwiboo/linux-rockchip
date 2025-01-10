@@ -47,6 +47,7 @@
 #define S35390A_INT2_MODE_ALARM		BIT(1) /* INT2AE */
 #define S35390A_INT2_MODE_PMIN_EDG	BIT(2) /* INT2ME */
 #define S35390A_INT2_MODE_FREQ		BIT(3) /* INT2FE */
+#define S35390A_INT2_MODE_32K		BIT(4) /* 32KE */
 #define S35390A_INT2_MODE_PMIN		(BIT(3) | BIT(2)) /* INT2FE | INT2ME */
 
 static const struct i2c_device_id s35390a_id[] = {
@@ -55,7 +56,7 @@ static const struct i2c_device_id s35390a_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, s35390a_id);
 
-static const struct of_device_id s35390a_of_match[] = {
+static const __maybe_unused struct of_device_id s35390a_of_match[] = {
 	{ .compatible = "s35390a" },
 	{ .compatible = "sii,s35390a" },
 	{ }
@@ -277,16 +278,60 @@ static int s35390a_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alm)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct s35390a *s35390a = i2c_get_clientdata(client);
+	struct rtc_time *alm_tm = &alm->time;
 	char buf[3], sts = 0;
 	int err, i;
+
+	/*
+	 * The alarm has no seconds so deal with it
+	 */
+	if (alm_tm->tm_sec) {
+		alm_tm->tm_sec = 0;
+		alm_tm->tm_min++;
+		if (alm_tm->tm_min >= 60) {
+			alm_tm->tm_min = 0;
+			alm_tm->tm_hour++;
+			if (alm_tm->tm_hour >= 24) {
+				alm_tm->tm_hour = 0;
+				alm_tm->tm_mday++;
+				alm_tm->tm_wday++;
+				if (alm_tm->tm_wday > 6)
+					alm_tm->tm_wday = 0;
+				switch (alm_tm->tm_mon + 1) {
+				case 1:
+				case 3:
+				case 5:
+				case 7:
+				case 8:
+				case 10:
+				case 12:
+					if (alm_tm->tm_mday > 31)
+						alm_tm->tm_mday = 1;
+					break;
+				case 4:
+				case 6:
+				case 9:
+				case 11:
+					if (alm_tm->tm_mday > 30)
+						alm_tm->tm_mday = 1;
+					break;
+				case 2:
+					if (alm_tm->tm_year / 4 == 0) {
+						if (alm_tm->tm_mday > 29)
+							alm_tm->tm_mday = 1;
+					} else if (alm_tm->tm_mday > 28) {
+						alm_tm->tm_mday = 1;
+					}
+					break;
+				}
+			}
+		}
+	}
 
 	dev_dbg(&client->dev, "%s: alm is secs=%d, mins=%d, hours=%d mday=%d, "\
 		"mon=%d, year=%d, wday=%d\n", __func__, alm->time.tm_sec,
 		alm->time.tm_min, alm->time.tm_hour, alm->time.tm_mday,
 		alm->time.tm_mon, alm->time.tm_year, alm->time.tm_wday);
-
-	if (alm->time.tm_sec != 0)
-		dev_warn(&client->dev, "Alarms are only supported on a per minute basis!\n");
 
 	/* disable interrupt (which deasserts the irq line) */
 	err = s35390a_set_reg(s35390a, S35390A_CMD_STATUS2, &sts, sizeof(sts));
@@ -299,7 +344,7 @@ static int s35390a_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alm)
 		return err;
 
 	if (alm->enabled)
-		sts = S35390A_INT2_MODE_ALARM;
+		sts = S35390A_INT2_MODE_ALARM | S35390A_INT2_MODE_32K;
 	else
 		sts = S35390A_INT2_MODE_NOINTR;
 
@@ -423,8 +468,7 @@ static const struct rtc_class_ops s35390a_rtc_ops = {
 	.ioctl          = s35390a_rtc_ioctl,
 };
 
-static int s35390a_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int s35390a_probe(struct i2c_client *client)
 {
 	int err, err_read;
 	unsigned int i;
@@ -485,14 +529,22 @@ static int s35390a_probe(struct i2c_client *client,
 		}
 	}
 
+	/* enable 32kE status register */
+	buf = S35390A_INT2_MODE_32K;
+	err = s35390a_set_reg(s35390a, S35390A_CMD_STATUS2, &buf, sizeof(buf));
+	if (err < 0) {
+		dev_err(dev, "s35390a 32Ke enable fail");
+		return err;
+	}
+
 	device_set_wakeup_capable(dev, 1);
 
 	s35390a->rtc->ops = &s35390a_rtc_ops;
 	s35390a->rtc->range_min = RTC_TIMESTAMP_BEGIN_2000;
 	s35390a->rtc->range_max = RTC_TIMESTAMP_END_2099;
 
-	/* supports per-minute alarms only, therefore set uie_unsupported */
-	s35390a->rtc->uie_unsupported = 1;
+	// set_bit(RTC_FEATURE_ALARM_RES_MINUTE, s35390a->rtc->features);
+	// clear_bit(RTC_FEATURE_UPDATE_INTERRUPT, s35390a->rtc->features );
 
 	if (status1 & S35390A_FLAG_INT2)
 		rtc_update_irq(s35390a->rtc, 1, RTC_AF);
@@ -505,7 +557,7 @@ static struct i2c_driver s35390a_driver = {
 		.name	= "rtc-s35390a",
 		.of_match_table = of_match_ptr(s35390a_of_match),
 	},
-	.probe		= s35390a_probe,
+	.probe_new	= s35390a_probe,
 	.id_table	= s35390a_id,
 };
 
