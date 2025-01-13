@@ -31,6 +31,7 @@
 #define RV1103B_GCK_RING_SEL_OFFSET		10
 #define RV1103B_GCK_RING_SEL_MASK		0x07
 #define RV1103B_PVTPLL_MAX_LENGTH		0x1ff
+#define RV1103B_PVTPLL_GCK_CNT_AVG		0x54
 
 #define RK3506_GRF_CORE_PVTPLL_CON0_L		0x00
 #define RK3506_GRF_CORE_PVTPLL_CON0_H		0x04
@@ -58,8 +59,11 @@ struct rockchip_clock_pvtpll_info {
 	unsigned int jm_table_size;
 	struct pvtpll_table *jm_table;
 	unsigned int pvtpll_adjust_factor;
+	unsigned int calibrate_length_step;
+	unsigned int calibrate_freq_per_step;
 	int (*config)(struct rockchip_clock_pvtpll *pvtpll,
 		      struct pvtpll_table *table);
+	int (*pvtpll_calibrate)(struct rockchip_clock_pvtpll *pvtpll);
 	int (*pvtpll_volt_sel_adjust)(struct rockchip_clock_pvtpll *pvtpll,
 				      u32 clock_id,
 				      u32 volt_sel);
@@ -76,6 +80,7 @@ struct rockchip_clock_pvtpll {
 	struct clk *pvtpll_clk;
 	struct clk *pvtpll_out;
 	struct notifier_block pvtpll_nb;
+	struct delayed_work pvtpll_calibrate_work;
 	unsigned long cur_rate;
 	u32 pvtpll_clk_id;
 };
@@ -118,7 +123,7 @@ static struct pvtpll_table rv1103b_core_pvtpll_table[] = {
 
 static struct pvtpll_table rv1103b_enc_pvtpll_table[] = {
 	/* rate_hz, ring_se, length */
-	ROCKCHIP_PVTPLL(500000000, 1, 100),
+	ROCKCHIP_PVTPLL(500000000, 1, 80),
 };
 
 static struct pvtpll_table rv1103b_isp_pvtpll_table[] = {
@@ -241,6 +246,15 @@ static int rockchip_clock_pvtpll_set_rate(struct clk_hw *hw,
 
 	if (!pvtpll)
 		return 0;
+
+	/*
+	 * The calibration is only for the init frequency of pvtpll on the platform
+	 * which regulator is fixed, if the frequency will be change, we assume that
+	 * dvfs is working, so just cancel the calibration work and use the pvtpll
+	 * configuration from pvtpll_table, it will match the opp-table.
+	 */
+	if (pvtpll->info->pvtpll_calibrate)
+		cancel_delayed_work_sync(&pvtpll->pvtpll_calibrate_work);
 
 	table = rockchip_get_pvtpll_settings(pvtpll, rate);
 	if (!table)
@@ -439,18 +453,99 @@ static void rockchip_adjust_pvtpll_by_otp(struct device *dev,
 	}
 }
 
+static int rv1103b_pvtpll_calibrate(struct rockchip_clock_pvtpll *pvtpll)
+{
+	unsigned int rate, delta, length, length_ori, val, i = 0;
+	unsigned int length_step = pvtpll->info->calibrate_length_step;
+	unsigned int freq_per_step = pvtpll->info->calibrate_freq_per_step;
+	unsigned long target_rate = pvtpll->cur_rate / MHz;
+	int ret;
+
+	ret = regmap_read(pvtpll->regmap, RV1103B_PVTPLL_GCK_CNT_AVG, &rate);
+	if (ret)
+		return ret;
+
+	if (rate < target_rate)
+		return 0;
+
+	/* delta < (6.25% * target_rate) */
+	if ((rate - target_rate) < (target_rate >> 4))
+		return 0;
+
+	ret = regmap_read(pvtpll->regmap, RV1103B_PVTPLL_GCK_LEN, &val);
+	if (ret)
+		return ret;
+	length_ori = (val >> RV1103B_GCK_RING_LEN_SEL_OFFSET) & RV1103B_GCK_RING_LEN_SEL_MASK;
+	length = length_ori;
+	delta = rate - target_rate;
+	length += (delta / freq_per_step) * length_step;
+	val = HIWORD_UPDATE(length, RV1103B_GCK_RING_LEN_SEL_MASK,
+			    RV1103B_GCK_RING_LEN_SEL_OFFSET);
+	ret = regmap_write(pvtpll->regmap, RV1103B_PVTPLL_GCK_LEN, val);
+	if (ret)
+		return ret;
+	usleep_range(2000, 2100);
+	ret = regmap_read(pvtpll->regmap, RV1103B_PVTPLL_GCK_CNT_AVG, &rate);
+	if (ret)
+		return ret;
+
+	while ((rate < target_rate) || ((rate - target_rate) > (target_rate >> 4))) {
+		if (i++ > 20)
+			break;
+
+		if (rate > target_rate)
+			length += length_step;
+		else
+			length -= length_step;
+		if (length < length_ori)
+			break;
+
+		val = HIWORD_UPDATE(length, RV1103B_GCK_RING_LEN_SEL_MASK,
+				    RV1103B_GCK_RING_LEN_SEL_OFFSET);
+		ret = regmap_write(pvtpll->regmap, RV1103B_PVTPLL_GCK_LEN, val);
+		if (ret)
+			return ret;
+		usleep_range(2000, 2100);
+		ret = regmap_read(pvtpll->regmap, RV1103B_PVTPLL_GCK_CNT_AVG, &rate);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static void rockchip_pvtpll_calibrate(struct work_struct *work)
+{
+	struct rockchip_clock_pvtpll *pvtpll;
+	int ret;
+
+	pvtpll = container_of(work, struct rockchip_clock_pvtpll, pvtpll_calibrate_work.work);
+
+	if (pvtpll->info->pvtpll_calibrate) {
+		ret = pvtpll->info->pvtpll_calibrate(pvtpll);
+		if (ret)
+			dev_warn(pvtpll->dev, "%s: calibrate error, ret %d\n", __func__, ret);
+	}
+}
+
 static const struct rockchip_clock_pvtpll_info rv1103b_core_pvtpll_data = {
 	.config = rv1103b_pvtpll_configs,
 	.table_size = ARRAY_SIZE(rv1103b_core_pvtpll_table),
 	.table = rv1103b_core_pvtpll_table,
 	.pvtpll_adjust_factor = 4,
 	.pvtpll_volt_sel_adjust = pvtpll_volt_sel_adjust_linear,
+	.calibrate_length_step = 2,
+	.calibrate_freq_per_step = 30,
+	.pvtpll_calibrate = rv1103b_pvtpll_calibrate,
 };
 
 static const struct rockchip_clock_pvtpll_info rv1103b_enc_pvtpll_data = {
 	.config = rv1103b_pvtpll_configs,
 	.table_size = ARRAY_SIZE(rv1103b_enc_pvtpll_table),
 	.table = rv1103b_enc_pvtpll_table,
+	.calibrate_length_step = 8,
+	.calibrate_freq_per_step = 25,
+	.pvtpll_calibrate = rv1103b_pvtpll_calibrate,
 };
 
 static const struct rockchip_clock_pvtpll_info rv1103b_isp_pvtpll_data = {
@@ -465,6 +560,9 @@ static const struct rockchip_clock_pvtpll_info rv1103b_npu_pvtpll_data = {
 	.table = rv1103b_npu_pvtpll_table,
 	.pvtpll_adjust_factor = 6,
 	.pvtpll_volt_sel_adjust = pvtpll_volt_sel_adjust_linear,
+	.calibrate_length_step = 4,
+	.calibrate_freq_per_step = 25,
+	.pvtpll_calibrate = rv1103b_pvtpll_calibrate,
 };
 
 static const struct rockchip_clock_pvtpll_info rk3506_core_pvtpll_data = {
@@ -522,7 +620,9 @@ static int rockchip_clock_pvtpll_probe(struct platform_device *pdev)
 	if (IS_ERR(pvtpll->regmap))
 		return PTR_ERR(pvtpll->regmap);
 
+	pvtpll->dev = dev;
 	pvtpll->pvtpll_clk_id = UINT_MAX;
+	INIT_DELAYED_WORK(&pvtpll->pvtpll_calibrate_work, rockchip_pvtpll_calibrate);
 
 	error = of_parse_phandle_with_args(np, "clocks", "#clock-cells",
 					   0, &clkspec);
@@ -542,6 +642,11 @@ static int rockchip_clock_pvtpll_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "failed to register clock: %d\n", error);
 		return error;
 	}
+
+	if (pvtpll->info->pvtpll_calibrate)
+		queue_delayed_work(system_freezable_wq,
+				   &pvtpll->pvtpll_calibrate_work,
+				   0);
 
 	mutex_lock(&pvtpll_list_mutex);
 	list_add(&pvtpll->list_head, &rockchip_clock_pvtpll_list);
