@@ -699,8 +699,10 @@ int rkisp_csi_config_patch(struct rkisp_device *dev, bool is_pre_cfg)
 	if (val)
 		rkisp_unite_set_bits(dev, CTRL_SWS_CFG, 0, val, false);
 	/* line counter from isp out, default from mp out */
-	if (dev->isp_ver == ISP_V32_L)
-		rkisp_unite_set_bits(dev, CTRL_SWS_CFG, 0, ISP32L_ISP2ENC_CNT_MUX, true);
+	if (dev->isp_ver == ISP_V32_L) {
+		val |= ISP32L_ISP2ENC_CNT_MUX;
+		rkisp_unite_set_bits(dev, CTRL_SWS_CFG, 0, val, true);
+	}
 	dev->rdbk_cnt = -1;
 	dev->rdbk_cnt_x1 = -1;
 	dev->rdbk_cnt_x2 = -1;
