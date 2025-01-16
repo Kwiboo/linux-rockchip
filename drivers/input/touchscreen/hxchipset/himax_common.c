@@ -653,7 +653,7 @@ static int himax_common_proc_init(struct himax_ts_data *ts)
 
 	if (ts->debug.procfs.proc_dir == NULL) {
 		E(" %s: himax_touch_proc_dir file create failed!\n", __func__);
-		return -ENOMEM;
+		goto fail_1;
 	}
 #if defined(CONFIG_TOUCHSCREEN_HIMAX_INSPECT)
 	himax_inspection_init(ts);
@@ -663,7 +663,7 @@ static int himax_common_proc_init(struct himax_ts_data *ts)
 				 &himax_proc_self_test_ops, ts);
 	if (ts->debug.procfs.self_test == NULL) {
 		E(" %s: proc self_test file create failed!\n", __func__);
-		goto fail_1;
+		goto fail_2;
 	}
 
 	ts->debug.procfs.wpbplock_node =
@@ -671,7 +671,7 @@ static int himax_common_proc_init(struct himax_ts_data *ts)
 				 &himax_proc_WPBPlock_node_ops, ts);
 	if (ts->debug.procfs.wpbplock_node == NULL) {
 		E(" %s: proc BPlock file create failed!\n", __func__);
-		goto fail_1;
+		goto fail_3;
 	}
 
 	ts->debug.procfs.fail_det =
@@ -679,7 +679,7 @@ static int himax_common_proc_init(struct himax_ts_data *ts)
 				 &himax_proc_fail_det_ops, ts);
 	if (ts->debug.procfs.fail_det == NULL) {
 		E(" %s: proc fail det file create failed!\n", __func__);
-		goto fail_1;
+		goto fail_4;
 	}
 
 #if defined(HX_TP_INSPECT_MODE)
@@ -689,15 +689,23 @@ static int himax_common_proc_init(struct himax_ts_data *ts)
 
 	if (ts->debug.procfs.inspect_mode == NULL) {
 		E(" %s: proc INSPECT_MODE file create failed!\n", __func__);
-		goto fail_6;
+		goto fail_5;
 	}
 #endif
 	return 0;
 #if defined(HX_TP_INSPECT_MODE)
-fail_6:
-	remove_proc_entry(HIMAX_PROC_INSPECT_MODE_FILE, ts->debug.procfs.proc_dir);
+fail_5:
+	remove_proc_entry(HIMAX_PROC_FAIL_DET_FILE, ts->debug.procfs.proc_dir);
 #endif
+fail_4:
+	remove_proc_entry(HIMAX_PROC_WP_BP_LOCK_FILE, ts->debug.procfs.proc_dir);
+fail_3:
 	remove_proc_entry(HIMAX_PROC_SELF_TEST_FILE, ts->debug.procfs.proc_dir);
+fail_2:
+	if (ts->location)
+		remove_proc_entry(ts->location, NULL);
+	else
+		remove_proc_entry(HIMAX_PROC_TOUCH_FOLDER, NULL);
 fail_1:
 	return -ENOMEM;
 }
@@ -705,7 +713,15 @@ fail_1:
 static void himax_common_proc_deinit(struct himax_ts_data *ts)
 {
 	remove_proc_entry(HIMAX_PROC_SELF_TEST_FILE, ts->debug.procfs.proc_dir);
-	remove_proc_entry(HIMAX_PROC_TOUCH_FOLDER, NULL);
+	remove_proc_entry(HIMAX_PROC_WP_BP_LOCK_FILE, ts->debug.procfs.proc_dir);
+	remove_proc_entry(HIMAX_PROC_FAIL_DET_FILE, ts->debug.procfs.proc_dir);
+#if defined(HX_TP_INSPECT_MODE)
+	remove_proc_entry(HIMAX_PROC_INSPECT_MODE_FILE, ts->debug.procfs.proc_dir);
+#endif
+	if (ts->location)
+		remove_proc_entry(ts->location, NULL);
+	else
+		remove_proc_entry(HIMAX_PROC_TOUCH_FOLDER, NULL);
 }
 
 void himax_parse_assign_cmd(uint32_t addr, uint8_t *cmd, int len)
@@ -2039,12 +2055,13 @@ found_hx_chip:
 
 	/*touch data init*/
 	err = himax_report_data_init(ts);
-#if defined(HIMAX_I2C_PLATFORM)
-	himax_sysfs_init(ts);
-#endif
-
 	if (err)
 		goto err_report_data_init_failed;
+#if defined(HIMAX_I2C_PLATFORM)
+	err = himax_sysfs_init(ts);
+	if (err)
+		goto err_creat_sysfs_file_failed;
+#endif
 
 	if (himax_common_proc_init(ts)) {
 		E(" %s: himax_common proc_init failed!\n", __func__);
@@ -2069,9 +2086,14 @@ found_hx_chip:
 	return 0;
 
 err_creat_proc_file_failed:
+#if defined(HIMAX_I2C_PLATFORM)
+	himax_sysfs_deinit(ts);
+err_creat_sysfs_file_failed:
+#endif
 	himax_report_data_deinit(ts);
 err_report_data_init_failed:
-
+	input_unregister_device(ts->input_dev);
+	ts->input_dev = NULL;
 #if defined(HX_CONFIG_FB) || defined(HX_CONFIG_DRM)
 	cancel_delayed_work_sync(&ts->work_att);
 	destroy_workqueue(ts->himax_att_wq);
@@ -2142,19 +2164,26 @@ void himax_chip_common_deinit(struct himax_ts_data *ts)
 	cancel_delayed_work_sync(&ts->work_att);
 	destroy_workqueue(ts->himax_att_wq);
 #endif
-	input_free_device(ts->input_dev);
 #if defined(HX_CONTAINER_SPEED_UP)
 	cancel_delayed_work_sync(&ts->ts_int_work);
 	destroy_workqueue(ts->ts_int_workqueue);
 #endif
-
 #if defined(HX_BOOT_UPGRADE)
 	cancel_delayed_work_sync(&ts->work_boot_upgrade);
 	destroy_workqueue(ts->himax_boot_upgrade_wq);
 #endif
 	himax_gpio_power_deconfig(ts->pdata);
 	himax_mcu_in_cmd_struct_free(ts);
+	if (ts->input_dev) {
+		input_unregister_device(ts->input_dev);
+		ts->input_dev = NULL;
+	}
 
+#if defined(HIMAX_I2C_PLATFORM)
+	himax_sysfs_deinit(ts);
+#endif
+	kfree(ts->rw_buf);
+	ts->rw_buf = NULL;
 	kfree(ts->hx_touch_data);
 	ts->hx_touch_data = NULL;
 	kfree(ts->ic_data);

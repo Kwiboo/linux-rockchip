@@ -2318,6 +2318,7 @@ void himax_touch_proc_deinit(struct himax_ts_data *ts)
 	remove_proc_entry(HIMAX_PROC_DELTA_FILE, ts->debug.procfs.diag_dir);
 	remove_proc_entry(HIMAX_PROC_STACK_FILE, ts->debug.procfs.diag_dir);
 	remove_proc_entry(HIMAX_PROC_VENDOR_FILE, ts->debug.procfs.proc_dir);
+	remove_proc_entry(HIMAX_PROC_DIAG_FOLDER, ts->debug.procfs.proc_dir);
 }
 
 int himax_debug_init(struct himax_ts_data *ts)

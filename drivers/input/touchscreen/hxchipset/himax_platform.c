@@ -224,7 +224,14 @@ int himax_sysfs_init(struct himax_ts_data *ts)
 		dev_warn(&client->dev, "Failed to create %s (%d)\n", bin_attr_i2c_trace.attr.name,
 			 error);
 
-	return 0;
+	return error;
+}
+
+void himax_sysfs_deinit(struct himax_ts_data *ts)
+{
+	struct i2c_client *client = ts->client;
+
+	sysfs_remove_bin_file(&client->dev.kobj, &bin_attr_i2c_trace);
 }
 
 int himax_dev_set(struct himax_ts_data *ts)
@@ -1130,9 +1137,6 @@ static int himax_chip_common_remove(struct i2c_client *client)
 
 	/* FIXME */
 	// himax_hx83192_remove();
-
-	kfree(ts->rw_buf);
-
 	return 0;
 }
 

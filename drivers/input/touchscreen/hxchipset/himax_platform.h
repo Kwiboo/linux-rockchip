@@ -107,6 +107,7 @@ extern enum hrtimer_restart himax_ts_timer_func(struct hrtimer *timer);
 extern int himax_chip_common_init(struct himax_ts_data *ts);
 extern void himax_chip_common_deinit(struct himax_ts_data *ts);
 extern int himax_sysfs_init(struct himax_ts_data *ts);
+extern void himax_sysfs_deinit(struct himax_ts_data *ts);
 int himax_int_en_set(struct himax_ts_data *ts);
 int tp_diag_himax(void);
 #if IS_ENABLED(CONFIG_TOUCHSCREEN_HIMAX_IC_HX83192)

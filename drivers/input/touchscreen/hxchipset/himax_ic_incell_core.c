@@ -550,8 +550,9 @@ static void himax_mcu_system_reset(struct himax_ts_data *ts)
 {
 	uint8_t addr[DATA_LEN_4] = { 0 };
 	uint8_t data[DATA_LEN_4] = { 0 };
+#if defined(HIMAX_I2C_PLATFORM)
 	int ret = 0;
-
+#endif
 	himax_parse_assign_cmd(addr_system_reset, addr, sizeof(addr));
 	himax_parse_assign_cmd(data_system_reset, data, sizeof(data));
 	himax_mcu_register_write(ts, addr, DATA_LEN_4, data, 0);
