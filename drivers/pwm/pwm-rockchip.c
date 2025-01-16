@@ -1561,8 +1561,6 @@ static int rockchip_pwm_set_wave_v4(struct pwm_chip *chip, struct pwm_device *pw
 	writel_relaxed(middle, pc->base + WAVE_MIDDLE);
 
 	writel_relaxed(rpt, pc->base + RPT);
-	writel_relaxed(WAVE_MAX_INT_EN(config->enable) | WAVE_MIDDLE_INT_EN(config->enable),
-		       pc->base + INT_EN);
 
 	pc->wave_en = config->enable;
 
