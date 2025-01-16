@@ -1592,7 +1592,7 @@ int rockchip_pwm_set_wave(struct pwm_device *pwm, struct rockchip_pwm_wave_confi
 		return -EINVAL;
 	}
 
-	pc->scaler = DIV_ROUND_CLOSEST_ULL(pc->clk_rate, config->clk_rate * 2);
+	pc->scaler = DIV_ROUND_CLOSEST_ULL(pc->clk_rate, config->clk_rate) / 2;
 	if (pc->scaler > 256) {
 		dev_err(chip->dev, "Unsupported scale factor %d(max: 512) for PWM%d\n",
 			pc->scaler * 2, pc->channel_id);
