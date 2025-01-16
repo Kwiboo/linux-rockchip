@@ -70,7 +70,7 @@
 /*
  * regs for pwm v4
  */
-#define HIWORD_UPDATE(v, l, h)	(((v) << (l)) | (GENMASK(h, l) << 16))
+#define HIWORD_UPDATE(v, l, h)	((((v) << (l)) & GENMASK((h), (l))) | (GENMASK(h, l) << 16))
 
 /* VERSION_ID */
 #define VERSION_ID			0x0
