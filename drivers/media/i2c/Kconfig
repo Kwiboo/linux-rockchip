@@ -2125,6 +2125,16 @@ config VIDEO_VS6624
 	  To compile this driver as a module, choose M here: the
 	  module will be called vs6624.
 
+config VIDEO_MIA1321
+	tristate "ImageDesign mia1321 sensor support"
+	depends on I2C && VIDEO_V4L2
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  This is a Video4Linux2 sensor driver for the ImageDesign
+	  MIA1321 camera.
+
 config VIDEO_MIS2031
 	tristate "ImageDesign mis2031 sensor support"
 	depends on I2C && VIDEO_V4L2
