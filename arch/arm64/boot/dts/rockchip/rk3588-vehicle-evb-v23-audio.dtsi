@@ -17,7 +17,7 @@
 
 	sound0 {
 		compatible = "simple-audio-card";
-		simple-audio-card,name = "rockchip,tdm";
+		simple-audio-card,name = "rockchip,car-rk3308-sound";
 		simple-audio-card,format = "i2s";
 		simple-audio-card,mclk-fs = <256>;
 		simple-audio-card,bitclock-master = <&codec_master>;
