@@ -147,6 +147,18 @@ static int rockchip_csi2_dphy_attach_hw(struct csi2_dphy *dphy, int csi_idx, int
 			dphy->lane_mode = PHY_SPLIT_23;
 			dphy_hw->lane_mode = LANE_MODE_SPLIT;
 			break;
+		case 3:
+			dphy->lane_mode = PHY_FULL_MODE;
+			dphy_hw->lane_mode = LANE_MODE_FULL;
+			break;
+		case 4:
+			dphy->lane_mode = PHY_SPLIT_01;
+			dphy_hw->lane_mode = LANE_MODE_SPLIT;
+			break;
+		case 5:
+			dphy->lane_mode = PHY_SPLIT_23;
+			dphy_hw->lane_mode = LANE_MODE_SPLIT;
+			break;
 		default:
 			dphy->lane_mode = PHY_FULL_MODE;
 			dphy_hw->lane_mode = LANE_MODE_FULL;
