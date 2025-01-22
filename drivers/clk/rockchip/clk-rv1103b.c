@@ -140,6 +140,10 @@ static struct rockchip_clk_branch rv1103b_clk_uart2_fracmux __initdata =
 	MUX(SCLK_UART2_SRC, "sclk_uart2_src", sclk_uart2_src_p, CLK_SET_RATE_PARENT,
 			RV1103B_CLKSEL_CON(32), 12, 2, MFLAGS);
 
+static struct rockchip_clk_branch rv1103b_clk_sai_fracmux __initdata =
+	MUX(MCLK_SAI_SRC, "mclk_sai_src", mclk_sai_src_p, CLK_SET_RATE_PARENT,
+			RV1103B_CLKSEL_CON(35), 10, 2, MFLAGS);
+
 static struct rockchip_clk_branch rv1103b_rcdiv_pmu_fracmux __initdata =
 	MUX(CLK_32K, "clk_32k", clk_32k_p, CLK_SET_RATE_PARENT | CLK_SET_RATE_NO_REPARENT,
 			RK3568_PMU_CLKSEL_CON(0), 0, 2, MFLAGS);
@@ -205,11 +209,10 @@ static struct rockchip_clk_branch rv1103b_clk_branches[] __initdata = {
 	COMPOSITE_NOMUX(CLK_SAI_SRC, "clk_sai_src", "gpll", 0,
 			RV1103B_CLKSEL_CON(20), 0, 5, DFLAGS,
 			RV1103B_CLKGATE_CON(1), 12, GFLAGS),
-	COMPOSITE_FRAC_V2(CLK_SAI_FRAC, "clk_sai_frac", "clk_sai_src", 0,
-			RV1103B_CLKSEL_CON(21), 16, 16,
-			RV1103B_CLK_SAI_FRAC_DIV_HIGH, 8, 8, 0),
-	MUX(MCLK_SAI_SRC, "mclk_sai_src", mclk_sai_src_p, CLK_SET_RATE_PARENT,
-			RV1103B_CLKSEL_CON(35), 10, 2, MFLAGS),
+	COMPOSITE_FRACMUX(CLK_SAI_FRAC, "clk_sai_frac", "clk_sai_src", 0,
+			RV1103B_CLKSEL_CON(21), 0,
+			RV1103B_CLKGATE_CON(1), 13, GFLAGS,
+			&rv1103b_clk_sai_fracmux),
 	GATE(MCLK_SAI, "mclk_sai", "mclk_sai_src", 0,
 			RV1103B_CLKGATE_CON(5), 5, GFLAGS),
 
