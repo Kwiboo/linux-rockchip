@@ -151,6 +151,7 @@
 #define HDMI_EARC_MODE			BIT(29)
 #define DATA_RATE_MASK			0xFFFFFFF
 
+#define HDMI14_MAX_RATE                 340000
 #define HDMI20_MAX_RATE			600000
 #define HDMI_8K60_RATE			2376000
 
@@ -2130,12 +2131,12 @@ dw_hdmi_rockchip_select_output(struct drm_connector_state *conn_state,
 			*color_format = RK_IF_FORMAT_YCBCR422;
 		else if (conn_state->connector->ycbcr_420_allowed &&
 			 drm_mode_is_420(info, &mode) &&
-			 (pixclock >= 594000 && !hdmi->is_hdmi_qp))
+			 (pixclock > HDMI14_MAX_RATE && !hdmi->is_hdmi_qp))
 			*color_format = RK_IF_FORMAT_YCBCR420;
 		break;
 	case RK_IF_FORMAT_YCBCR_LQ:
 		if (conn_state->connector->ycbcr_420_allowed &&
-		    drm_mode_is_420(info, &mode) && pixclock >= 594000)
+		    drm_mode_is_420(info, &mode) && pixclock > HDMI14_MAX_RATE)
 			*color_format = RK_IF_FORMAT_YCBCR420;
 		else if (info->color_formats & DRM_COLOR_FORMAT_YCRCB422)
 			*color_format = RK_IF_FORMAT_YCBCR422;
@@ -2144,7 +2145,7 @@ dw_hdmi_rockchip_select_output(struct drm_connector_state *conn_state,
 		break;
 	case RK_IF_FORMAT_YCBCR420:
 		if (conn_state->connector->ycbcr_420_allowed &&
-		    drm_mode_is_420(info, &mode) && pixclock >= 594000)
+		    drm_mode_is_420(info, &mode) && pixclock > HDMI14_MAX_RATE)
 			*color_format = RK_IF_FORMAT_YCBCR420;
 		break;
 	case RK_IF_FORMAT_YCBCR422:
