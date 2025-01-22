@@ -1474,20 +1474,23 @@ rk628_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	i2c_set_clientdata(client, rk628);
 	rk628->hdmirx_irq = client->irq;
 
-	if (of_find_node_by_name(rk628->dev->of_node, "rk628-pwm")) {
-		np = of_find_node_by_name(rk628->dev->of_node, "rk628-pwm");
-		if (of_device_is_available(np)) {
-			ret = rk628_pwm_probe(rk628, np);
-			if (ret) {
-				dev_err(dev, "failed to probe pwm\n");
-				return ret;
-			}
+	np = of_find_node_by_name(rk628->dev->of_node, "rk628-pwm");
+	if (of_device_is_available(np)) {
+		ret = rk628_pwm_probe(rk628, np);
+		if (ret) {
+			of_node_put(np);
+			dev_err(dev, "failed to probe pwm\n");
+			return ret;
 		}
 	}
+	of_node_put(np);
 
 	if (rk628->pwm_bl_en) {
 		rk628->pwm_wq = alloc_ordered_workqueue("%s",
 			WQ_MEM_RECLAIM | WQ_FREEZABLE, "rk628-pwm-wq");
+		if (!rk628->pwm_wq)
+			return -ENOMEM;
+
 		INIT_DELAYED_WORK(&rk628->pwm_delay_work, rk628_pwm_work);
 	}
 
@@ -1495,14 +1498,14 @@ rk628_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	if (ret) {
 		if (ret != -EPROBE_DEFER)
 			dev_err(dev, "display route err\n");
-		return ret;
+		goto destroy_pwm_wq;
 	}
 
 	if (!rk628_output_is_csi(rk628)) {
 		ret = rk628_display_timings_get(rk628);
 		if (ret && !rk628_output_is_hdmi(rk628)) {
 			dev_info(dev, "display timings err\n");
-			return ret;
+			goto destroy_pwm_wq;
 		}
 	}
 
@@ -1513,7 +1516,7 @@ rk628_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	if (IS_ERR(rk628->soc_24M)) {
 		ret = PTR_ERR(rk628->soc_24M);
 		dev_err(dev, "Unable to get soc_24M: %d\n", ret);
-		return ret;
+		goto destroy_pwm_wq;
 	}
 
 	clk_prepare_enable(rk628->soc_24M);
@@ -1652,6 +1655,11 @@ rk628_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
 
 err_clk:
 	clk_disable_unprepare(rk628->soc_24M);
+
+destroy_pwm_wq:
+	if (rk628->pwm_wq)
+		destroy_workqueue(rk628->pwm_wq);
+
 	return ret;
 }
 
