@@ -25,6 +25,9 @@
 		csi2dphy0 = &csi2_dphy0;
 		csi2dphy1 = &csi2_dphy1;
 		csi2dphy2 = &csi2_dphy2;
+		csi2dphy3 = &csi2_dphy3;
+		csi2dphy4 = &csi2_dphy4;
+		csi2dphy5 = &csi2_dphy5;
 		ethernet0 = &gmac;
 		gpio0 = &gpio0;
 		gpio1 = &gpio1;
@@ -51,6 +54,8 @@
 		pwm11 = &pwm2_4ch_3;
 		rkcif_mipi_lvds0 = &rkcif_mipi_lvds;
 		rkcif_mipi_lvds1 = &rkcif_mipi_lvds1;
+		rkcif_mipi_lvds2 = &rkcif_mipi_lvds2;
+		rkcif_mipi_lvds3 = &rkcif_mipi_lvds3;
 		serial0 = &uart0;
 		serial1 = &uart1;
 		serial2 = &uart2;
@@ -299,6 +304,27 @@
 		status = "disabled";
 	};
 
+	/* vir dphy0 full mode */
+	csi2_dphy3: csi2-dphy3 {
+		compatible = "rockchip,rv1106-csi2-dphy";
+		rockchip,hw = <&csi2_dphy_hw>;
+		status = "disabled";
+	};
+
+	/* vir dphy1 split mode 01 */
+	csi2_dphy4: csi2-dphy4 {
+		compatible = "rockchip,rv1106-csi2-dphy";
+		rockchip,hw = <&csi2_dphy_hw>;
+		status = "disabled";
+	};
+
+	/* vir dphy2 split mode 23 */
+	csi2_dphy5: csi2-dphy5 {
+		compatible = "rockchip,rv1106-csi2-dphy";
+		rockchip,hw = <&csi2_dphy_hw>;
+		status = "disabled";
+	};
+
 	fiq_debugger: fiq-debugger {
 		compatible = "rockchip,fiq-debugger";
 		rockchip,serial-id = <0>;
@@ -324,6 +350,18 @@
 	};
 
 	mipi1_csi2: mipi1-csi2 {
+		compatible = "rockchip,rv1103b-mipi-csi2";
+		rockchip,hw = <&mipi0_csi2_hw>, <&mipi1_csi2_hw>;
+		status = "disabled";
+	};
+
+	mipi2_csi2: mipi2-csi2 {
+		compatible = "rockchip,rv1103b-mipi-csi2";
+		rockchip,hw = <&mipi0_csi2_hw>, <&mipi1_csi2_hw>;
+		status = "disabled";
+	};
+
+	mipi3_csi2: mipi3-csi2 {
 		compatible = "rockchip,rv1103b-mipi-csi2";
 		rockchip,hw = <&mipi0_csi2_hw>, <&mipi1_csi2_hw>;
 		status = "disabled";
@@ -369,6 +407,30 @@
 		status = "disabled";
 	};
 
+	rkcif_mipi_lvds2: rkcif-mipi-lvds2 {
+		compatible = "rockchip,rkcif-mipi-lvds";
+		rockchip,hw = <&rkcif>;
+		status = "disabled";
+	};
+
+	rkcif_mipi_lvds2_sditf: rkcif-mipi-lvds2-sditf {
+		compatible = "rockchip,rkcif-sditf";
+		rockchip,cif = <&rkcif_mipi_lvds2>;
+		status = "disabled";
+	};
+
+	rkcif_mipi_lvds3: rkcif-mipi-lvds3 {
+		compatible = "rockchip,rkcif-mipi-lvds";
+		rockchip,hw = <&rkcif>;
+		status = "disabled";
+	};
+
+	rkcif_mipi_lvds3_sditf: rkcif-mipi-lvds3-sditf {
+		compatible = "rockchip,rkcif-sditf";
+		rockchip,cif = <&rkcif_mipi_lvds3>;
+		status = "disabled";
+	};
+
 	rkdvbm: rkdvbm {
 		compatible = "rockchip,rk-dvbm";
 		status = "disabled";
@@ -382,6 +444,20 @@
 	};
 
 	rkisp_vir1: rkisp-vir1 {
+		compatible = "rockchip,rkisp-vir";
+		rockchip,hw = <&rkisp>;
+		dvbm = <&rkdvbm>;
+		status = "disabled";
+	};
+
+	rkisp_vir2: rkisp-vir2 {
+		compatible = "rockchip,rkisp-vir";
+		rockchip,hw = <&rkisp>;
+		dvbm = <&rkdvbm>;
+		status = "disabled";
+	};
+
+	rkisp_vir3: rkisp-vir3 {
 		compatible = "rockchip,rkisp-vir";
 		rockchip,hw = <&rkisp>;
 		dvbm = <&rkdvbm>;
