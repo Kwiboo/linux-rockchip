@@ -1023,6 +1023,19 @@ config VIDEO_AR2020
 	  To compile this driver as a module, choose M here: the
 	  module will be called ar2020.
 
+config VIDEO_BF2257
+	tristate "BYD BF2257 sensor support"
+	depends on I2C && VIDEO_V4L2
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  This is a Video4Linux2 sensor driver for the BYD
+	  BF2257 camera.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called bf2257.
+
 config VIDEO_GC02M2
 	tristate "GalaxyCore GC02M2 sensor support"
 	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
