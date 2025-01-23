@@ -782,7 +782,6 @@ static struct mpp_hw_ops vdpu_v1_hw_ops = {
 	.set_freq = vdpu_set_freq,
 	.reduce_freq = vdpu_reduce_freq,
 	.reset = vdpu_reset,
-	.set_grf = vdpu_3036_set_grf,
 };
 
 static struct mpp_hw_ops vdpu_3036_hw_ops = {
