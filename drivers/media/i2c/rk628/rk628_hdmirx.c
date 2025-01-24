@@ -1836,6 +1836,7 @@ u8 rk628_hdmirx_get_range(struct rk628 *rk628)
 {
 	u8 color_range, yuv_range;
 	u32 val, vic, fmt, avi_hb;
+	bool dvi;
 
 	rk628_i2c_read(rk628, HDMI_RX_PDEC_AVI_PB, &val);
 	rk628_i2c_read(rk628, HDMI_RX_PDEC_AVI_HB, &avi_hb);
@@ -1843,6 +1844,8 @@ u8 rk628_hdmirx_get_range(struct rk628 *rk628)
 	yuv_range = (avi_hb & YUV_COLORRANGE_MASK) >> 30;
 	vic = (val & VID_IDENT_CODE_MASK) >> 24;
 	fmt = (val & VIDEO_FORMAT_MASK) >> 5;
+	rk628_i2c_read(rk628, HDMI_RX_PDEC_STS, &val);
+	dvi = !!(val & DVI_DET);
 	if (fmt != HDMIRX_RGB888) {
 		if (yuv_range == HDMIRX_YCC_LIMIT)
 			color_range = HDMIRX_LIMIT_RANGE;
@@ -1850,11 +1853,13 @@ u8 rk628_hdmirx_get_range(struct rk628 *rk628)
 			color_range = HDMIRX_FULL_RANGE;
 		else
 			color_range = HDMIRX_DEFAULT_RANGE;
-	}
-	if (fmt == HDMIRX_RGB888 && color_range == HDMIRX_DEFAULT_RANGE) {
-		(vic) ?
-		(color_range = HDMIRX_LIMIT_RANGE) :
-		(color_range = HDMIRX_FULL_RANGE);
+	} else {
+		if (dvi)
+			color_range = HDMIRX_FULL_RANGE;
+		if (color_range == HDMIRX_DEFAULT_RANGE)
+			vic ?
+			(color_range = HDMIRX_FULL_RANGE) :
+			(color_range = HDMIRX_LIMIT_RANGE);
 	}
 
 	return color_range;
