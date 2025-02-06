@@ -2975,7 +2975,8 @@ retry:
 						  alloc_flags))
 		goto retry;
 
-	trace_mm_page_alloc_zone_locked(page, order, migratetype);
+	if (page)
+		trace_mm_page_alloc_zone_locked(page, order, migratetype);
 	return page;
 }
 
@@ -2985,7 +2986,9 @@ static struct page *__rmqueue_cma(struct zone *zone, unsigned int order,
 				  unsigned int alloc_flags)
 {
 	struct page *page = __rmqueue_cma_fallback(zone, order);
-	trace_mm_page_alloc_zone_locked(page, order, MIGRATE_CMA);
+
+	if (page)
+		trace_mm_page_alloc_zone_locked(page, order, MIGRATE_CMA);
 	return page;
 }
 #else
