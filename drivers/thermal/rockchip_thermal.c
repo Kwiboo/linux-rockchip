@@ -354,10 +354,10 @@ static const struct tsadc_table rv1103b_code_table[] = {
 	{362, MIN_TEMP},
 	{395, -40000},
 	{503, 25000},
-	{604, 85000},
-	{672, 125000},
-	{757, MAX_TEMP},
-	{TSADCV2_DATA_MASK, MAX_TEMP},
+	{528, 40000},
+	{679, 125000},
+	{779, MAX_TEMP},
+	{TSADCV3_DATA_MASK, MAX_TEMP},
 };
 
 static const struct tsadc_table rv1106_code_table[] = {
