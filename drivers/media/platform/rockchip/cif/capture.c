@@ -4919,6 +4919,7 @@ static int rkcif_csi_stream_start(struct rkcif_stream *stream, unsigned int mode
 		stream->is_change_toisp = false;
 		stream->is_finish_single_cap = true;
 		stream->is_wait_single_cap = false;
+		stream->last_frame_idx = 0;
 	}
 	stream->interlaced_bad_frame = false;
 	stream->last_fs_interlaced_phase = 0;
@@ -6306,6 +6307,7 @@ void rkcif_do_stop_stream(struct rkcif_stream *stream,
 			kfifo_free(&stream->dcg_kfifo);
 		}
 		stream->crop_mask = 0;
+		stream->frame_loss = 0;
 	}
 	if (mode == RKCIF_STREAM_MODE_CAPTURE) {
 		tasklet_disable(&stream->vb_done_tasklet);
@@ -6898,6 +6900,7 @@ static int rkcif_stream_start(struct rkcif_stream *stream, unsigned int mode)
 		stream->frame_phase = 0;
 		stream->is_in_vblank = false;
 		stream->is_change_toisp = false;
+		stream->last_frame_idx = 0;
 	}
 
 	sensor_info = dev->active_sensor;
@@ -8004,6 +8007,7 @@ void rkcif_stream_init(struct rkcif_device *dev, u32 id)
 	stream->is_fb_first_frame = true;
 	stream->frame_idx = 0;
 	memset(&stream->sensor_exp_info, 0, sizeof(stream->sensor_exp_info));
+	stream->frame_loss = 0;
 }
 
 static int rkcif_sensor_set_power(struct rkcif_stream *stream, int on)
@@ -12871,7 +12875,7 @@ static void rkcif_deal_sof(struct rkcif_device *cif_dev)
 
 	if (cif_dev->sditf[0] &&
 	    cif_dev->sditf[0]->mode.rdbk_mode >= RKISP_VICAP_RDBK_AIQ &&
-	    (!detect_stream->dma_en))
+	    (!detect_stream->dma_en) && cif_dev->chip_id < CHIP_RK3576_CIF)
 		return;
 	if (cif_dev->sync_cfg.type != NO_SYNC_MODE &&
 	    cif_dev->sync_cfg.type != SOFT_SYNC_MODE) {
@@ -12946,8 +12950,9 @@ static void rkcif_deal_sof(struct rkcif_device *cif_dev)
 				schedule_work(&cif_dev->exp_work);
 			else
 				rkcif_send_sof(cif_dev);
-			if (detect_stream->cifdev->rdbk_debug &&
-			    detect_stream->frame_idx < 15)
+			if ((detect_stream->cifdev->rdbk_debug &&
+			    detect_stream->frame_idx < 15) ||
+			    rkcif_debug > 3)
 				v4l2_info(&cif_dev->v4l2_dev,
 					  "stream[%d] send sof %d, real sof %d\n",
 					  detect_stream->id,
@@ -13966,6 +13971,12 @@ void rkcif_irq_pingpong_v1(struct rkcif_device *cif_dev)
 			if (stream->crop_dyn_en)
 				rkcif_dynamic_crop(stream);
 
+			if ((stream->frame_idx - stream->last_frame_idx - 1) != 0) {
+				stream->frame_loss += (stream->frame_idx - stream->last_frame_idx - 1);
+				v4l2_dbg(3, rkcif_debug, &cif_dev->v4l2_dev,
+					 "cur_frame_idx %d, last_frame_idx %d, frame loss %d\n",
+					 stream->frame_idx, stream->last_frame_idx, stream->frame_loss);
+			}
 			if (stream->dma_en & RKCIF_DMAEN_BY_VICAP) {
 				if (cif_dev->sync_cfg.type == NO_SYNC_MODE ||
 				    cif_dev->sync_cfg.type == SOFT_SYNC_MODE)

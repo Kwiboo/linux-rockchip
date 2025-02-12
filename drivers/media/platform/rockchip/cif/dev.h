@@ -620,6 +620,7 @@ struct rkcif_stream {
 	int				sequence;
 	atomic_t			sub_stream_buf_cnt;
 	u32				rounding_bit;
+	int				frame_loss;
 	struct kfifo			exp_kfifo;
 	struct kfifo			gain_kfifo;
 	struct kfifo			vts_kfifo;

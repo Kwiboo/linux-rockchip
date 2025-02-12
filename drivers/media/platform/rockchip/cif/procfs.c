@@ -666,6 +666,12 @@ static void rkcif_show_format(struct rkcif_device *dev, struct seq_file *f)
 			   dev->stream[1].total_buf_num,
 			   dev->stream[2].total_buf_num,
 			   dev->stream[3].total_buf_num);
+		if (dev->chip_id >= CHIP_RK3576_CIF)
+			seq_printf(f, "frame loss: %d %d %d %d\n",
+				   dev->stream[0].frame_loss,
+				   dev->stream[1].frame_loss,
+				   dev->stream[2].frame_loss,
+				   dev->stream[3].frame_loss);
 		if (dev->sditf[0])
 			rkcif_show_toisp_info(dev, f);
 		if (dev->reg_dbg)
