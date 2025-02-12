@@ -4032,6 +4032,13 @@ err:
 static int rkisp_vicap_sof(struct rkisp_device *dev, struct rkisp_vicap_sof *sof)
 {
 	dev->vicap_sof = *sof;
+	if (!IS_HDR_RDBK(dev->rd_mode) &&
+	    sof->sequence - atomic_read(&dev->isp_sdev.frm_sync_seq) > 0) {
+		v4l2_dbg(4, rkisp_debug, &dev->v4l2_dev,
+			 "vicap sof %d, isp sof %d\n",
+			 sof->sequence, atomic_read(&dev->isp_sdev.frm_sync_seq));
+		atomic_set(&dev->isp_sdev.frm_sync_seq, sof->sequence);
+	}
 	return 0;
 }
 
