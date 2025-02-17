@@ -3314,6 +3314,8 @@
 				clocks = <&cru PCLK_PHP_ROOT>,
 					 <&cru ACLK_PCIE_ROOT>,
 					 <&cru ACLK_PHP_ROOT>;
+				pm_qos = <&qos_gic600_m0>,
+					 <&qos_gic600_m1>;
 			};
 			power-domain@RK3588_PD_SDIO {
 				reg = <RK3588_PD_SDIO>;
@@ -5158,6 +5160,16 @@
 	qos_sdio: qos@fdf39000 {
 		compatible = "syscon";
 		reg = <0x0 0xfdf39000 0x0 0x20>;
+	};
+
+	qos_gic600_m0: qos@fdf3a000 {
+		compatible = "syscon";
+		reg = <0x0 0xfdf3a000 0x0 0x20>;
+	};
+
+	qos_gic600_m1: qos@fdf3a200 {
+		compatible = "syscon";
+		reg = <0x0 0xfdf3a200 0x0 0x20>;
 	};
 
 	qos_sdmmc: qos@fdf3d800 {
