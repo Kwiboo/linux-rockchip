@@ -1523,6 +1523,7 @@ static void hdmi_config_AVI(struct dw_hdmi_qp *hdmi,
 		hdmi_infoframe_set_checksum(buff, 17);
 	} else if (is_hdmi2_sink(connector) && hdmi_quirk_vsi(connector, hdmi->vendor_info)) {
 		buff[7] = hdmi->vic;
+		hdmi_infoframe_set_checksum(buff, 17);
 	}
 
 	/*
