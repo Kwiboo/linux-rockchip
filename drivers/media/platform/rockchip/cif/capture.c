@@ -4470,11 +4470,12 @@ static void rkcif_modify_frame_skip_config(struct rkcif_stream *stream)
 	}
 }
 
-static u32 rkcif_get_parse_type_rk3576(const struct cif_input_fmt	*cif_fmt_in)
+static u32 rkcif_get_parse_type_rk3576(const struct cif_input_fmt *cif_fmt_in,
+				       struct csi_channel_info *channel)
 {
 	u32 parse_type = 0;
 
-	switch (cif_fmt_in->csi_fmt_val) {
+	switch (channel->csi_fmt_val) {
 	case CSI_WRDDR_TYPE_RAW8:
 		parse_type = CSI_WRDDR_TYPE_RAW8 << 3;
 		break;
@@ -4749,7 +4750,7 @@ static int rkcif_csi_channel_set_v1(struct rkcif_stream *stream,
 		if (dev->chip_id > CHIP_RK3562_CIF) {
 			val = CSI_ENABLE_CAPTURE | dma_en |
 			      CSI_ENABLE_CROP_RK3576;
-			val |= rkcif_get_parse_type_rk3576(stream->cif_fmt_in);
+			val |= rkcif_get_parse_type_rk3576(stream->cif_fmt_in, channel);
 			val |= rkcif_csi_get_output_type_mask_rk3576(stream);
 			val |= stream->cif_fmt_in->csi_yuv_order >> 4;
 			if (stream->is_high_align)
