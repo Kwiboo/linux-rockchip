@@ -1864,11 +1864,14 @@ static void vop2_power_domain_put(struct vop2_power_domain *pd)
 	 *
 	 * So we have a check here
 	 */
-	if (--pd->ref_count == 0 && vop2_power_domain_can_off_by_vsync(pd)) {
-		if (pd->vop2->data->delayed_pd)
-			schedule_delayed_work(&pd->power_off_work, msecs_to_jiffies(2500));
-		else
-			vop2_power_domain_off(pd);
+	if (pd->ref_count) {
+		pd->ref_count--;
+		if (pd->ref_count == 0 && vop2_power_domain_can_off_by_vsync(pd)) {
+			if (pd->vop2->data->delayed_pd)
+				schedule_delayed_work(&pd->power_off_work, msecs_to_jiffies(2500));
+			else
+				vop2_power_domain_off(pd);
+		}
 	}
 
 	spin_unlock(&pd->lock);
