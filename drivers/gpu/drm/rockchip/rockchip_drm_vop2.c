@@ -6853,6 +6853,7 @@ static int vop2_crtc_loader_protect(struct drm_crtc *crtc, bool on, void *data)
 	struct vop2_extend_pll *ext_pll;
 	struct clk *parent_clk;
 	const char *clk_name;
+	struct vop2_power_domain *pd;
 
 	if (on == vp->loader_protect)
 		return 0;
@@ -6865,9 +6866,11 @@ static int vop2_crtc_loader_protect(struct drm_crtc *crtc, bool on, void *data)
 		if (crtc->primary) {
 			win = to_vop2_win(crtc->primary);
 			if (VOP_WIN_GET(vop2, win, enable)) {
-				if (win->pd) {
-					win->pd->ref_count++;
-					win->pd->vp_mask |= BIT(vp->id);
+				pd = win->pd;
+				while (pd) {
+					pd->ref_count++;
+					pd->vp_mask |= BIT(vp->id);
+					pd = pd->parent;
 				}
 
 				vp->enabled_win_mask |= BIT(win->phys_id);
@@ -6887,8 +6890,12 @@ static int vop2_crtc_loader_protect(struct drm_crtc *crtc, bool on, void *data)
 
 					if (splice_win->pd &&
 					    VOP_WIN_GET(vop2, splice_win, enable)) {
-						splice_win->pd->ref_count++;
-						splice_win->pd->vp_mask |= BIT(splice_vp->id);
+						pd = splice_win->pd;
+						while (pd) {
+							pd->ref_count++;
+							pd->vp_mask |= BIT(splice_vp->id);
+							pd = pd->parent;
+						}
 					}
 				}
 			}
