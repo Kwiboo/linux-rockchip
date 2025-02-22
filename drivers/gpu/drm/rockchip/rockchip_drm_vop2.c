@@ -1952,7 +1952,7 @@ static void vop2_win_disable(struct vop2_win *win, bool skip_splice_win)
 		win->splice_win = NULL;
 	}
 
-	if (VOP_WIN_GET(vop2, win, enable) || VOP_WIN_GET_REG_BAK(vop2, win, enable)) {
+	if (VOP_WIN_GET_REG_BAK(vop2, win, enable)) {
 		VOP_WIN_SET(vop2, win, enable, 0);
 		if (win->feature & WIN_FEATURE_CLUSTER_MAIN) {
 			struct vop2_win *sub_win;
@@ -6866,6 +6866,8 @@ static int vop2_crtc_loader_protect(struct drm_crtc *crtc, bool on, void *data)
 		if (crtc->primary) {
 			win = to_vop2_win(crtc->primary);
 			if (VOP_WIN_GET(vop2, win, enable)) {
+				/* set enable in regbaks */
+				VOP_WIN_SET(vop2, win, enable, 1);
 				pd = win->pd;
 				while (pd) {
 					pd->ref_count++;
@@ -6890,6 +6892,8 @@ static int vop2_crtc_loader_protect(struct drm_crtc *crtc, bool on, void *data)
 
 					if (splice_win->pd &&
 					    VOP_WIN_GET(vop2, splice_win, enable)) {
+						/* set enable in regbaks */
+						VOP_WIN_SET(vop2, splice_win, enable, 1);
 						pd = splice_win->pd;
 						while (pd) {
 							pd->ref_count++;
