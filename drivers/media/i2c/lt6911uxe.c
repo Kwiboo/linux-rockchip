@@ -52,14 +52,19 @@ MODULE_PARM_DESC(debug, "debug level (0-3)");
 #define POLL_INTERVAL_MS	1000
 
 #define LT6911UXE_LINK_FREQ_1250M	1250000000
+#define LT6911UXE_LINK_FREQ_1100M	1100000000
+#define LT6911UXE_LINK_FREQ_1000M	1000000000
 #define LT6911UXE_LINK_FREQ_900M	900000000
+#define LT6911UXE_LINK_FREQ_800M	800000000
+#define LT6911UXE_LINK_FREQ_700M	700000000
 #define LT6911UXE_LINK_FREQ_600M	600000000
-#define LT6911UXE_LINK_FREQ_450M	450000000
+#define LT6911UXE_LINK_FREQ_500M	500000000
 #define LT6911UXE_LINK_FREQ_400M	400000000
 #define LT6911UXE_LINK_FREQ_300M	300000000
 #define LT6911UXE_LINK_FREQ_200M	200000000
 #define LT6911UXE_LINK_FREQ_150M	150000000
 #define LT6911UXE_LINK_FREQ_100M	100000000
+#define LT6911UXE_LINK_FREQ_50M		50000000
 #define LT6911UXE_PIXEL_RATE		800000000
 
 #define LT6911UXE_CHIPID	0x0221
@@ -167,25 +172,22 @@ static const char * const bus_format_str[] = {
 
 #define LT6911UXE_NAME			"LT6911UXE"
 
-#ifdef LT6911UXE_OUT_RGB
 static const s64 link_freq_menu_items[] = {
 	LT6911UXE_LINK_FREQ_1250M,
+	LT6911UXE_LINK_FREQ_1100M,
+	LT6911UXE_LINK_FREQ_1000M,
 	LT6911UXE_LINK_FREQ_900M,
+	LT6911UXE_LINK_FREQ_800M,
+	LT6911UXE_LINK_FREQ_700M,
 	LT6911UXE_LINK_FREQ_600M,
-	LT6911UXE_LINK_FREQ_450M,
-	LT6911UXE_LINK_FREQ_300M,
-	LT6911UXE_LINK_FREQ_150M,
-};
-#else
-static const s64 link_freq_menu_items[] = {
-	LT6911UXE_LINK_FREQ_1250M,
-	LT6911UXE_LINK_FREQ_600M,
+	LT6911UXE_LINK_FREQ_500M,
 	LT6911UXE_LINK_FREQ_400M,
 	LT6911UXE_LINK_FREQ_300M,
 	LT6911UXE_LINK_FREQ_200M,
+	LT6911UXE_LINK_FREQ_150M,
 	LT6911UXE_LINK_FREQ_100M,
+	LT6911UXE_LINK_FREQ_50M,
 };
-#endif
 
 struct lt6911uxe {
 	struct v4l2_fwnode_bus_mipi_csi2 bus;
@@ -1301,12 +1303,69 @@ lt6911uxe_find_best_fit(struct lt6911uxe *lt6911uxe)
 	return &lt6911uxe->support_modes[cur_best_fit];
 }
 
+static int lt6911uxe_get_format_bpp(struct v4l2_subdev *sd)
+{
+	struct lt6911uxe *lt6911uxe = to_lt6911uxe(sd);
+	u32 code = lt6911uxe->mbus_fmt_code;
+
+	switch (code) {
+	case MEDIA_BUS_FMT_UYVY8_2X8:
+		return 16;
+	case MEDIA_BUS_FMT_BGR888_1X24:
+		return 24;
+	case MEDIA_BUS_FMT_UV8_1X8:
+		return 12;
+	default:
+		return 16;
+	}
+}
+
+static u64 lt6911uxe_get_lane_rate_bps(struct v4l2_subdev *sd)
+{
+	struct lt6911uxe *lt6911uxe = to_lt6911uxe(sd);
+	u64 lane_rate;
+	u64 max_lane_rate = 2500000000U;
+	u8 bpp;
+	u64 pixelclock = lt6911uxe->timings.bt.pixelclock;
+	u32 lanes = lt6911uxe->bus_cfg.bus.mipi_csi2.num_data_lanes;
+
+	bpp = lt6911uxe_get_format_bpp(sd);
+	lane_rate = pixelclock * bpp;
+	lane_rate = div_u64(lane_rate, lanes);
+	lane_rate = DIV_ROUND_UP_ULL(lane_rate * 10, 9);
+
+	if (lane_rate > max_lane_rate)
+		lane_rate = max_lane_rate;
+
+	return lane_rate;
+}
+
+static int lt6911uxe_get_mipi_freq_idx(struct v4l2_subdev *sd)
+{
+	u64 mipi_freq;
+	u64 dist;
+	u64 cur_best_idx = 0;
+	u64 cur_dist;
+	unsigned int i;
+
+	mipi_freq = div_u64(lt6911uxe_get_lane_rate_bps(sd), 2);
+	dist = abs(mipi_freq - link_freq_menu_items[0]);
+	for (i = 0; i < ARRAY_SIZE(link_freq_menu_items); i++) {
+		cur_dist = abs(mipi_freq - link_freq_menu_items[i]);
+		if (cur_dist < dist) {
+			dist = cur_dist;
+			cur_best_idx = i;
+		}
+	}
+	return cur_best_idx;
+}
+
 static int lt6911uxe_get_fmt(struct v4l2_subdev *sd,
 			struct v4l2_subdev_pad_config *cfg,
 			struct v4l2_subdev_format *format)
 {
 	struct lt6911uxe *lt6911uxe = to_lt6911uxe(sd);
-	const struct lt6911uxe_mode *mode;
+	int mipi_freq_idx;
 
 	mutex_lock(&lt6911uxe->confctl_mutex);
 	format->format.code = lt6911uxe->mbus_fmt_code;
@@ -1318,15 +1377,14 @@ static int lt6911uxe_get_fmt(struct v4l2_subdev *sd,
 	format->format.colorspace = V4L2_COLORSPACE_SRGB;
 	mutex_unlock(&lt6911uxe->confctl_mutex);
 
-	mode = lt6911uxe_find_best_fit(lt6911uxe);
-	lt6911uxe->cur_mode = mode;
+	mipi_freq_idx = lt6911uxe_get_mipi_freq_idx(sd);
 
 	__v4l2_ctrl_s_ctrl_int64(lt6911uxe->pixel_rate,
 				LT6911UXE_PIXEL_RATE);
 	__v4l2_ctrl_s_ctrl(lt6911uxe->link_freq,
-				mode->mipi_freq_idx);
+				mipi_freq_idx);
 
-	v4l2_dbg(1, debug, sd, "%s: mode->mipi_freq_idx(%d)", __func__, mode->mipi_freq_idx);
+	v4l2_dbg(1, debug, sd, "%s: mipi_freq_idx(%d)", __func__, mipi_freq_idx);
 
 	v4l2_dbg(1, debug, sd, "%s: fmt code:%d, w:%d, h:%d, field code:%d\n",
 			__func__, format->format.code, format->format.width,
