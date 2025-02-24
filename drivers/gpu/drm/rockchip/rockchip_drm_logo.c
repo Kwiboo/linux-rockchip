@@ -711,7 +711,19 @@ static void rockchip_drm_mode_fixup(struct drm_crtc_state *crtc_state,
 		return;
 
 	bridge = drm_bridge_chain_get_first_bridge(encoder);
-	if (bridge) {
+	/*
+	 * Check whether the bridge supports atomic mode or not.
+	 * According to the include/drm/drm_bridge.h, the following functions
+	 * are mandatory in atomic mode:
+	 * &drm_bridge_funcs.atomic_reset()
+	 * &drm_bridge_funcs.atomic_duplicate_state()
+	 * &drm_bridge_funcs.atomic_destroy_state()
+	 *
+	 * For some bridge drivers that have not supported atomic mode yet:
+	 * drivers/gpu/drm/bridge/sii902x.c
+	 * drivers/gpu/drm/bridge/rk630-tve.c
+	 */
+	if (bridge && bridge->funcs->atomic_duplicate_state) {
 		bridge_state = drm_atomic_get_bridge_state(crtc_state->state, bridge);
 		if (IS_ERR(bridge_state))
 			return;
