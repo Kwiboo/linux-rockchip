@@ -19,6 +19,7 @@ properties:
       - rockchip,rk3328-usb2phy
       - rockchip,rk3366-usb2phy
       - rockchip,rk3399-usb2phy
+      - rockchip,rk3506-usb2phy
       - rockchip,rk3568-usb2phy
       - rockchip,rk3576-usb2phy
       - rockchip,rk3588-usb2phy
@@ -87,11 +88,15 @@ properties:
         const: 0
 
       interrupts:
-        description: host linestate interrupt
-        maxItems: 1
+        maxItems: 3
 
       interrupt-names:
-        const: linestate
+        oneOf:
+          - const: linestate
+          - items:
+              - const: otg-bvalid
+              - const: otg-id
+              - const: linestate
 
       phy-supply:
         description:
@@ -190,6 +195,7 @@ allOf:
               - rockchip,rk3328-usb2phy
               - rockchip,rk3366-usb2phy
               - rockchip,rk3399-usb2phy
+              - rockchip,rk3506-usb2phy
               - rockchip,rk3568-usb2phy
               - rockchip,rk3588-usb2phy
               - rockchip,rv1108-usb2phy
