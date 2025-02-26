@@ -1,0 +1,319 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+
+#include <dt-bindings/clock/rockchip,rk3506-cru.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/reset/rockchip,rk3506-cru.h>
+
+/ {
+	compatible = "rockchip,rk3506";
+
+	#address-cells = <1>;
+	#size-cells = <1>;
+
+	interrupt-parent = <&gic>;
+
+	aliases {
+		i2c0 = &i2c0;
+		i2c1 = &i2c1;
+		i2c2 = &i2c2;
+		mmc0 = &sdmmc;
+		serial0 = &uart0;
+		serial1 = &uart1;
+		serial2 = &uart2;
+		serial3 = &uart3;
+		serial4 = &uart4;
+		serial5 = &uart5;
+		spi0 = &spi0;
+		spi1 = &spi1;
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu0: cpu@f00 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a7";
+			reg = <0xf00>;
+			clocks = <&cru ARMCLK>;
+			enable-method = "psci";
+			d-cache-size = <0x4000>;
+			d-cache-line-size = <64>;
+			d-cache-sets = <64>;
+			i-cache-size = <0x4000>;
+			i-cache-line-size = <32>;
+			i-cache-sets = <256>;
+			next-level-cache = <&l2>;
+		};
+
+		cpu1: cpu@f01 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a7";
+			reg = <0xf01>;
+			clocks = <&cru ARMCLK>;
+			enable-method = "psci";
+			d-cache-size = <0x4000>;
+			d-cache-line-size = <64>;
+			d-cache-sets = <64>;
+			i-cache-size = <0x4000>;
+			i-cache-line-size = <32>;
+			i-cache-sets = <256>;
+			next-level-cache = <&l2>;
+		};
+
+		cpu2: cpu@f02 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a7";
+			reg = <0xf02>;
+			clocks = <&cru ARMCLK>;
+			enable-method = "psci";
+			d-cache-size = <0x4000>;
+			d-cache-line-size = <64>;
+			d-cache-sets = <64>;
+			i-cache-size = <0x4000>;
+			i-cache-line-size = <32>;
+			i-cache-sets = <256>;
+			next-level-cache = <&l2>;
+		};
+
+		l2: l2-cache {
+			compatible = "cache";
+			cache-unified;
+			cache-size = <0x20000>;
+			cache-line-size = <64>;
+			cache-sets = <256>;
+			cache-level = <2>;
+		};
+	};
+
+	arm-pmu {
+		compatible = "arm,cortex-a7-pmu";
+		interrupts = <GIC_SPI 121 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 122 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 123 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-affinity = <&cpu0>, <&cpu1>, <&cpu2>;
+	};
+
+	psci {
+		compatible = "arm,psci-1.0";
+		method = "smc";
+	};
+
+	timer {
+		compatible = "arm,armv7-timer";
+		interrupts = <GIC_PPI 13 (GIC_CPU_MASK_SIMPLE(3) | IRQ_TYPE_LEVEL_HIGH)>,
+			     <GIC_PPI 14 (GIC_CPU_MASK_SIMPLE(3) | IRQ_TYPE_LEVEL_HIGH)>,
+			     <GIC_PPI 11 (GIC_CPU_MASK_SIMPLE(3) | IRQ_TYPE_LEVEL_HIGH)>,
+			     <GIC_PPI 10 (GIC_CPU_MASK_SIMPLE(3) | IRQ_TYPE_LEVEL_HIGH)>;
+		clock-frequency = <24000000>;
+	};
+
+	xin24m: clock-xin24m {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+		clock-output-names = "xin24m";
+	};
+
+	soc {
+		compatible = "simple-bus";
+		ranges = <0xff000000 0xff000000 0x1000000>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		i2c0: i2c@ff040000 {
+			compatible = "rockchip,rk3506-i2c", "rockchip,rk3399-i2c";
+			reg = <0xff040000 0x1000>;
+			interrupts = <GIC_SPI 40 IRQ_TYPE_LEVEL_HIGH>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			clocks = <&cru CLK_I2C0>, <&cru PCLK_I2C0>;
+			clock-names = "i2c", "pclk";
+			status = "disabled";
+		};
+
+		i2c1: i2c@ff050000 {
+			compatible = "rockchip,rk3506-i2c", "rockchip,rk3399-i2c";
+			reg = <0xff050000 0x1000>;
+			interrupts = <GIC_SPI 41 IRQ_TYPE_LEVEL_HIGH>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			clocks = <&cru CLK_I2C1>, <&cru PCLK_I2C1>;
+			clock-names = "i2c", "pclk";
+			status = "disabled";
+		};
+
+		i2c2: i2c@ff060000 {
+			compatible = "rockchip,rk3506-i2c", "rockchip,rk3399-i2c";
+			reg = <0xff060000 0x1000>;
+			interrupts = <GIC_SPI 42 IRQ_TYPE_LEVEL_HIGH>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			clocks = <&cru CLK_I2C2>, <&cru PCLK_I2C2>;
+			clock-names = "i2c", "pclk";
+			status = "disabled";
+		};
+
+		uart0: serial@ff0a0000 {
+			compatible = "rockchip,rk3506-uart", "snps,dw-apb-uart";
+			reg = <0xff0a0000 0x100>;
+			clock-names = "baudclk", "apb_pclk";
+			clocks = <&cru SCLK_UART0>, <&cru PCLK_UART0>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			status = "disabled";
+		};
+
+		uart1: serial@ff0b0000 {
+			compatible = "rockchip,rk3506-uart", "snps,dw-apb-uart";
+			reg = <0xff0b0000 0x100>;
+			interrupts = <GIC_SPI 35 IRQ_TYPE_LEVEL_HIGH>;
+			clock-names = "baudclk", "apb_pclk";
+			clocks = <&cru SCLK_UART1>, <&cru PCLK_UART1>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			status = "disabled";
+		};
+
+		uart2: serial@ff0c0000 {
+			compatible = "rockchip,rk3506-uart", "snps,dw-apb-uart";
+			reg = <0xff0c0000 0x100>;
+			interrupts = <GIC_SPI 36 IRQ_TYPE_LEVEL_HIGH>;
+			clock-names = "baudclk", "apb_pclk";
+			clocks = <&cru SCLK_UART2>, <&cru PCLK_UART2>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			status = "disabled";
+		};
+
+		uart3: serial@ff0d0000 {
+			compatible = "rockchip,rk3506-uart", "snps,dw-apb-uart";
+			reg = <0xff0d0000 0x100>;
+			interrupts = <GIC_SPI 37 IRQ_TYPE_LEVEL_HIGH>;
+			clock-names = "baudclk", "apb_pclk";
+			clocks = <&cru SCLK_UART3>, <&cru PCLK_UART3>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			status = "disabled";
+		};
+
+		uart4: serial@ff0e0000 {
+			compatible = "rockchip,rk3506-uart", "snps,dw-apb-uart";
+			reg = <0xff0e0000 0x100>;
+			interrupts = <GIC_SPI 38 IRQ_TYPE_LEVEL_HIGH>;
+			clock-names = "baudclk", "apb_pclk";
+			clocks = <&cru SCLK_UART4>, <&cru PCLK_UART4>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			status = "disabled";
+		};
+
+		spi0: spi@ff120000 {
+			compatible = "rockchip,rk3506-spi", "rockchip,rk3066-spi";
+			reg = <0xff120000 0x1000>;
+			interrupts = <GIC_SPI 43 IRQ_TYPE_LEVEL_HIGH>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			clocks = <&cru CLK_SPI0>, <&cru PCLK_SPI0>;
+			clock-names = "spiclk", "apb_pclk";
+			num-cs = <2>;
+			status = "disabled";
+		};
+
+		spi1: spi@ff130000 {
+			compatible = "rockchip,rk3506-spi", "rockchip,rk3066-spi";
+			reg = <0xff130000 0x1000>;
+			interrupts = <GIC_SPI 44 IRQ_TYPE_LEVEL_HIGH>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			clocks = <&cru CLK_SPI1>, <&cru PCLK_SPI1>;
+			clock-names = "spiclk", "apb_pclk";
+			num-cs = <2>;
+			status = "disabled";
+		};
+
+		wdt0: watchdog@ff260000 {
+			compatible = "rockchip,rk3506-wdt", "snps,dw-wdt";
+			reg = <0xff260000 0x100>;
+			interrupts = <GIC_SPI 107 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&cru TCLK_WDT0>, <&cru PCLK_WDT0>;
+			clock-names = "tclk", "pclk";
+			status = "disabled";
+		};
+
+		wdt1: watchdog@ff268000 {
+			compatible = "rockchip,rk3506-wdt", "snps,dw-wdt";
+			reg = <0xff268000 0x100>;
+			interrupts = <GIC_SPI 108 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&cru TCLK_WDT1>, <&cru PCLK_WDT1>;
+			clock-names = "tclk", "pclk";
+			status = "disabled";
+		};
+
+		grf: syscon@ff288000 {
+			compatible = "rockchip,rk3506-grf", "syscon", "simple-mfd";
+			reg = <0xff288000 0x4000>;
+		};
+
+		sdmmc: mmc@ff480000 {
+			compatible = "rockchip,rk3506-dw-mshc",
+				     "rockchip,rk3288-dw-mshc";
+			reg = <0xff480000 0x4000>;
+			interrupts = <GIC_SPI 86 IRQ_TYPE_LEVEL_HIGH>;
+			bus-width = <4>;
+			clocks = <&cru HCLK_SDMMC>, <&cru CCLK_SRC_SDMMC>;
+			clock-names = "biu", "ciu";
+			fifo-depth = <0x100>;
+			max-frequency = <150000000>;
+			reset-names = "reset";
+			resets = <&cru SRST_H_SDMMC>;
+			status = "disabled";
+		};
+
+		uart5: serial@ff4e0000 {
+			compatible = "rockchip,rk3506-uart", "snps,dw-apb-uart";
+			reg = <0xff4e0000 0x100>;
+			interrupts = <GIC_SPI 39 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&cru SCLK_UART5>, <&cru PCLK_UART5>;
+			clock-names = "baudclk", "apb_pclk";
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			status = "disabled";
+		};
+
+		saradc: adc@ff4e8000 {
+			compatible = "rockchip,rk3506-saradc",
+				     "rockchip,rk3528-saradc";
+			reg = <0xff4e8000 0x8000>;
+			interrupts = <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
+			#io-channel-cells = <1>;
+			clocks = <&cru CLK_SARADC>, <&cru PCLK_SARADC>;
+			clock-names = "saradc", "apb_pclk";
+			resets = <&cru SRST_P_SARADC>;
+			reset-names = "saradc-apb";
+			status = "disabled";
+		};
+
+		gic: interrupt-controller@ff581000 {
+			compatible = "arm,gic-400";
+			reg = <0xff581000 0x1000>,
+			      <0xff582000 0x2000>,
+			      <0xff584000 0x2000>,
+			      <0xff586000 0x2000>;
+			interrupts = <GIC_PPI 9 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-controller;
+			#interrupt-cells = <3>;
+			#address-cells = <0>;
+		};
+
+		cru: clock-controller@ff9a0000 {
+			compatible = "rockchip,rk3506-cru";
+			reg = <0xff9a0000 0x20000>;
+			clocks = <&xin24m>;
+			clock-names = "xin24m";
+			#clock-cells = <1>;
+			#reset-cells = <1>;
+			rockchip,grf = <&grf>;
+		};
+	};
+};
