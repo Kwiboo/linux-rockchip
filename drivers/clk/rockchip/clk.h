@@ -465,6 +465,7 @@ struct rockchip_pll_rate_table {
  * ROCKCHIP_PLL_SYNC_RATE - check rate parameters to match against the
  *	rate_table parameters and ajust them if necessary.
  * ROCKCHIP_PLL_FIXED_MODE - the pll operates in normal mode only
+ * ROCKCHIP_PLL_ALLOW_POWER_DOWN - allow the pll to be disabled when unused
  */
 struct rockchip_pll_clock {
 	unsigned int		id;
@@ -483,6 +484,7 @@ struct rockchip_pll_clock {
 
 #define ROCKCHIP_PLL_SYNC_RATE		BIT(0)
 #define ROCKCHIP_PLL_FIXED_MODE		BIT(1)
+#define ROCKCHIP_PLL_ALLOW_POWER_DOWN	BIT(2)
 
 #define PLL(_type, _id, _name, _pnames, _flags, _con, _mode, _mshift,	\
 		_lshift, _pflags, _rtable)				\
