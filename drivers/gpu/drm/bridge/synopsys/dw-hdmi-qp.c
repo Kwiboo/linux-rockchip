@@ -1585,7 +1585,7 @@ static void hdmi_config_vendor_specific_infoframe(struct dw_hdmi_qp *hdmi,
 	for (i = 0; i <= 7; i++)
 		hdmi_writel(hdmi, 0, PKT_VSI_CONTENTS0 + i * 4);
 
-	if (hdmi->allm_enable && (link_cfg->add_func & SUPPORT_HDMI_ALLM)) {
+	if (hdmi->allm_enable && link_cfg->allm_supported) {
 		buffer[0] = VSI_PKT_TYPE;
 		buffer[1] = VSI_PKT_VERSION;
 		buffer[2] = 5;
@@ -2761,7 +2761,8 @@ static int dw_hdmi_connector_get_modes(struct drm_connector *connector)
 		drm_connector_update_edid_property(connector, edid);
 		if (hdmi->cec_notifier)
 			cec_notifier_set_phys_addr_from_edid(hdmi->cec_notifier, edid);
-
+		if (hdmi->plat_data->get_edid_hdmi21_info)
+			hdmi->plat_data->get_edid_hdmi21_info(data, edid, info);
 		memcpy(hdmi->vendor_info, &raw_edid[8], VENDOR_INFO_LEN);
 		if (hdmi->plat_data->get_dovi_data)
 			hdmi->plat_data->get_dovi_data(data, edid, connector);
@@ -2770,8 +2771,6 @@ static int dw_hdmi_connector_get_modes(struct drm_connector *connector)
 			hdmi->plat_data->get_colorimetry(data, edid);
 		if (hdmi->plat_data->get_yuv422_format)
 			hdmi->plat_data->get_yuv422_format(connector, edid);
-		if (hdmi->plat_data->get_edid_dsc_info)
-			hdmi->plat_data->get_edid_dsc_info(data, edid, info);
 		if (hdmi->plat_data->get_hdr10_plus_vsdb)
 			hdmi->plat_data->get_hdr10_plus_vsdb(data, edid, connector);
 		dw_hdmi_update_hdr_property(connector);
@@ -2798,8 +2797,9 @@ static int dw_hdmi_connector_get_modes(struct drm_connector *connector)
 			if (secondary->cec_notifier)
 				cec_notifier_set_phys_addr_from_edid(secondary->cec_notifier,
 								     edid);
-			if (secondary->plat_data->get_edid_dsc_info)
-				secondary->plat_data->get_edid_dsc_info(secondary_data, edid, info);
+			if (secondary->plat_data->get_edid_hdmi21_info)
+				secondary->plat_data->get_edid_hdmi21_info(secondary_data, edid,
+									   info);
 		}
 		kfree(edid);
 	} else {
@@ -2865,7 +2865,7 @@ void dw_hdmi_qp_set_allm_enable(struct dw_hdmi_qp *hdmi, bool enable)
 
 	hdmi->allm_enable = enable;
 
-	if (enable && !(link_cfg->add_func & SUPPORT_HDMI_ALLM)) {
+	if (enable && !link_cfg->allm_supported) {
 		hdmi->allm_enable = false;
 		dev_err(hdmi->dev, "sink don't support allm, allm won't be enabled\n");
 		return;

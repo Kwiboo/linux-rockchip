@@ -268,14 +268,10 @@ struct rockchip_hdmi {
 	struct rockchip_drm_sub_dev sub_dev;
 
 	u64 force_frl_rate;
-	u8 max_frl_rate_per_lane;
-	u8 max_lanes;
-	u8 add_func;
 	u8 edid_colorimetry;
 	u8 hdcp_status;
 	u8 dovi_vsdb[DOVI_VSDB_LEN];
 	struct hdr10_plus_vsdb hdr10_plus_data;
-	struct rockchip_drm_dsc_cap dsc_cap;
 	struct dw_hdmi_link_config link_cfg;
 	struct gpio_desc *enable_gpio;
 
@@ -288,6 +284,7 @@ struct rockchip_hdmi {
 	struct mode_color_caps *mode_color_caps;
 	bool timing_force_output;
 	struct drm_display_mode force_mode;
+	struct rockchip_drm_hdmi21_data hdmi21_data;
 	u32 force_bus_format;
 };
 
@@ -1005,14 +1002,14 @@ static void hdmi_select_link_config(struct rockchip_hdmi *hdmi,
 	if (hdmi->plat_data->split_mode)
 		drm_mode_convert_to_origin_mode(&mode);
 
-	max_lanes = hdmi->max_lanes;
-	max_rate_per_lane = hdmi->max_frl_rate_per_lane;
+	max_lanes = hdmi->hdmi21_data.max_lanes;
+	max_rate_per_lane = hdmi->hdmi21_data.max_frl_rate_per_lane;
 	max_frl_rate = max_lanes * max_rate_per_lane * 1000000;
 
 	hdmi->link_cfg.dsc_mode = false;
 	hdmi->link_cfg.frl_lanes = max_lanes;
 	hdmi->link_cfg.rate_per_lane = max_rate_per_lane;
-	hdmi->link_cfg.add_func = hdmi->add_func;
+	hdmi->link_cfg.allm_supported = hdmi->hdmi21_data.allm_supported;
 
 	if (!max_frl_rate || (tmdsclk < HDMI20_MAX_RATE && mode.clock < HDMI20_MAX_RATE)) {
 		dev_dbg(hdmi->dev, "use tmds mode\n");
@@ -1022,12 +1019,12 @@ static void hdmi_select_link_config(struct rockchip_hdmi *hdmi,
 
 	hdmi->link_cfg.frl_mode = true;
 
-	if (!hdmi->dsc_cap.v_1p2)
+	if (!hdmi->hdmi21_data.dsc_cap.v_1p2)
 		return;
 
-	max_dsc_lanes = hdmi->dsc_cap.max_lanes;
+	max_dsc_lanes = hdmi->hdmi21_data.dsc_cap.max_lanes;
 	max_dsc_rate_per_lane =
-		hdmi->dsc_cap.max_frl_rate_per_lane;
+		hdmi->hdmi21_data.dsc_cap.max_frl_rate_per_lane;
 
 	if (rockchip_hdmi_if_dsc_enable(hdmi, tmdsclk)) {
 		hdmi->link_cfg.dsc_mode = true;
@@ -1159,8 +1156,8 @@ static int hdmi_dsc_get_num_slices(struct rockchip_hdmi *hdmi,
 static int hdmi_dsc_slices(struct rockchip_hdmi *hdmi,
 			   struct drm_crtc_state *crtc_state)
 {
-	int hdmi_throughput = hdmi->dsc_cap.clk_per_slice;
-	int hdmi_max_slices = hdmi->dsc_cap.max_slices;
+	int hdmi_throughput = hdmi->hdmi21_data.dsc_cap.clk_per_slice;
+	int hdmi_max_slices = hdmi->hdmi21_data.dsc_cap.max_slices;
 	int rk_max_slices = 8;
 	int rk_max_slice_width = 2048;
 
@@ -1258,9 +1255,9 @@ static int
 dw_hdmi_dsc_bpp(struct rockchip_hdmi *hdmi,
 		int num_slices, int slice_width, u64 pixel_clk)
 {
-	bool hdmi_all_bpp = hdmi->dsc_cap.all_bpp;
+	bool hdmi_all_bpp = hdmi->hdmi21_data.dsc_cap.all_bpp;
 	int fractional_bpp = 0;
-	int hdmi_max_chunk_bytes = hdmi->dsc_cap.total_chunk_kbytes * 1024;
+	int hdmi_max_chunk_bytes = hdmi->hdmi21_data.dsc_cap.total_chunk_kbytes * 1024;
 
 	return hdmi_dsc_get_bpp(hdmi, fractional_bpp, slice_width,
 				num_slices, hdmi_all_bpp,
@@ -1317,7 +1314,7 @@ static void dw_hdmi_qp_dsc_configure(struct rockchip_hdmi *hdmi,
 	if (!crtc_state)
 		return;
 
-	hdmi_is_dsc_1_2 = hdmi->dsc_cap.v_1p2;
+	hdmi_is_dsc_1_2 = hdmi->hdmi21_data.dsc_cap.v_1p2;
 
 	if (!hdmi_is_dsc_1_2)
 		return;
@@ -2683,21 +2680,17 @@ dw_hdmi_rockchip_get_yuv422_format(struct drm_connector *connector,
 }
 
 static int
-dw_hdmi_rockchip_get_edid_dsc_info(void *data, struct edid *edid, struct drm_display_info *info)
+dw_hdmi_rockchip_get_edid_hdmi21_info(void *data, const struct edid *edid,
+				      struct drm_display_info *info)
 {
 	struct rockchip_hdmi *hdmi = (struct rockchip_hdmi *)data;
 
 	if (!edid)
 		return -EINVAL;
 
-	memset(&hdmi->dsc_cap, 0, sizeof(hdmi->dsc_cap));
-	hdmi->max_frl_rate_per_lane = 0;
-	hdmi->max_lanes = 0;
-	hdmi->add_func = 0;
+	memset(&hdmi->hdmi21_data, 0, sizeof(hdmi->hdmi21_data));
 
-	return rockchip_drm_parse_cea_ext(&hdmi->dsc_cap, info,
-					  &hdmi->max_frl_rate_per_lane,
-					  &hdmi->max_lanes, &hdmi->add_func, edid);
+	return rockchip_drm_parse_cea_ext(&hdmi->hdmi21_data, info, edid);
 }
 
 static int
@@ -3204,7 +3197,7 @@ dw_hdmi_rockchip_attach_properties(struct drm_connector *connector,
 		if (prop) {
 			hdmi->allm_capacity = prop;
 			drm_object_attach_property(&connector->base, prop,
-						   !!(hdmi->add_func & SUPPORT_HDMI_ALLM));
+						   hdmi->hdmi21_data.allm_supported);
 		}
 
 		prop = drm_property_create_enum(connector->dev, 0,
@@ -3536,7 +3529,7 @@ dw_hdmi_rockchip_get_property(struct drm_connector *connector,
 			*val = dw_hdmi_qp_get_output_type_cap(hdmi->hdmi_qp);
 		return 0;
 	} else if (property == hdmi->allm_capacity) {
-		*val = !!(hdmi->add_func & SUPPORT_HDMI_ALLM);
+		*val = hdmi->hdmi21_data.allm_supported;
 		return 0;
 	} else if (property == hdmi->allm_enable) {
 		*val = hdmi->enable_allm;
@@ -4050,8 +4043,8 @@ static int dw_hdmi_rockchip_bind(struct device *dev, struct device *master,
 		dw_hdmi_rockchip_get_color_changed;
 	plat_data->get_yuv422_format =
 		dw_hdmi_rockchip_get_yuv422_format;
-	plat_data->get_edid_dsc_info =
-		dw_hdmi_rockchip_get_edid_dsc_info;
+	plat_data->get_edid_hdmi21_info =
+		dw_hdmi_rockchip_get_edid_hdmi21_info;
 	plat_data->get_dovi_data =
 		dw_hdmi_rockchip_get_dovi_data;
 	plat_data->get_colorimetry =

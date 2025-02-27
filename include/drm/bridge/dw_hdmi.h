@@ -139,7 +139,7 @@ struct dw_hdmi_link_config {
 	int frl_lanes;
 	int rate_per_lane;
 	int hcactive;
-	u8 add_func;
+	bool allm_supported;
 	u8 pps_payload[128];
 };
 
@@ -253,7 +253,8 @@ struct dw_hdmi_plat_data {
 	bool (*get_color_changed)(void *data);
 	int (*get_yuv422_format)(struct drm_connector *connector,
 				 struct edid *edid);
-	int (*get_edid_dsc_info)(void *data, struct edid *edid, struct drm_display_info *info);
+	int (*get_edid_hdmi21_info)(void *data, const struct edid *edid,
+				    struct drm_display_info *info);
 	int (*get_dovi_data)(void *data, struct edid *edid,
 			     struct drm_connector *connector);
 	void (*get_dovi_vsif)(void *data, u32 *buf);

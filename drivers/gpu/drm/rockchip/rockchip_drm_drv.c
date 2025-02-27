@@ -850,10 +850,8 @@ void get_max_frl_rate(int max_frl_rate, u8 *max_lanes, u8 *max_rate_per_lane)
 #define EDID_MAX_FRL_RATE_MASK		0xf0
 
 /* Sink Capability Data Structure, for compatibility with linux version < linux kernel 6.1 */
-static void parse_hdmi_forum_scds(struct rockchip_drm_dsc_cap *dsc_cap,
-				  struct drm_display_info *info,
-				  u8 *max_frl_rate_per_lane, u8 *max_lanes,
-				  const u8 *hf_scds)
+static void parse_hdmi_forum_scds(struct rockchip_drm_hdmi21_data *hdmi21_data,
+				  struct drm_display_info *info, const u8 *hf_scds)
 {
 	struct drm_hdmi_info *hdmi = &info->hdmi;
 
@@ -897,63 +895,64 @@ static void parse_hdmi_forum_scds(struct rockchip_drm_dsc_cap *dsc_cap,
 
 		DRM_DEBUG_KMS("hdmi_21 sink detected. parsing edid\n");
 		max_frl_rate = (hf_scds[7] & EDID_MAX_FRL_RATE_MASK) >> 4;
-		get_max_frl_rate(max_frl_rate, max_lanes,
-				 max_frl_rate_per_lane);
-		dsc_cap->v_1p2 = hf_scds[11] & EDID_DSC_1P2;
+		get_max_frl_rate(max_frl_rate, &hdmi21_data->max_lanes,
+				 &hdmi21_data->max_frl_rate_per_lane);
+		hdmi21_data->dsc_cap.v_1p2 = hf_scds[11] & EDID_DSC_1P2;
 
-		if (dsc_cap->v_1p2) {
-			dsc_cap->native_420 = hf_scds[11] & EDID_DSC_NATIVE_420;
-			dsc_cap->all_bpp = hf_scds[11] & EDID_DSC_ALL_BPP;
+		if (hdmi21_data->dsc_cap.v_1p2) {
+			hdmi21_data->dsc_cap.native_420 = hf_scds[11] & EDID_DSC_NATIVE_420;
+			hdmi21_data->dsc_cap.all_bpp = hf_scds[11] & EDID_DSC_ALL_BPP;
 
 			if (hf_scds[11] & EDID_DSC_16BPC)
-				dsc_cap->bpc_supported = 16;
+				hdmi21_data->dsc_cap.bpc_supported = 16;
 			else if (hf_scds[11] & EDID_DSC_12BPC)
-				dsc_cap->bpc_supported = 12;
+				hdmi21_data->dsc_cap.bpc_supported = 12;
 			else if (hf_scds[11] & EDID_DSC_10BPC)
-				dsc_cap->bpc_supported = 10;
+				hdmi21_data->dsc_cap.bpc_supported = 10;
 			else
 				/* Supports min 8 BPC if DSC 1.2 is supported*/
-				dsc_cap->bpc_supported = 8;
+				hdmi21_data->dsc_cap.bpc_supported = 8;
 
 			dsc_max_frl_rate = (hf_scds[12] & EDID_DSC_MAX_FRL_RATE_MASK) >> 4;
-			get_max_frl_rate(dsc_max_frl_rate, &dsc_cap->max_lanes,
-					 &dsc_cap->max_frl_rate_per_lane);
-			dsc_cap->total_chunk_kbytes = hf_scds[13] & EDID_DSC_TOTAL_CHUNK_KBYTES;
+			get_max_frl_rate(dsc_max_frl_rate, &hdmi21_data->dsc_cap.max_lanes,
+					 &hdmi21_data->dsc_cap.max_frl_rate_per_lane);
+			hdmi21_data->dsc_cap.total_chunk_kbytes =
+				hf_scds[13] & EDID_DSC_TOTAL_CHUNK_KBYTES;
 
 			dsc_max_slices = hf_scds[12] & EDID_DSC_MAX_SLICES;
 			switch (dsc_max_slices) {
 			case 1:
-				dsc_cap->max_slices = 1;
-				dsc_cap->clk_per_slice = 340;
+				hdmi21_data->dsc_cap.max_slices = 1;
+				hdmi21_data->dsc_cap.clk_per_slice = 340;
 				break;
 			case 2:
-				dsc_cap->max_slices = 2;
-				dsc_cap->clk_per_slice = 340;
+				hdmi21_data->dsc_cap.max_slices = 2;
+				hdmi21_data->dsc_cap.clk_per_slice = 340;
 				break;
 			case 3:
-				dsc_cap->max_slices = 4;
-				dsc_cap->clk_per_slice = 340;
+				hdmi21_data->dsc_cap.max_slices = 4;
+				hdmi21_data->dsc_cap.clk_per_slice = 340;
 				break;
 			case 4:
-				dsc_cap->max_slices = 8;
-				dsc_cap->clk_per_slice = 340;
+				hdmi21_data->dsc_cap.max_slices = 8;
+				hdmi21_data->dsc_cap.clk_per_slice = 340;
 				break;
 			case 5:
-				dsc_cap->max_slices = 8;
-				dsc_cap->clk_per_slice = 400;
+				hdmi21_data->dsc_cap.max_slices = 8;
+				hdmi21_data->dsc_cap.clk_per_slice = 400;
 				break;
 			case 6:
-				dsc_cap->max_slices = 12;
-				dsc_cap->clk_per_slice = 400;
+				hdmi21_data->dsc_cap.max_slices = 12;
+				hdmi21_data->dsc_cap.clk_per_slice = 400;
 				break;
 			case 7:
-				dsc_cap->max_slices = 16;
-				dsc_cap->clk_per_slice = 400;
+				hdmi21_data->dsc_cap.max_slices = 16;
+				hdmi21_data->dsc_cap.clk_per_slice = 400;
 				break;
 			case 0:
 			default:
-				dsc_cap->max_slices = 0;
-				dsc_cap->clk_per_slice = 0;
+				hdmi21_data->dsc_cap.max_slices = 0;
+				hdmi21_data->dsc_cap.clk_per_slice = 0;
 			}
 		}
 	}
@@ -971,15 +970,14 @@ int parse_dovi_block(u8 *sink_data, const u8 *dovi_db)
 	return 0;
 }
 
-int rockchip_drm_parse_cea_ext(struct rockchip_drm_dsc_cap *dsc_cap,
+int rockchip_drm_parse_cea_ext(struct rockchip_drm_hdmi21_data *hdmi21_data,
 			       struct drm_display_info *info,
-			       u8 *max_frl_rate_per_lane, u8 *max_lanes, u8 *add_func,
 			       const struct edid *edid)
 {
 	const u8 *edid_ext;
 	int i, start, end;
 
-	if (!dsc_cap || !max_frl_rate_per_lane || !max_lanes || !edid || !add_func)
+	if (!hdmi21_data || !edid)
 		return -EINVAL;
 
 	edid_ext = find_cea_extension(edid);
@@ -993,8 +991,7 @@ int rockchip_drm_parse_cea_ext(struct rockchip_drm_dsc_cap *dsc_cap,
 		const u8 *db = &edid_ext[i];
 
 		if (cea_db_is_hdmi_forum_vsdb(db) || cea_db_is_hdmi_forum_scdb(db))
-			parse_hdmi_forum_scds(dsc_cap, info, max_frl_rate_per_lane,
-					      max_lanes, db);
+			parse_hdmi_forum_scds(hdmi21_data, info, db);
 	}
 
 	return 0;
