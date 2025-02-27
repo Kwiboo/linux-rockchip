@@ -796,10 +796,13 @@ static int csi2_dphy_hw_stream_on(struct csi2_dphy *dphy,
 			write_csi2_dphy_reg_mask(hw, CSI2PHY_CLK_CONTINUE_MODE,
 						0x30, CSI2PHY_CLK_CONTINUE_MODE_MASK);
 	} else {
-		if (!(pre_val & (0x1 << CSI2_DPHY_CTRL_CLKLANE_ENABLE_OFFSET_BIT)))
+		if (!(pre_val & (0x1 << CSI2_DPHY_CTRL_CLKLANE_ENABLE_OFFSET_BIT)) &&
+		    hw->drv_data->chip_id < CHIP_ID_RK3588)
 			val |= (0x1 << CSI2_DPHY_CTRL_CLKLANE_ENABLE_OFFSET_BIT);
 
 		if (dphy->phy_index % 3 == DPHY1) {
+			if (!(pre_val & (0x1 << CSI2_DPHY_CTRL_CLKLANE_ENABLE_OFFSET_BIT)))
+				val |= (0x1 << CSI2_DPHY_CTRL_CLKLANE_ENABLE_OFFSET_BIT);
 			val |= (GENMASK(sensor->lanes - 1, 0) <<
 				CSI2_DPHY_CTRL_DATALANE_ENABLE_OFFSET_BIT);
 			if (sensor->mbus.flags &
@@ -970,12 +973,15 @@ static int csi2_dphy_hw_quick_stream_on(struct csi2_dphy *dphy,
 			CSI2_DPHY_CTRL_DATALANE_ENABLE_OFFSET_BIT) |
 			(0x1 << CSI2_DPHY_CTRL_CLKLANE_ENABLE_OFFSET_BIT);
 	} else {
-		if (!(pre_val & (0x1 << CSI2_DPHY_CTRL_CLKLANE_ENABLE_OFFSET_BIT)))
+		if (!(pre_val & (0x1 << CSI2_DPHY_CTRL_CLKLANE_ENABLE_OFFSET_BIT)) &&
+		    hw->drv_data->chip_id < CHIP_ID_RK3588)
 			val |= (0x1 << CSI2_DPHY_CTRL_CLKLANE_ENABLE_OFFSET_BIT);
 
-		if (dphy->phy_index % 3 == DPHY1)
+		if (dphy->phy_index % 3 == DPHY1) {
 			val |= (GENMASK(sensor->lanes - 1, 0) <<
 				CSI2_DPHY_CTRL_DATALANE_ENABLE_OFFSET_BIT);
+			val |= (0x1 << CSI2_DPHY_CTRL_CLKLANE_ENABLE_OFFSET_BIT);
+		}
 
 		if (dphy->phy_index % 3 == DPHY2) {
 			val |= (GENMASK(sensor->lanes - 1, 0) <<
@@ -1009,12 +1015,15 @@ static int csi2_dphy_hw_quick_stream_off(struct csi2_dphy *dphy,
 			CSI2_DPHY_CTRL_DATALANE_ENABLE_OFFSET_BIT) |
 			(0x1 << CSI2_DPHY_CTRL_CLKLANE_ENABLE_OFFSET_BIT);
 	} else {
-		if (!(pre_val & (0x1 << CSI2_DPHY_CTRL_CLKLANE_ENABLE_OFFSET_BIT)))
+		if (!(pre_val & (0x1 << CSI2_DPHY_CTRL_CLKLANE_ENABLE_OFFSET_BIT)) &&
+		    hw->drv_data->chip_id < CHIP_ID_RK3588)
 			val |= (0x1 << CSI2_DPHY_CTRL_CLKLANE_ENABLE_OFFSET_BIT);
 
-		if (dphy->phy_index % 3 == DPHY1)
+		if (dphy->phy_index % 3 == DPHY1) {
 			val |= (GENMASK(sensor->lanes - 1, 0) <<
 				CSI2_DPHY_CTRL_DATALANE_ENABLE_OFFSET_BIT);
+			val |= (0x1 << CSI2_DPHY_CTRL_CLKLANE_ENABLE_OFFSET_BIT);
+		}
 
 		if (dphy->phy_index % 3 == DPHY2) {
 			val |= (GENMASK(sensor->lanes - 1, 0) <<
