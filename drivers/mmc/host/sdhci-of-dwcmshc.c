@@ -93,11 +93,11 @@
 #define DLL_TXCLK_TAPNUM_DEFAULT	0x10
 #define DLL_TXCLK_TAPNUM_90_DEGREES	0xA
 #define DLL_TXCLK_TAPNUM_FROM_SW	BIT(24)
-#define DLL_STRBIN_TAPNUM_DEFAULT	0x8
+#define DLL_STRBIN_TAPNUM_DEFAULT	0x4
 #define DLL_STRBIN_TAPNUM_FROM_SW	BIT(24)
 #define DLL_STRBIN_DELAY_NUM_SEL	BIT(26)
 #define DLL_STRBIN_DELAY_NUM_OFFSET	16
-#define DLL_STRBIN_DELAY_NUM_DEFAULT	0x16
+#define DLL_STRBIN_DELAY_NUM_DEFAULT	0x10
 #define DLL_RXCLK_NO_INVERTER		1
 #define DLL_RXCLK_INVERTER		0
 #define DLL_CMDOUT_TAPNUM_90_DEGREES	0x8
@@ -105,6 +105,7 @@
 #define DLL_CMDOUT_TAPNUM_FROM_SW	BIT(24)
 #define DLL_CMDOUT_SRC_CLK_NEG		BIT(28)
 #define DLL_CMDOUT_EN_SRC_CLK_NEG	BIT(29)
+#define DLL_CMDOUT_BOTH_CLK_EDGE	BIT(30)
 
 #define DLL_LOCK_WO_TMOUT(x) \
 	((((x) & DWCMSHC_EMMC_DLL_LOCKED) == DWCMSHC_EMMC_DLL_LOCKED) && \
@@ -206,7 +207,9 @@
 #define BLUEFIELD_SMC_SET_EMMC_RST_N	0x82000007
 
 enum dwcmshc_rk_type {
+	DWCMSHC_RK3528,
 	DWCMSHC_RK3568,
+	DWCMSHC_RK3576,
 	DWCMSHC_RK3588,
 };
 
@@ -214,6 +217,11 @@ struct rk35xx_priv {
 	struct reset_control *reset;
 	enum dwcmshc_rk_type devtype;
 	u8 txclk_tapnum;
+	u8 hs200_txclk_tapnum;
+	u8 hs400_txclk_tapnum;
+	u8 hs400_cmdout_tapnum;
+	u8 hs400_strbin_tapnum;
+	u8 ddr50_strbin_delay_num;
 };
 
 #define DWCMSHC_MAX_OTHER_CLKS 3
@@ -607,7 +615,7 @@ static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
 	struct dwcmshc_priv *dwc_priv = sdhci_pltfm_priv(pltfm_host);
 	struct rk35xx_priv *priv = dwc_priv->priv;
-	u8 txclk_tapnum = DLL_TXCLK_TAPNUM_DEFAULT;
+	u8 txclk_tapnum;
 	u32 extra, reg;
 	int err;
 
@@ -651,7 +659,7 @@ static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock
 		 */
 		extra = DWCMSHC_EMMC_DLL_DLYENA |
 			DLL_STRBIN_DELAY_NUM_SEL |
-			DLL_STRBIN_DELAY_NUM_DEFAULT << DLL_STRBIN_DELAY_NUM_OFFSET;
+			priv->ddr50_strbin_delay_num << DLL_STRBIN_DELAY_NUM_OFFSET;
 		sdhci_writel(host, extra, DWCMSHC_EMMC_DLL_STRBIN);
 		return;
 	}
@@ -665,7 +673,7 @@ static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock
 	 * We shouldn't set DLL_RXCLK_NO_INVERTER for identify mode but
 	 * we must set it in higher speed mode.
 	 */
-	extra = DWCMSHC_EMMC_DLL_DLYENA;
+	extra = DWCMSHC_EMMC_DLL_DLYENA | DLL_RXCLK_ORI_GATE;
 	if (priv->devtype == DWCMSHC_RK3568)
 		extra |= DLL_RXCLK_NO_INVERTER << DWCMSHC_EMMC_DLL_RXCLK_SRCSEL;
 	sdhci_writel(host, extra, DWCMSHC_EMMC_DLL_RXCLK);
@@ -688,19 +696,18 @@ static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock
 		0x3 << 19;  /* post-change delay */
 	sdhci_writel(host, extra, dwc_priv->vendor_specific_area1 + DWCMSHC_EMMC_ATCTRL);
 
-	if (host->mmc->ios.timing == MMC_TIMING_MMC_HS200 ||
-	    host->mmc->ios.timing == MMC_TIMING_MMC_HS400)
-		txclk_tapnum = priv->txclk_tapnum;
+	txclk_tapnum = priv->hs200_txclk_tapnum;
+	if (host->mmc->ios.timing == MMC_TIMING_MMC_HS400) {
+		txclk_tapnum = priv->hs400_txclk_tapnum;
 
-	if ((priv->devtype == DWCMSHC_RK3588) && host->mmc->ios.timing == MMC_TIMING_MMC_HS400) {
-		txclk_tapnum = DLL_TXCLK_TAPNUM_90_DEGREES;
-
-		extra = DLL_CMDOUT_SRC_CLK_NEG |
-			DLL_CMDOUT_EN_SRC_CLK_NEG |
-			DWCMSHC_EMMC_DLL_DLYENA |
-			DLL_CMDOUT_TAPNUM_90_DEGREES |
-			DLL_CMDOUT_TAPNUM_FROM_SW;
-		sdhci_writel(host, extra, DECMSHC_EMMC_DLL_CMDOUT);
+		if (priv->devtype != DWCMSHC_RK3568) {
+			extra = DLL_CMDOUT_SRC_CLK_NEG |
+				DLL_CMDOUT_BOTH_CLK_EDGE |
+				DWCMSHC_EMMC_DLL_DLYENA |
+				priv->hs400_cmdout_tapnum |
+				DLL_CMDOUT_TAPNUM_FROM_SW;
+			sdhci_writel(host, extra, DECMSHC_EMMC_DLL_CMDOUT);
+		}
 	}
 
 	extra = DWCMSHC_EMMC_DLL_DLYENA |
@@ -710,7 +717,7 @@ static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock
 	sdhci_writel(host, extra, DWCMSHC_EMMC_DLL_TXCLK);
 
 	extra = DWCMSHC_EMMC_DLL_DLYENA |
-		DLL_STRBIN_TAPNUM_DEFAULT |
+		priv->hs400_strbin_tapnum |
 		DLL_STRBIN_TAPNUM_FROM_SW;
 	sdhci_writel(host, extra, DWCMSHC_EMMC_DLL_STRBIN);
 }
@@ -741,10 +748,31 @@ static int dwcmshc_rk35xx_init(struct device *dev, struct sdhci_host *host,
 	if (!priv)
 		return -ENOMEM;
 
-	if (of_device_is_compatible(dev->of_node, "rockchip,rk3588-dwcmshc"))
+	priv->hs200_txclk_tapnum = DLL_TXCLK_TAPNUM_DEFAULT;
+	priv->hs400_txclk_tapnum = 0x8;
+	priv->hs400_cmdout_tapnum = DLL_CMDOUT_TAPNUM_90_DEGREES;
+	priv->hs400_strbin_tapnum = DLL_STRBIN_TAPNUM_DEFAULT;
+	priv->ddr50_strbin_delay_num = DLL_STRBIN_DELAY_NUM_DEFAULT;
+
+	if (of_device_is_compatible(dev->of_node, "rockchip,rk3528-dwcmshc")) {
+		priv->devtype = DWCMSHC_RK3528;
+		priv->hs200_txclk_tapnum = 0xc;
+		priv->hs400_txclk_tapnum = 0x6;
+		priv->hs400_cmdout_tapnum = 0x6;
+		priv->hs400_strbin_tapnum = 0x3;
+		priv->ddr50_strbin_delay_num = 0xa;
+	} else if (of_device_is_compatible(dev->of_node, "rockchip,rk3576-dwcmshc")) {
+		priv->devtype = DWCMSHC_RK3576;
+		priv->hs400_txclk_tapnum = 0x7;
+		priv->hs400_cmdout_tapnum = 0x7;
+		priv->hs400_strbin_tapnum = 0x5;
+		priv->ddr50_strbin_delay_num = 0xa;
+	} else if (of_device_is_compatible(dev->of_node, "rockchip,rk3588-dwcmshc")) {
 		priv->devtype = DWCMSHC_RK3588;
-	else
+		priv->hs400_txclk_tapnum = 0x9;
+	} else  {
 		priv->devtype = DWCMSHC_RK3568;
+	}
 
 	priv->reset = devm_reset_control_array_get_optional_exclusive(mmc_dev(host->mmc));
 	if (IS_ERR(priv->reset)) {
