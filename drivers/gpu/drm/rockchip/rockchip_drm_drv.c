@@ -849,87 +849,6 @@ void get_max_frl_rate(int max_frl_rate, u8 *max_lanes, u8 *max_rate_per_lane)
 #define EDID_DSC_TOTAL_CHUNK_KBYTES	0x3f
 #define EDID_MAX_FRL_RATE_MASK		0xf0
 
-static
-void parse_edid_forum_vsdb(struct rockchip_drm_dsc_cap *dsc_cap,
-			   u8 *max_frl_rate_per_lane, u8 *max_lanes, u8 *add_func,
-			   const u8 *hf_vsdb)
-{
-	u8 max_frl_rate;
-	u8 dsc_max_frl_rate;
-	u8 dsc_max_slices;
-
-	if (!hf_vsdb[7])
-		return;
-
-	DRM_DEBUG_KMS("hdmi_21 sink detected. parsing edid\n");
-	max_frl_rate = (hf_vsdb[7] & EDID_MAX_FRL_RATE_MASK) >> 4;
-	get_max_frl_rate(max_frl_rate, max_lanes,
-			 max_frl_rate_per_lane);
-
-	*add_func = hf_vsdb[8];
-
-	if (cea_db_payload_len(hf_vsdb) < 13)
-		return;
-
-	dsc_cap->v_1p2 = hf_vsdb[11] & EDID_DSC_1P2;
-
-	if (!dsc_cap->v_1p2)
-		return;
-
-	dsc_cap->native_420 = hf_vsdb[11] & EDID_DSC_NATIVE_420;
-	dsc_cap->all_bpp = hf_vsdb[11] & EDID_DSC_ALL_BPP;
-
-	if (hf_vsdb[11] & EDID_DSC_16BPC)
-		dsc_cap->bpc_supported = 16;
-	else if (hf_vsdb[11] & EDID_DSC_12BPC)
-		dsc_cap->bpc_supported = 12;
-	else if (hf_vsdb[11] & EDID_DSC_10BPC)
-		dsc_cap->bpc_supported = 10;
-	else
-		dsc_cap->bpc_supported = 0;
-
-	dsc_max_frl_rate = (hf_vsdb[12] & EDID_DSC_MAX_FRL_RATE_MASK) >> 4;
-	get_max_frl_rate(dsc_max_frl_rate, &dsc_cap->max_lanes,
-			 &dsc_cap->max_frl_rate_per_lane);
-	dsc_cap->total_chunk_kbytes = hf_vsdb[13] & EDID_DSC_TOTAL_CHUNK_KBYTES;
-
-	dsc_max_slices = hf_vsdb[12] & EDID_DSC_MAX_SLICES;
-	switch (dsc_max_slices) {
-	case 1:
-		dsc_cap->max_slices = 1;
-		dsc_cap->clk_per_slice = 340;
-		break;
-	case 2:
-		dsc_cap->max_slices = 2;
-		dsc_cap->clk_per_slice = 340;
-		break;
-	case 3:
-		dsc_cap->max_slices = 4;
-		dsc_cap->clk_per_slice = 340;
-		break;
-	case 4:
-		dsc_cap->max_slices = 8;
-		dsc_cap->clk_per_slice = 340;
-		break;
-	case 5:
-		dsc_cap->max_slices = 8;
-		dsc_cap->clk_per_slice = 400;
-		break;
-	case 6:
-		dsc_cap->max_slices = 12;
-		dsc_cap->clk_per_slice = 400;
-		break;
-	case 7:
-		dsc_cap->max_slices = 16;
-		dsc_cap->clk_per_slice = 400;
-		break;
-	case 0:
-	default:
-		dsc_cap->max_slices = 0;
-		dsc_cap->clk_per_slice = 0;
-	}
-}
-
 /* Sink Capability Data Structure, for compatibility with linux version < linux kernel 6.1 */
 static void parse_hdmi_forum_scds(struct rockchip_drm_dsc_cap *dsc_cap,
 				  struct drm_display_info *info,
@@ -1073,10 +992,7 @@ int rockchip_drm_parse_cea_ext(struct rockchip_drm_dsc_cap *dsc_cap,
 	for_each_cea_db(edid_ext, i, start, end) {
 		const u8 *db = &edid_ext[i];
 
-		if (cea_db_is_hdmi_forum_vsdb(db))
-			parse_edid_forum_vsdb(dsc_cap, max_frl_rate_per_lane,
-					      max_lanes, add_func, db);
-		else if (cea_db_is_hdmi_forum_scdb(db))
+		if (cea_db_is_hdmi_forum_vsdb(db) || cea_db_is_hdmi_forum_scdb(db))
 			parse_hdmi_forum_scds(dsc_cap, info, max_frl_rate_per_lane,
 					      max_lanes, db);
 	}
