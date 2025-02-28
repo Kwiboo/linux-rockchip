@@ -2538,6 +2538,8 @@ static int __maybe_unused rockchip_dw_pcie_resume(struct device *dev)
 std_rc_done:
 	/* Enable L0s capability */
 	if (rk_pcie->linkcap_off) {
+		rk_pcie->pci->n_fts[0] = 255; /* Gen1 */
+		rk_pcie->pci->n_fts[1] = 255; /* Gen2+ */
 		ret = dw_pcie_readl_dbi(rk_pcie->pci, rk_pcie->linkcap_off);
 		ret |= PCI_EXP_LNKCAP_ASPM_L0S;
 		dw_pcie_writel_dbi(rk_pcie->pci, rk_pcie->linkcap_off, ret);
