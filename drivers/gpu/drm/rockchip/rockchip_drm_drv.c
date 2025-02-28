@@ -838,6 +838,7 @@ void get_max_frl_rate(int max_frl_rate, u8 *max_lanes, u8 *max_rate_per_lane)
 	}
 }
 
+#define EDID_ALLM			(1 << 1)
 #define EDID_DSC_10BPC			(1 << 0)
 #define EDID_DSC_12BPC			(1 << 1)
 #define EDID_DSC_16BPC			(1 << 2)
@@ -895,6 +896,7 @@ static void parse_hdmi_forum_scds(struct rockchip_drm_hdmi21_data *hdmi21_data,
 
 		DRM_DEBUG_KMS("hdmi_21 sink detected. parsing edid\n");
 		max_frl_rate = (hf_scds[7] & EDID_MAX_FRL_RATE_MASK) >> 4;
+		hdmi21_data->allm_supported = hf_scds[8] & EDID_ALLM;
 		get_max_frl_rate(max_frl_rate, &hdmi21_data->max_lanes,
 				 &hdmi21_data->max_frl_rate_per_lane);
 		hdmi21_data->dsc_cap.v_1p2 = hf_scds[11] & EDID_DSC_1P2;
