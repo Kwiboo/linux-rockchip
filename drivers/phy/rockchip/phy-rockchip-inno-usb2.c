@@ -271,6 +271,9 @@ static inline int property_enable(struct regmap *base,
 {
 	unsigned int val, mask, tmp;
 
+	if (!reg->offset && !reg->enable && !reg->disable)
+		return 0;
+
 	tmp = en ? reg->enable : reg->disable;
 	mask = GENMASK(reg->bitend, reg->bitstart);
 	val = (tmp << reg->bitstart) | (mask << BIT_WRITEABLE_SHIFT);
@@ -284,6 +287,9 @@ static inline bool property_enabled(struct regmap *base,
 	int ret;
 	unsigned int tmp, orig;
 	unsigned int mask = GENMASK(reg->bitend, reg->bitstart);
+
+	if (!reg->offset && !reg->enable && !reg->disable)
+		return false;
 
 	ret = regmap_read(base, reg->offset, &orig);
 	if (ret)
