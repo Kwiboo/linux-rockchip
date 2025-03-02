@@ -847,13 +847,12 @@ static void rk3568_set_to_rgmii(struct rk_priv_data *bsp_priv,
 	con1 = (bsp_priv->id == 1) ? RK3568_GRF_GMAC1_CON1 :
 				     RK3568_GRF_GMAC0_CON1;
 
+	regmap_write(bsp_priv->grf, con1,
+		     DELAY_ENABLE(RK3568, tx_delay, rx_delay));
+
 	regmap_write(bsp_priv->grf, con0,
 		     RK3568_GMAC_CLK_RX_DL_CFG(rx_delay) |
 		     RK3568_GMAC_CLK_TX_DL_CFG(tx_delay));
-
-	regmap_write(bsp_priv->grf, con1,
-		     RK3568_GMAC_RXCLK_DLY_ENABLE |
-		     RK3568_GMAC_TXCLK_DLY_ENABLE);
 }
 
 static const struct rk_gmac_ops rk3568_ops = {
