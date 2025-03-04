@@ -792,26 +792,46 @@ static int rk730_dai_hw_params(struct snd_pcm_substream *substream,
 	dev_info(component->dev, "%s:index %d  mclk=%d rate=%d\n",
 		 __func__, coeff, coeff_div[coeff].mclk, coeff_div[coeff].rate);
 
-	switch (params_format(params)) {
-	case SNDRV_PCM_FORMAT_S16_LE:
-		snd_soc_component_update_bits(component, RK730_DI2S_RXCR2,
-					      RK730_DI2S_RXCR2_VDW_MASK,
-					      RK730_DI2S_RXCR2_VDW(16));
-		snd_soc_component_update_bits(component, RK730_DI2S_TXCR2,
-					      RK730_DI2S_TXCR2_VDW_MASK,
-					      RK730_DI2S_TXCR2_VDW(16));
-		break;
-	case SNDRV_PCM_FORMAT_S24_LE:
-	case SNDRV_PCM_FORMAT_S32_LE:
-		snd_soc_component_update_bits(component, RK730_DI2S_RXCR2,
-					      RK730_DI2S_RXCR2_VDW_MASK,
-					      RK730_DI2S_RXCR2_VDW(24));
-		snd_soc_component_update_bits(component, RK730_DI2S_TXCR2,
-					      RK730_DI2S_TXCR2_VDW_MASK,
-					      RK730_DI2S_TXCR2_VDW(24));
-		break;
-	default:
-		return -EINVAL;
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		switch (params_format(params)) {
+		case SNDRV_PCM_FORMAT_S16_LE:
+			snd_soc_component_update_bits(component, RK730_DI2S_RXCR2,
+						      RK730_DI2S_RXCR2_VDW_MASK,
+						      RK730_DI2S_RXCR2_VDW(16));
+			break;
+		case SNDRV_PCM_FORMAT_S24_LE:
+			snd_soc_component_update_bits(component, RK730_DI2S_RXCR2,
+						      RK730_DI2S_RXCR2_VDW_MASK,
+						      RK730_DI2S_RXCR2_VDW(24));
+			break;
+		case SNDRV_PCM_FORMAT_S32_LE:
+			snd_soc_component_update_bits(component, RK730_DI2S_RXCR2,
+						      RK730_DI2S_RXCR2_VDW_MASK,
+						      RK730_DI2S_RXCR2_VDW(32));
+			break;
+		default:
+			return -EINVAL;
+		}
+	} else {
+		switch (params_format(params)) {
+		case SNDRV_PCM_FORMAT_S16_LE:
+			snd_soc_component_update_bits(component, RK730_DI2S_TXCR2,
+						      RK730_DI2S_TXCR2_VDW_MASK,
+						      RK730_DI2S_TXCR2_VDW(16));
+			break;
+		case SNDRV_PCM_FORMAT_S24_LE:
+			snd_soc_component_update_bits(component, RK730_DI2S_TXCR2,
+						      RK730_DI2S_TXCR2_VDW_MASK,
+						      RK730_DI2S_TXCR2_VDW(24));
+			break;
+		case SNDRV_PCM_FORMAT_S32_LE:
+			snd_soc_component_update_bits(component, RK730_DI2S_TXCR2,
+						      RK730_DI2S_TXCR2_VDW_MASK,
+						      RK730_DI2S_TXCR2_VDW(32));
+			break;
+		default:
+			return -EINVAL;
+		}
 	}
 
 	rate = samplerate_to_bit(params_rate(params));
