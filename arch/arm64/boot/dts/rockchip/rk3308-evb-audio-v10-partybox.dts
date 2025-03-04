@@ -82,11 +82,21 @@
 
 &spdif_rx {
 	status = "okay";
+	rockchip,always-on;
 };
 
 &spdif_rx_sound {
 	status = "okay";
 	rockchip,wait-card-locked = <0>;
+};
+
+&spdif_tx {
+	status = "okay";
+};
+
+&spdif_tx_sound {
+	status = "okay";
+	rockchip,wait-card-locked = <1>;
 };
 
 &vad {

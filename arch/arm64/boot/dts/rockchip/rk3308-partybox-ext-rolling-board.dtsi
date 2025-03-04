@@ -58,7 +58,7 @@
 		rockchip,cpu = <&i2s_8ch_0>;
 		rockchip,codec = <&dac_codec>;
 		rockchip,format = "left_j";
-		rockchip,wait-card-locked = <1>;
+		rockchip,wait-card-locked = <2>;
 	};
 };
 
