@@ -134,6 +134,34 @@
 		states = <1800000 0x0>, <3300000 0x1>;
 		vin-supply = <&vcc5v0_sys>;
 	};
+
+	vdd_arm: regulator-vdd-arm {
+		compatible = "pwm-regulator";
+		pwm-supply = <&vcc5v0_sys>;
+		pwms = <&pwm1 0 5000 1>;
+		regulator-name = "vdd_arm";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <746000>;
+		regulator-max-microvolt = <1201000>;
+		regulator-settling-time-up-us = <250>;
+	};
+};
+
+&cpu0 {
+	cpu-supply = <&vdd_arm>;
+};
+
+&cpu1 {
+	cpu-supply = <&vdd_arm>;
+};
+
+&cpu2 {
+	cpu-supply = <&vdd_arm>;
+};
+
+&cpu3 {
+	cpu-supply = <&vdd_arm>;
 };
 
 &gmac1 {
@@ -211,6 +239,10 @@
 			rockchip,pins = <0 RK_PA1 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
+};
+
+&pwm1 {
+	status = "okay";
 };
 
 &saradc {
