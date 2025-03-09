@@ -35,6 +35,17 @@
 
 #define to_rockchip_pcie(x) dev_get_drvdata((x)->dev)
 
+#define RK_PCIE_DBG			0
+
+#define PCIE_CLIENT_DBG_FIFO_MODE_CON	0x310
+#define PCIE_CLIENT_DBG_FIFO_PTN_HIT_D0 0x320
+#define PCIE_CLIENT_DBG_FIFO_PTN_HIT_D1 0x324
+#define PCIE_CLIENT_DBG_FIFO_TRN_HIT_D0 0x328
+#define PCIE_CLIENT_DBG_FIFO_TRN_HIT_D1 0x32c
+#define PCIE_CLIENT_DBG_FIFO_STATUS	0x350
+#define PCIE_CLIENT_DBG_TRANSITION_DATA	0xffff0000
+#define PCIE_CLIENT_DBF_EN		0xffff0007
+
 #define PCIE_DMA_OFFSET			0x380000
 
 #define PCIE_DMA_CTRL_OFF		0x8
@@ -752,6 +763,33 @@ static void rockchip_pcie_hide_broken_ats_cap(struct dw_pcie *pci)
 	dw_pcie_dbi_ro_wr_dis(pci);
 }
 
+static void rockchip_pcie_enable_debug(struct rockchip_pcie *rockchip)
+{
+	rockchip_pcie_writel_apb(rockchip, PCIE_CLIENT_DBG_TRANSITION_DATA,
+				 PCIE_CLIENT_DBG_FIFO_PTN_HIT_D0);
+	rockchip_pcie_writel_apb(rockchip, PCIE_CLIENT_DBG_TRANSITION_DATA,
+				 PCIE_CLIENT_DBG_FIFO_PTN_HIT_D1);
+	rockchip_pcie_writel_apb(rockchip, PCIE_CLIENT_DBG_TRANSITION_DATA,
+				 PCIE_CLIENT_DBG_FIFO_TRN_HIT_D0);
+	rockchip_pcie_writel_apb(rockchip, PCIE_CLIENT_DBG_TRANSITION_DATA,
+				 PCIE_CLIENT_DBG_FIFO_TRN_HIT_D1);
+	rockchip_pcie_writel_apb(rockchip, PCIE_CLIENT_DBF_EN,
+				 PCIE_CLIENT_DBG_FIFO_MODE_CON);
+}
+
+static void rockchip_pcie_debug_dump(struct rockchip_pcie *rockchip)
+{
+#if RK_PCIE_DBG
+	u32 loop;
+
+	dev_info(rockchip->pci.dev, "ltssm = 0x%x\n",
+		 rockchip_pcie_readl_apb(rockchip, PCIE_CLIENT_LTSSM_STATUS));
+	for (loop = 0; loop < 64; loop++)
+		dev_info(rockchip->pci.dev, "fifo_status = 0x%x\n",
+			 rockchip_pcie_readl_apb(rockchip, PCIE_CLIENT_DBG_FIFO_STATUS));
+#endif
+}
+
 static int rockchip_pcie_config_host(struct rockchip_pcie *rockchip)
 {
 	struct device *dev = rockchip->pci.dev;
@@ -820,6 +858,7 @@ static int rockchip_pcie_config_host(struct rockchip_pcie *rockchip)
 		dev_info(dev, "hot reset ever\n");
 	}
 	rockchip_pcie_writel_apb(rockchip, reg, PCIE_CLIENT_INTR_STATUS_MISC);
+	rockchip_pcie_enable_debug(rockchip);
 
 	retries = 1000;
 	for (i = 0; i < retries; i++) {
@@ -836,12 +875,14 @@ static int rockchip_pcie_config_host(struct rockchip_pcie *rockchip)
 			if (dw_pcie_link_up(pci)) {
 				dev_info(pci->dev, "PCIe Link up, LTSSM is 0x%x\n",
 					 rockchip_pcie_readl_apb(rockchip, PCIE_CLIENT_LTSSM_STATUS));
+				rockchip_pcie_debug_dump(rockchip);
 				break;
 			}
 		}
 
 		dev_info_ratelimited(dev, "PCIe Linking... LTSSM is 0x%x\n",
 				     rockchip_pcie_readl_apb(rockchip, PCIE_CLIENT_LTSSM_STATUS));
+		rockchip_pcie_debug_dump(rockchip);
 		msleep(20);
 	}
 
