@@ -22,6 +22,7 @@
 #include <linux/uaccess.h>
 #include <uapi/linux/rk-pcie-ep.h>
 
+#include "../../pci.h"
 #include "../rockchip-pcie-dma.h"
 #include "pcie-designware.h"
 #include "pcie-dw-dmatest.h"
@@ -321,6 +322,8 @@ static int rockchip_pcie_get_io_resource(struct platform_device *pdev,
 		dev_err(dev, "missing bar0 memory region\n");
 		return -ENODEV;
 	}
+
+	rockchip->pci.link_gen = of_pci_get_max_link_speed(np);
 
 	return 0;
 }
