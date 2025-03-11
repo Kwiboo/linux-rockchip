@@ -3008,9 +3008,6 @@ static void mmc_blk_remove_debugfs(struct mmc_card *card,
 
 #endif /* CONFIG_DEBUG_FS */
 
-struct mmc_card *this_card;
-EXPORT_SYMBOL(this_card);
-
 static int mmc_blk_probe(struct mmc_card *card)
 {
 	struct mmc_blk_data *md;
@@ -3040,11 +3037,6 @@ static int mmc_blk_probe(struct mmc_card *card)
 	ret = mmc_blk_alloc_parts(card, md);
 	if (ret)
 		goto out;
-
-#if defined(CONFIG_MMC_DW_ROCKCHIP) || defined(CONFIG_MMC_SDHCI_OF_ARASAN)
-	if (card->type == MMC_TYPE_MMC)
-		this_card = card;
-#endif
 
 	/* Add two debugfs entries */
 	mmc_blk_add_debugfs(card, md);
@@ -3076,12 +3068,6 @@ static void mmc_blk_remove(struct mmc_card *card)
 	struct mmc_blk_data *md = dev_get_drvdata(&card->dev);
 
 	mmc_blk_remove_debugfs(card, md);
-
-	#if defined(CONFIG_MMC_DW_ROCKCHIP)
-	if (card->type == MMC_TYPE_MMC)
-		this_card = NULL;
-	#endif
-
 	mmc_blk_remove_parts(card, md);
 	pm_runtime_get_sync(&card->dev);
 	if (md->part_curr != md->part_type) {
