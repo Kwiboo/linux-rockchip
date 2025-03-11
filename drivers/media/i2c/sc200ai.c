@@ -22,6 +22,7 @@
  * V0.0X01.0X0c fix pm_runtime issue in aov
  * V0.0X01.0X0d add support select sensor setting
  * V0.0X01.0X0e add 120fps 960*540 sensor setting
+ * V0.0X01.0X0f fix poweroff issue
  *
  */
 
@@ -49,7 +50,7 @@
 #include "cam-tb-setup.h"
 #include "cam-sleep-wakeup.h"
 
-#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x0e)
+#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x0f)
 
 #ifndef V4L2_CID_DIGITAL_GAIN
 #define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
@@ -2105,7 +2106,7 @@ static void __sc200ai_power_off(struct sc200ai *sc200ai)
 	}
 	if (!IS_ERR(sc200ai->pwdn_gpio))
 		gpiod_set_value_cansleep(sc200ai->pwdn_gpio, 0);
-	clk_disable_unprepare(sc200ai->xvclk);
+
 	if (!IS_ERR(sc200ai->reset_gpio))
 		gpiod_set_value_cansleep(sc200ai->reset_gpio, 0);
 	if (!IS_ERR_OR_NULL(sc200ai->pins_sleep)) {
@@ -2407,15 +2408,19 @@ static int sc200ai_initialize_controls(struct sc200ai *sc200ai)
 		sc200ai->link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 	__v4l2_ctrl_s_ctrl(sc200ai->link_freq, mode->mipi_freq_idx);
 
-	if (mode->mipi_freq_idx == 0)
+	if (mode->mipi_freq_idx == 0) {
 		dst_pixel_rate = PIXEL_RATE_WITH_185M_10BIT;
-	else if (mode->mipi_freq_idx == 1)
+		sc200ai->pixel_rate = v4l2_ctrl_new_std(handler, NULL,
+							V4L2_CID_PIXEL_RATE, 0,
+							PIXEL_RATE_WITH_185M_10BIT, 1,
+							dst_pixel_rate);
+	} else if (mode->mipi_freq_idx == 1) {
 		dst_pixel_rate = PIXEL_RATE_WITH_371M_10BIT;
-
-	sc200ai->pixel_rate = v4l2_ctrl_new_std(handler, NULL,
-						V4L2_CID_PIXEL_RATE, 0,
-						PIXEL_RATE_WITH_371M_10BIT, 1,
-						dst_pixel_rate);
+		sc200ai->pixel_rate = v4l2_ctrl_new_std(handler, NULL,
+							V4L2_CID_PIXEL_RATE, 0,
+							PIXEL_RATE_WITH_371M_10BIT, 1,
+							dst_pixel_rate);
+	}
 
 	h_blank = mode->hts_def - mode->width;
 	sc200ai->hblank = v4l2_ctrl_new_std(handler, NULL, V4L2_CID_HBLANK,
@@ -2487,7 +2492,7 @@ static int sc200ai_check_sensor_id(struct sc200ai *sc200ai,
 		return -ENODEV;
 	}
 
-	dev_info(dev, "Detected SC200AI (%06x) sensor\n", CHIP_ID);
+	dev_info(dev, "Detected SC200AI (0x%04x) sensor\n", CHIP_ID);
 
 	return 0;
 }
