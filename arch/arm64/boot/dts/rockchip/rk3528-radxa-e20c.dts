@@ -146,6 +146,18 @@
 		regulator-max-microvolt = <1201000>;
 		regulator-settling-time-up-us = <250>;
 	};
+
+	vdd_logic: regulator-vdd-logic {
+		compatible = "pwm-regulator";
+		pwm-supply = <&vcc5v0_sys>;
+		pwms = <&pwm2 0 5000 1>;
+		regulator-name = "vdd_logic";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <705000>;
+		regulator-max-microvolt = <1006000>;
+		regulator-settling-time-up-us = <250>;
+	};
 };
 
 &cpu0 {
@@ -242,6 +254,10 @@
 };
 
 &pwm1 {
+	status = "okay";
+};
+
+&pwm2 {
 	status = "okay";
 };
 
