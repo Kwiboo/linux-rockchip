@@ -29,6 +29,7 @@ MODULE_PARM_DESC(prealloc_buffer_size_kbytes, "Preallocate DMA buffer size (KB).
 struct dmaengine_dma_guard {
 	dma_addr_t dma_addr;
 	unsigned char *dma_area;
+	int buffer_size;
 };
 
 struct dmaengine_trcm {
@@ -101,6 +102,8 @@ static int dmaengine_trcm_hw_params(struct snd_soc_component *component,
 				   struct snd_pcm_substream *substream,
 				   struct snd_pcm_hw_params *params)
 {
+	struct dmaengine_trcm *trcm = soc_component_to_trcm(component);
+	struct dmaengine_dma_guard *guard = &trcm->guard[substream->stream];
 	struct dmaengine_trcm_runtime_data *prtd = substream_to_prtd(substream);
 	struct dma_chan *chan = snd_dmaengine_trcm_get_chan(substream);
 	struct dma_slave_config slave_config;
@@ -119,6 +122,14 @@ static int dmaengine_trcm_hw_params(struct snd_soc_component *component,
 	prtd->frame_bytes = snd_pcm_format_size(params_format(params),
 						params_channels(params));
 	prtd->channels = params_channels(params);
+
+	guard->buffer_size = DMA_GUARD_BUFFER_SIZE / (prtd->channels * 4);
+	guard->buffer_size = guard->buffer_size * prtd->channels * 4;
+
+	if (!guard->buffer_size) {
+		dev_err(component->dev, "Invalid channels: %d\n", prtd->channels);
+		return -EINVAL;
+	}
 
 	return 0;
 }
@@ -278,8 +289,8 @@ int dmaengine_trcm_dma_guard_ctrl(struct snd_soc_component *component,
 	direction = stream ? DMA_DEV_TO_MEM : DMA_MEM_TO_DEV;
 
 	desc = dmaengine_prep_dma_cyclic(chan, guard->dma_addr,
-					 DMA_GUARD_BUFFER_SIZE,
-					 DMA_GUARD_BUFFER_SIZE,
+					 guard->buffer_size,
+					 guard->buffer_size,
 					 direction,
 					 DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
 	if (!desc) {
@@ -378,6 +389,7 @@ static int dmaengine_trcm_dma_guard_new(struct snd_soc_component *component,
 
 		trcm->guard[i].dma_addr = dma_addr;
 		trcm->guard[i].dma_area = dma_area;
+		trcm->guard[i].buffer_size = DMA_GUARD_BUFFER_SIZE;
 
 		memset(&slave_config, 0, sizeof(slave_config));
 
