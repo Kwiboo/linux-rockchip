@@ -456,18 +456,6 @@
 			status = "disabled";
 		};
 
-		saradc: adc@ffae0000 {
-			compatible = "rockchip,rk3528-saradc";
-			reg = <0x0 0xffae0000 0x0 0x10000>;
-			clocks = <&cru CLK_SARADC>, <&cru PCLK_SARADC>;
-			clock-names = "saradc", "apb_pclk";
-			interrupts = <GIC_SPI 140 IRQ_TYPE_LEVEL_HIGH>;
-			resets = <&cru SRST_P_SARADC>;
-			reset-names = "saradc-apb";
-			#io-channel-cells = <1>;
-			status = "disabled";
-		};
-
 		pwm0: pwm@ffa90000 {
 			compatible = "rockchip,rk3528-pwm", "rockchip,rk3328-pwm";
 			reg = <0x0 0xffa90000 0x0 0x10>;
@@ -553,6 +541,18 @@
 			pinctrl-0 = <&pwm7m0_pins>;
 			pinctrl-names = "default";
 			#pwm-cells = <3>;
+			status = "disabled";
+		};
+
+		saradc: adc@ffae0000 {
+			compatible = "rockchip,rk3528-saradc";
+			reg = <0x0 0xffae0000 0x0 0x10000>;
+			clocks = <&cru CLK_SARADC>, <&cru PCLK_SARADC>;
+			clock-names = "saradc", "apb_pclk";
+			interrupts = <GIC_SPI 140 IRQ_TYPE_LEVEL_HIGH>;
+			resets = <&cru SRST_P_SARADC>;
+			reset-names = "saradc-apb";
+			#io-channel-cells = <1>;
 			status = "disabled";
 		};
 
