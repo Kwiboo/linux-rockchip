@@ -1989,7 +1989,7 @@ static int rockchip_i2s_tdm_hw_params(struct snd_pcm_substream *substream,
 		rockchip_i2s_tdm_multi_lanes_set_clk(substream, params, dai);
 #endif
 	dma_data = snd_soc_dai_get_dma_data(dai, substream);
-	dma_data->maxburst = MAXBURST_PER_FIFO * params_channels(params) / 2;
+	dma_data->maxburst = params_channels(params);
 
 	if (i2s_tdm->mclk_calibrate)
 		rockchip_i2s_tdm_calibrate_mclk(i2s_tdm, substream,
