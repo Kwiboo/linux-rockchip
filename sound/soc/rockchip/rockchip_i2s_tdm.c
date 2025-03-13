@@ -518,6 +518,7 @@ static void rockchip_i2s_tdm_fifo_xrun_detect(struct rk_i2s_tdm_dev *i2s_tdm,
 		/* clear irq status which was asserted before TXUIE enabled */
 		regmap_update_bits(i2s_tdm->regmap, I2S_INTCR,
 				   I2S_INTCR_TXUIC, I2S_INTCR_TXUIC);
+		udelay(10);
 		regmap_update_bits(i2s_tdm->regmap, I2S_INTCR,
 				   I2S_INTCR_TXUIE_MASK,
 				   I2S_INTCR_TXUIE(en));
@@ -525,6 +526,7 @@ static void rockchip_i2s_tdm_fifo_xrun_detect(struct rk_i2s_tdm_dev *i2s_tdm,
 		/* clear irq status which was asserted before RXOIE enabled */
 		regmap_update_bits(i2s_tdm->regmap, I2S_INTCR,
 				   I2S_INTCR_RXOIC, I2S_INTCR_RXOIC);
+		udelay(10);
 		regmap_update_bits(i2s_tdm->regmap, I2S_INTCR,
 				   I2S_INTCR_RXOIE_MASK,
 				   I2S_INTCR_RXOIE(en));
