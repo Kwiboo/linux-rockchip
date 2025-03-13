@@ -20,6 +20,7 @@ properties:
       - rockchip,rk3328-tsadc
       - rockchip,rk3368-tsadc
       - rockchip,rk3399-tsadc
+      - rockchip,rk3528-tsadc
       - rockchip,rk3568-tsadc
       - rockchip,rk3576-tsadc
       - rockchip,rk3588-tsadc
@@ -33,12 +34,14 @@ properties:
 
   clocks:
     minItems: 2
-    maxItems: 2
+    maxItems: 3
 
   clock-names:
+    minItems: 2
     items:
       - const: tsadc
       - const: apb_pclk
+      - const: tsen
 
   nvmem-cells:
     items:
@@ -50,6 +53,9 @@ properties:
     items:
       - const: trim_base
       - const: trim_base_frac
+
+  power-domains:
+    maxItems: 1
 
   resets:
     minItems: 1
@@ -150,11 +156,24 @@ allOf:
           compatible:
             contains:
               enum:
+                - rockchip,rk3528-tsadc
                 - rockchip,rk3568-tsadc
                 - rockchip,rk3576-tsadc
     then:
       patternProperties:
         "@[0-9a-f]+$": false
+  - if:
+      not:
+        properties:
+          compatible:
+            contains:
+              const: rockchip,rk3528-tsadc
+    then:
+      properties:
+        clocks:
+          maxItems: 2
+        clock-names:
+          maxItems: 2
 
 unevaluatedProperties: false
 
