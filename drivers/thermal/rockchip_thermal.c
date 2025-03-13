@@ -144,8 +144,8 @@ struct rockchip_thermal_sensor {
  * @pdev: platform device of thermal
  * @reset: the reset controller of tsadc
  * @sensors: array of thermal sensors
- * @clk: the controller clock is divided by the exteral 24MHz
- * @pclk: the advanced peripherals bus clock
+ * @clks: array of clks, e.g. controller and advanced peripherals bus clock
+ * @num_clks: the number of clks
  * @grf: the general register file will be used to do static set by software
  * @regs: the base address of tsadc controller
  * @trim_base: major component of sensor trim value, in Celsius
@@ -163,8 +163,8 @@ struct rockchip_thermal_data {
 
 	struct rockchip_thermal_sensor *sensors;
 
-	struct clk *clk;
-	struct clk *pclk;
+	struct clk_bulk_data *clks;
+	int num_clks;
 
 	struct regmap *grf;
 	void __iomem *regs;
@@ -1727,15 +1727,11 @@ static int rockchip_thermal_probe(struct platform_device *pdev)
 		return dev_err_probe(&pdev->dev, PTR_ERR(thermal->reset),
 				     "failed to get tsadc reset.\n");
 
-	thermal->clk = devm_clk_get_enabled(&pdev->dev, "tsadc");
-	if (IS_ERR(thermal->clk))
-		return dev_err_probe(&pdev->dev, PTR_ERR(thermal->clk),
-				     "failed to get tsadc clock.\n");
-
-	thermal->pclk = devm_clk_get_enabled(&pdev->dev, "apb_pclk");
-	if (IS_ERR(thermal->pclk))
-		return dev_err_probe(&pdev->dev, PTR_ERR(thermal->pclk),
-				     "failed to get apb_pclk clock.\n");
+	thermal->num_clks = devm_clk_bulk_get_all_enabled(&pdev->dev,
+							  &thermal->clks);
+	if (thermal->num_clks < 0)
+		return dev_err_probe(&pdev->dev, thermal->num_clks,
+				     "failed to get clocks.\n");
 
 	rockchip_thermal_reset_controller(thermal->reset);
 
@@ -1817,8 +1813,7 @@ static int __maybe_unused rockchip_thermal_suspend(struct device *dev)
 
 	thermal->chip->control(thermal->regs, false);
 
-	clk_disable(thermal->pclk);
-	clk_disable(thermal->clk);
+	clk_bulk_disable(thermal->num_clks, thermal->clks);
 
 	pinctrl_pm_select_sleep_state(dev);
 
@@ -1834,15 +1829,9 @@ static int __maybe_unused rockchip_thermal_resume(struct device *dev)
 	int error;
 	int i;
 
-	error = clk_enable(thermal->clk);
+	error = clk_bulk_enable(thermal->num_clks, thermal->clks);
 	if (error)
 		return error;
-
-	error = clk_enable(thermal->pclk);
-	if (error) {
-		clk_disable(thermal->clk);
-		return error;
-	}
 
 	rockchip_thermal_reset_controller(thermal->reset);
 
