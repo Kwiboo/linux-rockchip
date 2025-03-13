@@ -1700,7 +1700,6 @@ static DEVICE_ATTR(error_event, 0444, rockchip_drm_error_event_show, NULL);
 static void rockchip_drm_error_event_init(struct drm_device *drm_dev)
 {
 	struct rockchip_drm_private *priv = drm_dev->dev_private;
-	struct sched_param sched_param = { .sched_priority = MAX_RT_PRIO - 1 };
 	int ret;
 
 	ret = device_create_file(drm_dev->dev, &dev_attr_error_event);
@@ -1717,7 +1716,7 @@ static void rockchip_drm_error_event_init(struct drm_device *drm_dev)
 		priv->error_event.thread = NULL;
 		drm_err(drm_dev, "failed to run display error_event thread\n");
 	} else {
-		sched_setscheduler(priv->error_event.thread, SCHED_FIFO, &sched_param);
+		sched_set_fifo_low(priv->error_event.thread);
 		drm_info(drm_dev, "run display error_event monitor\n");
 	}
 }
