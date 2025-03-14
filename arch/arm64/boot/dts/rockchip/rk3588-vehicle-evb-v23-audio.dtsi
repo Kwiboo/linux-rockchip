@@ -68,6 +68,7 @@
 			&gpio_fsxn_pins>;
 	fsxn-rx-gpio = <&gpio2 RK_PB4 GPIO_ACTIVE_HIGH>;
 	fsxn-tx-gpio = <&gpio4 RK_PA0 GPIO_ACTIVE_HIGH>;
+	rockchip,clk-trcm = <0>;
 	rockchip,tdm-multi-lanes;
 	rockchip,tdm-tx-lanes = <3>;
 	rockchip,tdm-rx-lanes = <2>;
