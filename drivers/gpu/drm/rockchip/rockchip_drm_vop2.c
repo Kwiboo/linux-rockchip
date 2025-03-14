@@ -14707,7 +14707,7 @@ static int vop2_create_crtc(struct vop2 *vop2, uint8_t enabled_vp_mask)
 	return registered_num_crtcs;
 }
 
-static void vop2_destroy_crtcs(struct vop2 *vop2)
+static void vop2_destroy_crtc(struct drm_crtc *crtc)
 {
 	struct vop2_video_port *vp = to_vop2_video_port(crtc);
 
@@ -15348,7 +15348,7 @@ static int vop2_bind(struct device *dev, struct device *master, void *data)
 	}
 
 	/* Allocate vop2 struct and its vop2_win array */
-	alloc_size = struct_size(vop2, win, vop2_data->win_size);
+	alloc_size = struct_size(vop2, win, num_wins);
 	vop2 = devm_kzalloc(dev, alloc_size, GFP_KERNEL);
 	if (!vop2)
 		return -ENOMEM;
@@ -15648,11 +15648,6 @@ static int vop2_bind(struct device *dev, struct device *master, void *data)
 	}
 
 	return 0;
-
-err_crtcs:
-	vop2_destroy_crtcs(vop2);
-
-	return ret;
 }
 
 static void vop2_unbind(struct device *dev, struct device *master, void *data)
@@ -15667,8 +15662,8 @@ static void vop2_unbind(struct device *dev, struct device *master, void *data)
 	rockchip_vop2_devfreq_uninit(vop2);
 	pm_runtime_disable(dev);
 
-	if (vop2->rgb)
-		rockchip_rgb_fini(vop2->rgb);
+	list_for_each_entry_safe(plane, tmpp, plane_list, head)
+		drm_plane_cleanup(plane);
 
 	list_for_each_entry_safe(crtc, tmpc, crtc_list, head)
 		vop2_destroy_crtc(crtc);
