@@ -26,17 +26,13 @@ properties:
     minItems: 3
     maxItems: 4
 
-  clock-names:
-    minItems: 3
-    maxItems: 4
+  clock-names: true
 
   resets:
     minItems: 1
     maxItems: 4
 
-  reset-names:
-    minItems: 1
-    maxItems: 4
+  reset-names: true
 
 required:
   - compatible
@@ -84,19 +80,17 @@ allOf:
       properties:
         clocks:
           minItems: 4
-          maxItems: 4
         clock-names:
           items:
-            - const: usr
+            - const: otp
             - const: sbpi
             - const: apb_pclk
             - const: phy
         resets:
           minItems: 4
-          maxItems: 4
         reset-names:
           items:
-            - const: usr
+            - const: otp
             - const: sbpi
             - const: apb
             - const: phy
@@ -112,7 +106,10 @@ allOf:
         clocks:
           maxItems: 3
         clock-names:
-          maxItems: 3
+          items:
+            - const: otp
+            - const: apb_pclk
+            - const: phy
         resets:
           minItems: 2
           maxItems: 2
@@ -131,9 +128,7 @@ allOf:
       properties:
         clocks:
           minItems: 4
-          maxItems: 4
         clock-names:
-          minItems: 4
           items:
             - const: otp
             - const: apb_pclk
