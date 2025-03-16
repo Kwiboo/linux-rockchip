@@ -54,8 +54,6 @@
 #define SBPI_ENABLE_MASK		GENMASK(16, 16)
 
 #define OTPC_TIMEOUT			10000
-#define OTPC_TIMEOUT_PROG		100000
-#define RK3568_NBYTES			2
 
 /* RK3588 Register */
 #define RK3588_OTPC_AUTO_CTRL		0x04
@@ -188,24 +186,12 @@ read_end:
 }
 
 static int rk3568_otp_read(void *context, unsigned int offset, void *val,
-			   size_t bytes)
+			   size_t count)
 {
 	struct rockchip_otp *otp = context;
-	unsigned int addr_start, addr_end, addr_offset, addr_len;
-	unsigned int otp_qp;
-	u32 out_value;
-	u8 *buf;
-	int ret = 0, i = 0;
-
-	addr_start = rounddown(offset, RK3568_NBYTES) / RK3568_NBYTES;
-	addr_end = roundup(offset + bytes, RK3568_NBYTES) / RK3568_NBYTES;
-	addr_offset = offset % RK3568_NBYTES;
-	addr_len = addr_end - addr_start;
-
-	buf = kzalloc(array3_size(addr_len, RK3568_NBYTES, sizeof(*buf)),
-		      GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
+	u16 *buf = val;
+	u32 otp_qp;
+	int ret;
 
 	ret = rockchip_otp_reset(otp);
 	if (ret) {
@@ -214,39 +200,39 @@ static int rk3568_otp_read(void *context, unsigned int offset, void *val,
 	}
 
 	ret = rockchip_otp_ecc_enable(otp, true);
-	if (ret < 0) {
+	if (ret) {
 		dev_err(otp->dev, "rockchip_otp_ecc_enable err\n");
 		return ret;
 	}
 
 	writel(OTPC_USE_USER | OTPC_USE_USER_MASK, otp->base + OTPC_USER_CTRL);
 	udelay(5);
-	while (addr_len--) {
-		writel(addr_start++ | OTPC_USER_ADDR_MASK,
+
+	while (count--) {
+		writel(offset++ | OTPC_USER_ADDR_MASK,
 		       otp->base + OTPC_USER_ADDR);
 		writel(OTPC_USER_FSM_ENABLE | OTPC_USER_FSM_ENABLE_MASK,
 		       otp->base + OTPC_USER_ENABLE);
-		ret = rockchip_otp_wait_status(otp, OTPC_INT_STATUS, OTPC_USER_DONE);
-		if (ret < 0) {
+
+		ret = rockchip_otp_wait_status(otp, OTPC_INT_STATUS,
+					       OTPC_USER_DONE);
+		if (ret) {
 			dev_err(otp->dev, "timeout during read setup\n");
 			goto read_end;
 		}
+
 		otp_qp = readl(otp->base + OTPC_USER_QP);
 		if (((otp_qp & 0xc0) == 0xc0) || (otp_qp & 0x20)) {
 			ret = -EIO;
 			dev_err(otp->dev, "ecc check error during read setup\n");
 			goto read_end;
 		}
-		out_value = readl(otp->base + OTPC_USER_Q);
-		memcpy(&buf[i], &out_value, RK3568_NBYTES);
-		i += RK3568_NBYTES;
-	}
 
-	memcpy(val, buf + addr_offset, bytes);
+		*buf++ = readl(otp->base + OTPC_USER_Q);
+	}
 
 read_end:
 	writel(0x0 | OTPC_USE_USER_MASK, otp->base + OTPC_USER_CTRL);
-	kfree(buf);
 
 	return ret;
 }
@@ -348,11 +334,12 @@ static const struct rockchip_data px30_data = {
 };
 
 static const char * const rk3568_otp_clocks[] = {
-	"usr", "sbpi", "apb_pclk", "phy",
+	"otp", "sbpi", "apb_pclk", "phy",
 };
 
 static const struct rockchip_data rk3568_data = {
 	.size = 0x80,
+	.word_size = sizeof(u16),
 	.clks = rk3568_otp_clocks,
 	.num_clks = ARRAY_SIZE(rk3568_otp_clocks),
 	.reg_read = rk3568_otp_read,
