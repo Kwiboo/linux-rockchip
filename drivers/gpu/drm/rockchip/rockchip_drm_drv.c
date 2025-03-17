@@ -932,9 +932,45 @@ void parse_edid_forum_vsdb(struct rockchip_drm_dsc_cap *dsc_cap,
 
 /* Sink Capability Data Structure, for compatibility with linux version < linux kernel 6.1 */
 static void parse_hdmi_forum_scds(struct rockchip_drm_dsc_cap *dsc_cap,
+				  struct drm_display_info *info,
 				  u8 *max_frl_rate_per_lane, u8 *max_lanes,
 				  const u8 *hf_scds)
 {
+	struct drm_hdmi_info *hdmi = &info->hdmi;
+
+	if (hf_scds[6] & 0x80) {
+		hdmi->scdc.supported = true;
+		if (hf_scds[6] & 0x40)
+			hdmi->scdc.read_request = true;
+	}
+	/*
+	 * All HDMI 2.0 monitors must support scrambling at rates > 340 MHz.
+	 * And as per the spec, three factors confirm this:
+	 * * Availability of a HF-VSDB block in EDID (check)
+	 * * Non zero Max_TMDS_Char_Rate filed in HF-VSDB (let's check)
+	 * * SCDC support available (let's check)
+	 * Lets check it out.
+	 */
+
+	if (hf_scds[5]) {
+		/* max clock is 5000 KHz times block value */
+		u32 max_tmds_clock = hf_scds[5] * 5000;
+		struct drm_scdc *scdc = &hdmi->scdc;
+
+		if (max_tmds_clock > 340000) {
+			info->max_tmds_clock = max_tmds_clock;
+			DRM_DEBUG_KMS("HF-VSDB: max TMDS clock %d kHz\n", info->max_tmds_clock);
+		}
+
+		if (scdc->supported) {
+			scdc->scrambling.supported = true;
+
+			/* Few sinks support scrambling for clocks < 340M */
+			if ((hf_scds[6] & 0x8))
+				scdc->scrambling.low_rates = true;
+		}
+	}
+
 	if (hf_scds[7]) {
 		u8 max_frl_rate;
 		u8 dsc_max_frl_rate;
@@ -1017,6 +1053,7 @@ int parse_dovi_block(u8 *sink_data, const u8 *dovi_db)
 }
 
 int rockchip_drm_parse_cea_ext(struct rockchip_drm_dsc_cap *dsc_cap,
+			       struct drm_display_info *info,
 			       u8 *max_frl_rate_per_lane, u8 *max_lanes, u8 *add_func,
 			       const struct edid *edid)
 {
@@ -1040,7 +1077,7 @@ int rockchip_drm_parse_cea_ext(struct rockchip_drm_dsc_cap *dsc_cap,
 			parse_edid_forum_vsdb(dsc_cap, max_frl_rate_per_lane,
 					      max_lanes, add_func, db);
 		else if (cea_db_is_hdmi_forum_scdb(db))
-			parse_hdmi_forum_scds(dsc_cap, max_frl_rate_per_lane,
+			parse_hdmi_forum_scds(dsc_cap, info, max_frl_rate_per_lane,
 					      max_lanes, db);
 	}
 

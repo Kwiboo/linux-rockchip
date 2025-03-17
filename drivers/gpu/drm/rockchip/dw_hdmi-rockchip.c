@@ -2588,7 +2588,7 @@ dw_hdmi_rockchip_get_yuv422_format(struct drm_connector *connector,
 }
 
 static int
-dw_hdmi_rockchip_get_edid_dsc_info(void *data, struct edid *edid)
+dw_hdmi_rockchip_get_edid_dsc_info(void *data, struct edid *edid, struct drm_display_info *info)
 {
 	struct rockchip_hdmi *hdmi = (struct rockchip_hdmi *)data;
 
@@ -2600,7 +2600,7 @@ dw_hdmi_rockchip_get_edid_dsc_info(void *data, struct edid *edid)
 	hdmi->max_lanes = 0;
 	hdmi->add_func = 0;
 
-	return rockchip_drm_parse_cea_ext(&hdmi->dsc_cap,
+	return rockchip_drm_parse_cea_ext(&hdmi->dsc_cap, info,
 					  &hdmi->max_frl_rate_per_lane,
 					  &hdmi->max_lanes, &hdmi->add_func, edid);
 }

@@ -2747,8 +2747,7 @@ static int dw_hdmi_connector_get_modes(struct drm_connector *connector)
 		drm_connector_update_edid_property(connector, edid);
 		if (hdmi->cec_notifier)
 			cec_notifier_set_phys_addr_from_edid(hdmi->cec_notifier, edid);
-		if (hdmi->plat_data->get_edid_dsc_info)
-			hdmi->plat_data->get_edid_dsc_info(data, edid);
+
 		memcpy(hdmi->vendor_info, &raw_edid[8], VENDOR_INFO_LEN);
 		if (hdmi->plat_data->get_dovi_data)
 			hdmi->plat_data->get_dovi_data(data, edid, connector);
@@ -2757,6 +2756,9 @@ static int dw_hdmi_connector_get_modes(struct drm_connector *connector)
 			hdmi->plat_data->get_colorimetry(data, edid);
 		if (hdmi->plat_data->get_yuv422_format)
 			hdmi->plat_data->get_yuv422_format(connector, edid);
+		if (hdmi->plat_data->get_edid_dsc_info)
+			hdmi->plat_data->get_edid_dsc_info(data, edid, info);
+
 		dw_hdmi_update_hdr_property(connector);
 		if (ret > 0 && hdmi->plat_data->split_mode) {
 			struct dw_hdmi_qp *secondary = NULL;
@@ -2782,7 +2784,7 @@ static int dw_hdmi_connector_get_modes(struct drm_connector *connector)
 				cec_notifier_set_phys_addr_from_edid(secondary->cec_notifier,
 								     edid);
 			if (secondary->plat_data->get_edid_dsc_info)
-				secondary->plat_data->get_edid_dsc_info(secondary_data, edid);
+				secondary->plat_data->get_edid_dsc_info(secondary_data, edid, info);
 		}
 		kfree(edid);
 	} else {
