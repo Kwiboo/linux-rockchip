@@ -9,6 +9,7 @@
 
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/leds/common.h>
+#include <dt-bindings/pwm/pwm.h>
 #include "rk3528.dtsi"
 
 / {
@@ -80,6 +81,26 @@
 		};
 	};
 
+	vdd_0v9: regulator-0v9-vdd {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_0v9";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <900000>;
+		regulator-max-microvolt = <900000>;
+		vin-supply = <&vcc5v0_sys>;
+	};
+
+	vcc_ddr: regulator-1v1-vcc-ddr {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_ddr";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <1100000>;
+		regulator-max-microvolt = <1100000>;
+		vin-supply = <&vcc5v0_sys>;
+	};
+
 	vcc_1v8: regulator-1v8-vcc {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc_1v8";
@@ -100,16 +121,6 @@
 		vin-supply = <&vcc5v0_sys>;
 	};
 
-	vcc_ddr: regulator-vcc-ddr {
-		compatible = "regulator-fixed";
-		regulator-name = "vcc_ddr";
-		regulator-always-on;
-		regulator-boot-on;
-		regulator-min-microvolt = <1100000>;
-		regulator-max-microvolt = <1100000>;
-		vin-supply = <&vcc5v0_sys>;
-	};
-
 	vcc5v0_sys: regulator-5v0-vcc-sys {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc5v0_sys";
@@ -119,19 +130,11 @@
 		regulator-max-microvolt = <5000000>;
 	};
 
-	vdd_0v9: regulator-0v9-vdd {
-		compatible = "regulator-fixed";
-		regulator-name = "vdd_0v9";
-		regulator-always-on;
-		regulator-boot-on;
-		regulator-min-microvolt = <900000>;
-		regulator-max-microvolt = <900000>;
-		vin-supply = <&vcc5v0_sys>;
-	};
-
 	vdd_arm: regulator-vdd-arm {
 		compatible = "pwm-regulator";
-		pwms = <&pwm1 0 5000 1>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pwm1m0_pins>;
+		pwms = <&pwm1 0 5000 PWM_POLARITY_INVERTED>;
 		pwm-supply = <&vcc5v0_sys>;
 		regulator-name = "vdd_arm";
 		regulator-always-on;
@@ -143,7 +146,9 @@
 
 	vdd_logic: regulator-vdd-logic {
 		compatible = "pwm-regulator";
-		pwms = <&pwm2 0 5000 1>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pwm2m0_pins>;
+		pwms = <&pwm2 0 5000 PWM_POLARITY_INVERTED>;
 		pwm-supply = <&vcc5v0_sys>;
 		regulator-name = "vdd_logic";
 		regulator-always-on;
@@ -193,14 +198,10 @@
 };
 
 &pwm1 {
-	pinctrl-0 = <&pwm1m0_pins>;
-	pinctrl-names = "default";
 	status = "okay";
 };
 
 &pwm2 {
-	pinctrl-0 = <&pwm2m0_pins>;
-	pinctrl-names = "default";
 	status = "okay";
 };
 
