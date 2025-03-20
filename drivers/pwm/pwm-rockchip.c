@@ -29,6 +29,8 @@
 #define PWM_LOCK_EN		(1 << 6)
 #define PWM_LP_DISABLE		(0 << 8)
 
+#define PWM_CHANNEL_OFFSET(n)	((n) * 0x10)
+
 struct rockchip_pwm_chip {
 	struct clk *clk;
 	struct clk *pclk;
@@ -45,6 +47,7 @@ struct rockchip_pwm_regs {
 
 struct rockchip_pwm_data {
 	struct rockchip_pwm_regs regs;
+	unsigned int channels;
 	unsigned int prescaler;
 	bool supports_polarity;
 	bool supports_lock;
@@ -62,7 +65,7 @@ static int rockchip_pwm_get_state(struct pwm_chip *chip,
 {
 	struct rockchip_pwm_chip *pc = to_rockchip_pwm_chip(chip);
 	u32 enable_conf = pc->data->enable_conf;
-	unsigned long clk_rate;
+	unsigned long clk_rate, offset = PWM_CHANNEL_OFFSET(pwm->hwpwm);
 	u64 tmp;
 	u32 val;
 	int ret;
@@ -77,15 +80,15 @@ static int rockchip_pwm_get_state(struct pwm_chip *chip,
 
 	clk_rate = clk_get_rate(pc->clk);
 
-	tmp = readl_relaxed(pc->base + pc->data->regs.period);
+	tmp = readl_relaxed(pc->base + offset + pc->data->regs.period);
 	tmp *= pc->data->prescaler * NSEC_PER_SEC;
 	state->period = DIV_ROUND_CLOSEST_ULL(tmp, clk_rate);
 
-	tmp = readl_relaxed(pc->base + pc->data->regs.duty);
+	tmp = readl_relaxed(pc->base + offset + pc->data->regs.duty);
 	tmp *= pc->data->prescaler * NSEC_PER_SEC;
 	state->duty_cycle =  DIV_ROUND_CLOSEST_ULL(tmp, clk_rate);
 
-	val = readl_relaxed(pc->base + pc->data->regs.ctrl);
+	val = readl_relaxed(pc->base + offset + pc->data->regs.ctrl);
 	state->enabled = (val & enable_conf) == enable_conf;
 
 	if (pc->data->supports_polarity && !(val & PWM_DUTY_POSITIVE))
@@ -103,7 +106,7 @@ static void rockchip_pwm_config(struct pwm_chip *chip, struct pwm_device *pwm,
 			       const struct pwm_state *state)
 {
 	struct rockchip_pwm_chip *pc = to_rockchip_pwm_chip(chip);
-	unsigned long period, duty;
+	unsigned long period, duty, offset = PWM_CHANNEL_OFFSET(pwm->hwpwm);
 	u64 clk_rate, div;
 	u32 ctrl;
 
@@ -125,14 +128,14 @@ static void rockchip_pwm_config(struct pwm_chip *chip, struct pwm_device *pwm,
 	 * Lock the period and duty of previous configuration, then
 	 * change the duty and period, that would not be effective.
 	 */
-	ctrl = readl_relaxed(pc->base + pc->data->regs.ctrl);
+	ctrl = readl_relaxed(pc->base + offset + pc->data->regs.ctrl);
 	if (pc->data->supports_lock) {
 		ctrl |= PWM_LOCK_EN;
-		writel_relaxed(ctrl, pc->base + pc->data->regs.ctrl);
+		writel_relaxed(ctrl, pc->base + offset + pc->data->regs.ctrl);
 	}
 
-	writel(period, pc->base + pc->data->regs.period);
-	writel(duty, pc->base + pc->data->regs.duty);
+	writel(period, pc->base + offset + pc->data->regs.period);
+	writel(duty, pc->base + offset + pc->data->regs.duty);
 
 	if (pc->data->supports_polarity) {
 		ctrl &= ~PWM_POLARITY_MASK;
@@ -150,7 +153,7 @@ static void rockchip_pwm_config(struct pwm_chip *chip, struct pwm_device *pwm,
 	if (pc->data->supports_lock)
 		ctrl &= ~PWM_LOCK_EN;
 
-	writel(ctrl, pc->base + pc->data->regs.ctrl);
+	writel(ctrl, pc->base + offset + pc->data->regs.ctrl);
 }
 
 static int rockchip_pwm_enable(struct pwm_chip *chip,
@@ -159,6 +162,7 @@ static int rockchip_pwm_enable(struct pwm_chip *chip,
 {
 	struct rockchip_pwm_chip *pc = to_rockchip_pwm_chip(chip);
 	u32 enable_conf = pc->data->enable_conf;
+	unsigned long offset = PWM_CHANNEL_OFFSET(pwm->hwpwm);
 	int ret;
 	u32 val;
 
@@ -168,14 +172,14 @@ static int rockchip_pwm_enable(struct pwm_chip *chip,
 			return ret;
 	}
 
-	val = readl_relaxed(pc->base + pc->data->regs.ctrl);
+	val = readl_relaxed(pc->base + offset + pc->data->regs.ctrl);
 
 	if (enable)
 		val |= enable_conf;
 	else
 		val &= ~enable_conf;
 
-	writel_relaxed(val, pc->base + pc->data->regs.ctrl);
+	writel_relaxed(val, pc->base + offset + pc->data->regs.ctrl);
 
 	if (!enable)
 		clk_disable(pc->clk);
@@ -236,6 +240,7 @@ static const struct rockchip_pwm_data pwm_data_v1 = {
 		.cntr = 0x00,
 		.ctrl = 0x0c,
 	},
+	.channels = 1,
 	.prescaler = 2,
 	.supports_polarity = false,
 	.supports_lock = false,
@@ -249,6 +254,7 @@ static const struct rockchip_pwm_data pwm_data_v2 = {
 		.cntr = 0x00,
 		.ctrl = 0x0c,
 	},
+	.channels = 1,
 	.prescaler = 1,
 	.supports_polarity = true,
 	.supports_lock = false,
@@ -263,6 +269,7 @@ static const struct rockchip_pwm_data pwm_data_vop = {
 		.cntr = 0x0c,
 		.ctrl = 0x00,
 	},
+	.channels = 1,
 	.prescaler = 1,
 	.supports_polarity = true,
 	.supports_lock = false,
@@ -277,6 +284,22 @@ static const struct rockchip_pwm_data pwm_data_v3 = {
 		.cntr = 0x00,
 		.ctrl = 0x0c,
 	},
+	.channels = 1,
+	.prescaler = 1,
+	.supports_polarity = true,
+	.supports_lock = true,
+	.enable_conf = PWM_OUTPUT_LEFT | PWM_LP_DISABLE | PWM_ENABLE |
+		       PWM_CONTINUOUS,
+};
+
+static const struct rockchip_pwm_data pwm_data_v4 = {
+	.regs = {
+		.duty = 0x08,
+		.period = 0x04,
+		.cntr = 0x00,
+		.ctrl = 0x0c,
+	},
+	.channels = 4,
 	.prescaler = 1,
 	.supports_polarity = true,
 	.supports_lock = true,
@@ -289,6 +312,7 @@ static const struct of_device_id rockchip_pwm_dt_ids[] = {
 	{ .compatible = "rockchip,rk3288-pwm", .data = &pwm_data_v2},
 	{ .compatible = "rockchip,vop-pwm", .data = &pwm_data_vop},
 	{ .compatible = "rockchip,rk3328-pwm", .data = &pwm_data_v3},
+	{ .compatible = "rockchip,rk3528-pwm", .data = &pwm_data_v4},
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, rockchip_pwm_dt_ids);
@@ -297,11 +321,14 @@ static int rockchip_pwm_probe(struct platform_device *pdev)
 {
 	struct pwm_chip *chip;
 	struct rockchip_pwm_chip *pc;
+	const struct rockchip_pwm_data *data;
 	u32 enable_conf, ctrl;
-	bool enabled;
+	bool enabled = false;
 	int ret, count;
 
-	chip = devm_pwmchip_alloc(&pdev->dev, 1, sizeof(*pc));
+	data = device_get_match_data(&pdev->dev);
+
+	chip = devm_pwmchip_alloc(&pdev->dev, data->channels, sizeof(*pc));
 	if (IS_ERR(chip))
 		return PTR_ERR(chip);
 	pc = to_rockchip_pwm_chip(chip);
@@ -340,12 +367,18 @@ static int rockchip_pwm_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, chip);
 
-	pc->data = device_get_match_data(&pdev->dev);
+	pc->data = data;
 	chip->ops = &rockchip_pwm_ops;
 
 	enable_conf = pc->data->enable_conf;
-	ctrl = readl_relaxed(pc->base + pc->data->regs.ctrl);
-	enabled = (ctrl & enable_conf) == enable_conf;
+	for (int i = 0; i < chip->npwm; i++) {
+		unsigned long offset = PWM_CHANNEL_OFFSET(i);
+
+		ctrl = readl_relaxed(pc->base + offset + pc->data->regs.ctrl);
+		enabled = (ctrl & enable_conf) == enable_conf;
+		if (enabled)
+			break;
+	}
 
 	ret = pwmchip_add(chip);
 	if (ret < 0) {

@@ -187,7 +187,7 @@
 		compatible = "pwm-regulator";
 		pinctrl-names = "default";
 		pinctrl-0 = <&pwm3m0_pins>;
-		pwms = <&pwm3 0 5000 PWM_POLARITY_INVERTED>;
+		pwms = <&pwm0 3 5000 PWM_POLARITY_INVERTED>;
 		pwm-supply = <&vcc5v0_sys>;
 		regulator-name = "vdd_arm";
 		regulator-always-on;
@@ -201,7 +201,7 @@
 		compatible = "pwm-regulator";
 		pinctrl-names = "default";
 		pinctrl-0 = <&pwm2m0_pins>;
-		pwms = <&pwm2 0 5000 PWM_POLARITY_INVERTED>;
+		pwms = <&pwm0 2 5000 PWM_POLARITY_INVERTED>;
 		pwm-supply = <&vcc5v0_sys>;
 		regulator-name = "vdd_logic";
 		regulator-always-on;
@@ -364,11 +364,7 @@
 	};
 };
 
-&pwm2 {
-	status = "okay";
-};
-
-&pwm3 {
+&pwm0 {
 	status = "okay";
 };
 
