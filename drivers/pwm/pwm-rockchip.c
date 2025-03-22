@@ -88,6 +88,7 @@
 #define WAVE_SUPPORT			BIT(12)
 #define FILTER_SUPPORT			BIT(13)
 #define BIPHASIC_SUPPORT		BIT(14)
+#define LEDC_SUPPORT			BIT(15)
 #define MINOR_VERSION_SHIFT		16
 #define MINOR_VERSION_MASK		(0xff << MINOR_VERSION_SHIFT)
 #define MAIN_VERSION_SHIFT		24
@@ -183,6 +184,8 @@
 #define WAVE_MAX_INT_EN(v)		HIWORD_UPDATE(v, 7, 7)
 #define WAVE_MIDDLE_INT_EN(v)		HIWORD_UPDATE(v, 8, 8)
 #define BIPHASIC_INT_EN(v)		HIWORD_UPDATE(v, 9, 9)
+/* FEATURE */
+#define FEATURE				0x7c
 /* WAVE_MEM_ARBITER */
 #define WAVE_MEM_ARBITER		0x80
 #define WAVE_MEM_GRANT_SHIFT		0
@@ -325,12 +328,14 @@ struct rockchip_pwm_chip {
 	bool counter_support;
 	bool wave_support;
 	bool biphasic_support;
+	bool ledc_support;
 	bool freq_res_valid;
 	bool biphasic_res_valid;
 	int channel_id;
 	int irq;
 	u32 scaler;
 	u8 main_version;
+	u8 minor_version;
 	u8 capture_cnt;
 };
 
@@ -2251,13 +2256,19 @@ static int rockchip_pwm_get_channel_id(const char *name)
 	return name[len - 2] - '0';
 }
 
+static u32 rockchip_pwm_get_minor_version(struct rockchip_pwm_chip *pc)
+{
+	return (readl_relaxed(pc->base + pc->data->regs.version) & MINOR_VERSION_MASK) >>
+	       MINOR_VERSION_SHIFT;
+}
+
 static int rockchip_pwm_probe(struct platform_device *pdev)
 {
 	const struct of_device_id *id;
 	struct rockchip_pwm_chip *pc;
 	struct resource *r;
 	unsigned long irq_flags;
-	u32 enable_conf, ctrl, version;
+	u32 enable_conf, ctrl, feature;
 	bool enabled;
 	int ret, count;
 
@@ -2340,16 +2351,25 @@ static int rockchip_pwm_probe(struct platform_device *pdev)
 	pc->chip.npwm = 1;
 	pc->clk_rate = clk_get_rate(pc->clk);
 	pc->main_version = pc->data->main_version;
-	if (pc->main_version >= 4) {
-		version = readl_relaxed(pc->base + pc->data->regs.version);
-		pc->channel_id = (version & CHANNLE_INDEX_MASK) >> CHANNLE_INDEX_SHIFT;
-		pc->ir_trans_support = !!(version & IR_TRANS_SUPPORT);
-		pc->freq_meter_support = !!(version & FREQ_METER_SUPPORT);
-		pc->counter_support = !!(version & COUNTER_SUPPORT);
-		pc->wave_support = !!(version & WAVE_SUPPORT);
-		pc->biphasic_support = !!(version & BIPHASIC_SUPPORT);
-	} else {
+	if (pc->main_version < 4) {
 		pc->channel_id = rockchip_pwm_get_channel_id(pdev->dev.of_node->full_name);
+	} else if (pc->main_version == 4 && rockchip_pwm_get_minor_version(pc) < 1) {
+		feature = readl_relaxed(pc->base + pc->data->regs.version);
+		pc->channel_id = (feature & CHANNLE_INDEX_MASK) >> CHANNLE_INDEX_SHIFT;
+		pc->ir_trans_support = !!(feature & IR_TRANS_SUPPORT);
+		pc->freq_meter_support = !!(feature & FREQ_METER_SUPPORT);
+		pc->counter_support = !!(feature & COUNTER_SUPPORT);
+		pc->wave_support = !!(feature & WAVE_SUPPORT);
+		pc->biphasic_support = !!(feature & BIPHASIC_SUPPORT);
+	} else {
+		feature = readl_relaxed(pc->base + FEATURE);
+		pc->channel_id = (feature & CHANNLE_INDEX_MASK) >> CHANNLE_INDEX_SHIFT;
+		pc->ir_trans_support = !!(feature & IR_TRANS_SUPPORT);
+		pc->freq_meter_support = !!(feature & FREQ_METER_SUPPORT);
+		pc->counter_support = !!(feature & COUNTER_SUPPORT);
+		pc->wave_support = !!(feature & WAVE_SUPPORT);
+		pc->biphasic_support = !!(feature & BIPHASIC_SUPPORT);
+		pc->ledc_support = !!(feature & LEDC_SUPPORT);
 	}
 	if (pc->channel_id < 0 || pc->channel_id >= PWM_MAX_CHANNEL_NUM) {
 		dev_err(&pdev->dev, "Channel id is out of range: %d\n", pc->channel_id);
