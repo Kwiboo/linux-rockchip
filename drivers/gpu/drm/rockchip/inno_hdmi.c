@@ -28,6 +28,8 @@
 
 #include "inno_hdmi.h"
 
+#define RK3036_GRF_SOC_CON2    0x148
+
 #define to_inno_hdmi(x)	container_of(x, struct inno_hdmi, x)
 
 struct audio_info {
@@ -79,6 +81,7 @@ struct inno_hdmi {
 	struct clk *aclk;
 	struct clk *pclk;
 	void __iomem *regs;
+	struct regmap *grf;
 
 	struct drm_connector	connector;
 	struct drm_encoder	encoder;
@@ -438,8 +441,9 @@ static int inno_hdmi_config_video_timing(struct inno_hdmi *hdmi,
 		value = BIT(20) | BIT(21);
 		value |= mode->flags & DRM_MODE_FLAG_PHSYNC ? BIT(4) : 0;
 		value |= mode->flags & DRM_MODE_FLAG_PVSYNC ? BIT(5) : 0;
-		hdmi_writeb(hdmi, 0x148, value);
+		regmap_write(hdmi->grf, RK3036_GRF_SOC_CON2, value);
 	}
+
 	/* Set detail external video timing polarity and interlace mode */
 	value = v_EXTERANL_VIDEO(1);
 	value |= mode->flags & DRM_MODE_FLAG_PHSYNC ?
@@ -1154,6 +1158,15 @@ static int inno_hdmi_bind(struct device *dev, struct device *master,
 	if (ret) {
 		dev_err(hdmi->dev, "Cannot enable HDMI pclk clock: %d\n", ret);
 		goto err_disable_aclk;
+	}
+
+	if (hdmi->plat_data->dev_type == RK3036_HDMI) {
+		hdmi->grf = syscon_regmap_lookup_by_phandle(dev->of_node, "rockchip,grf");
+		if (IS_ERR(hdmi->grf)) {
+			dev_err(hdmi->dev, "Unable to get rockchip,grf\n");
+			ret = PTR_ERR(hdmi->grf);
+			goto err_disable_pclk;
+		}
 	}
 
 	inno_hdmi_reset(hdmi);
