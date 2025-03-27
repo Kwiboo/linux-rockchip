@@ -1370,20 +1370,27 @@ static void vop2_load_sdr2hdr_table(struct vop2_video_port *vp, int sdr2hdr_tf)
 	const struct vop2_video_port_regs *regs = vp->regs;
 	uint32_t sdr2hdr_eotf_oetf_yn[65];
 	uint32_t sdr2hdr_oetf_dx_dxpow[64];
-	int i;
+	int i, bt1886_eotf_coe = 1;
 
 	for (i = 0; i < 65; i++) {
+		/*
+		 * rk3568/rk3588 sdr2hdr bt1886 eotf dx << 1 by mistake, so add
+		 * bt1886_eotf_coe to adapt it.
+		 */
+		if (i == 64)
+			bt1886_eotf_coe = 0;
+
 		if (sdr2hdr_tf == SDR2HDR_FOR_BT2020)
 			sdr2hdr_eotf_oetf_yn[i] =
-				table->sdr2hdr_bt1886eotf_yn_for_bt2020[i] +
+				(table->sdr2hdr_bt1886eotf_yn_for_bt2020[i] << bt1886_eotf_coe) +
 				(table->sdr2hdr_st2084oetf_yn_for_bt2020[i] << 18);
 		else if (sdr2hdr_tf == SDR2HDR_FOR_HDR)
 			sdr2hdr_eotf_oetf_yn[i] =
-				table->sdr2hdr_bt1886eotf_yn_for_hdr[i] +
+				(table->sdr2hdr_bt1886eotf_yn_for_hdr[i] << bt1886_eotf_coe) +
 				(table->sdr2hdr_st2084oetf_yn_for_hdr[i] << 18);
 		else if (sdr2hdr_tf == SDR2HDR_FOR_HLG_HDR)
 			sdr2hdr_eotf_oetf_yn[i] =
-				table->sdr2hdr_bt1886eotf_yn_for_hlg_hdr[i] +
+				(table->sdr2hdr_bt1886eotf_yn_for_hlg_hdr[i] << bt1886_eotf_coe) +
 				(table->sdr2hdr_st2084oetf_yn_for_hlg_hdr[i] << 18);
 	}
 
@@ -9431,7 +9438,7 @@ static void vop2_setup_hdr10(struct vop2_video_port *vp, uint8_t win_phys_id)
 	bool sdr2hdr_en = 0;
 	bool sdr2hdr_tf = 0;
 	bool hdr2sdr_tf_update = 1;
-	bool sdr2hdr_tf_update = 0; /* default sdr2hdr curve is 1000 nit */
+	bool sdr2hdr_tf_update = 1;
 	unsigned long win_mask = vp->win_mask;
 	int phys_id;
 	bool have_sdr_layer = false;
