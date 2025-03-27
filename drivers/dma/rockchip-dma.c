@@ -429,10 +429,11 @@ struct rk_dma_dev {
 	struct list_head	chan_pending;
 	struct rk_dma_lch	*lch;
 	struct rk_dma_chan	*chans;
-	struct clk		*clk;
+	struct clk_bulk_data	*clks;
 	struct dma_pool		*pool;
 	void __iomem		*base;
 	int			irq;
+	int			num_clks;
 	u32			bus_width;
 	u32			dma_channels;
 	u32			dma_requests;
@@ -1171,10 +1172,10 @@ static int rk_dma_probe(struct platform_device *pdev)
 	if (IS_ERR(d->base))
 		return PTR_ERR(d->base);
 
-	d->clk = devm_clk_get(&pdev->dev, "aclk");
-	if (IS_ERR(d->clk)) {
-		dev_err(&pdev->dev, "Failed to get aclk\n");
-		return PTR_ERR(d->clk);
+	d->num_clks = devm_clk_bulk_get_all(&pdev->dev, &d->clks);
+	if (d->num_clks < 1) {
+		dev_err(&pdev->dev, "Failed to get clk\n");
+		return -ENODEV;
 	}
 
 	d->irq = platform_get_irq(pdev, 0);
@@ -1213,7 +1214,7 @@ static int rk_dma_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, d);
 
 	/* Enable clock before access registers */
-	ret = clk_prepare_enable(d->clk);
+	ret = clk_bulk_prepare_enable(d->num_clks, d->clks);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Failed to enable clk: %d\n", ret);
 		return ret;
@@ -1267,7 +1268,7 @@ err_unregister_dma:
 	dma_async_device_unregister(&d->slave);
 
 err_disable_clk:
-	clk_disable_unprepare(d->clk);
+	clk_bulk_disable_unprepare(d->num_clks, d->clks);
 
 	return ret;
 }
@@ -1283,7 +1284,7 @@ static int rk_dma_remove(struct platform_device *pdev)
 	list_for_each_entry_safe(c, cn, &d->slave.channels, vc.chan.device_node) {
 		list_del(&c->vc.chan.device_node);
 	}
-	clk_disable_unprepare(d->clk);
+	clk_bulk_disable_unprepare(d->num_clks, d->clks);
 
 	return 0;
 }
@@ -1294,7 +1295,7 @@ static int rk_dma_suspend_dev(struct device *dev)
 	struct rk_dma_dev *d = dev_get_drvdata(dev);
 
 	//TBD dma all chan idle
-	clk_disable_unprepare(d->clk);
+	clk_bulk_disable_unprepare(d->num_clks, d->clks);
 
 	return 0;
 }
@@ -1304,7 +1305,7 @@ static int rk_dma_resume_dev(struct device *dev)
 	struct rk_dma_dev *d = dev_get_drvdata(dev);
 	int ret = 0;
 
-	ret = clk_prepare_enable(d->clk);
+	ret = clk_bulk_prepare_enable(d->num_clks, d->clks);
 	if (ret < 0) {
 		dev_err(d->slave.dev, "Failed to enable clk: %d\n", ret);
 		return ret;
