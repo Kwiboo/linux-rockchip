@@ -262,7 +262,6 @@ struct dw_hdmi_plat_data {
 	void (*set_hdcp_status)(void *data, u8 status);
 	void (*set_hdcp2_enable)(void *data, bool enable);
 	void (*set_grf_cfg)(void *data);
-	u64 (*get_grf_color_fmt)(void *data);
 	void (*convert_to_split_mode)(struct drm_display_mode *mode);
 	void (*convert_to_origin_mode)(struct drm_display_mode *mode);
 	int (*dclk_set)(void *data, bool enable, int vp_id);

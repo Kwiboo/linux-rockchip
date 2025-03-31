@@ -72,6 +72,15 @@
 
 #define HDMI_CTRL_CLK_EN	0x15
 
+#define DW_HDMI_QP_RGB		0
+#define DW_HDMI_QP_YUV422	0x1
+#define DW_HDMI_QP_YUV444	0x2
+#define DW_HDMI_QP_YUV420	0x3
+#define DW_HDMI_QP_DSC		0xb
+
+#define IPI_FORMAT_MASK		0xf
+#define IPI_COLOR_DEPTH_MASK	0xf0
+
 static const unsigned int dw_hdmi_cable[] = {
 	EXTCON_DISP_HDMI,
 	EXTCON_NONE,
@@ -2977,20 +2986,107 @@ dw_hdmi_connector_set_property(struct drm_connector *connector,
 						     property, val);
 }
 
+static u64 dw_hdmi_qp_get_avi_color_fmt(struct dw_hdmi_qp *hdmi, u32 depth)
+{
+	u32 fmt;
+	u64 bus_format;
+
+	fmt = (hdmi_readl(hdmi, PKT_AVI_CONTENTS1) >> 13) & 0x3;
+
+	switch (fmt) {
+	case DW_HDMI_QP_YUV444:
+		if (!depth)
+			bus_format = MEDIA_BUS_FMT_YUV8_1X24;
+		else
+			bus_format = MEDIA_BUS_FMT_YUV10_1X30;
+		break;
+	case DW_HDMI_QP_YUV422:
+		bus_format = MEDIA_BUS_FMT_YUYV10_1X20;
+		break;
+	case DW_HDMI_QP_YUV420:
+		if (!depth)
+			bus_format = MEDIA_BUS_FMT_UYYVYY8_0_5X24;
+		else
+			bus_format = MEDIA_BUS_FMT_UYYVYY10_0_5X30;
+		break;
+	case DW_HDMI_QP_RGB:
+		if (!depth)
+			bus_format = MEDIA_BUS_FMT_RGB888_1X24;
+		else
+			bus_format = MEDIA_BUS_FMT_RGB101010_1X30;
+		break;
+	default:
+		dev_err(hdmi->dev, "can't get correct color format\n");
+		bus_format = MEDIA_BUS_FMT_YUV8_1X24;
+		break;
+	}
+
+	return bus_format;
+}
+
+static u64 dw_hdmi_qp_get_color_fmt(struct dw_hdmi_qp *hdmi)
+{
+	u32 fmt, depth;
+	u64 bus_format;
+
+	fmt = hdmi_readl(hdmi, VIDEO_INTERFACE_STATUS0);
+	depth = fmt & IPI_COLOR_DEPTH_MASK;
+	fmt = fmt & IPI_FORMAT_MASK;
+
+	switch (fmt) {
+	case DW_HDMI_QP_YUV444:
+		if (!depth)
+			bus_format = MEDIA_BUS_FMT_YUV8_1X24;
+		else
+			bus_format = MEDIA_BUS_FMT_YUV10_1X30;
+		break;
+	case DW_HDMI_QP_YUV422:
+		bus_format = MEDIA_BUS_FMT_YUYV10_1X20;
+		break;
+	case DW_HDMI_QP_YUV420:
+		if (!depth)
+			bus_format = MEDIA_BUS_FMT_UYYVYY8_0_5X24;
+		else
+			bus_format = MEDIA_BUS_FMT_UYYVYY10_0_5X30;
+		break;
+	case DW_HDMI_QP_RGB:
+		if (!depth)
+			bus_format = MEDIA_BUS_FMT_RGB888_1X24;
+		else
+			bus_format = MEDIA_BUS_FMT_RGB101010_1X30;
+		break;
+	/*
+	 * RK3588/RK3576 hdmi color format setting and dsc mode setting are
+	 * the same mask in the same register. If dsc is enabled for hdmi in
+	 * uboot, what color is hdmi output in uboot that cannot be obtained
+	 * from this register in kernel.
+	 * Since hdmi in dsc mode always sends avi infoframe, color format
+	 * of hdmi output in uboot can be read from the avi register.
+	 */
+	case DW_HDMI_QP_DSC:
+		bus_format = dw_hdmi_qp_get_avi_color_fmt(hdmi, depth);
+		break;
+	default:
+		dev_err(hdmi->dev, "can't get correct color format\n");
+		bus_format = MEDIA_BUS_FMT_YUV8_1X24;
+		break;
+	}
+
+	return bus_format;
+}
+
 static void dw_hdmi_attach_properties(struct dw_hdmi_qp *hdmi)
 {
 	u32 val;
 	u64 color = MEDIA_BUS_FMT_YUV8_1X24;
 	const struct dw_hdmi_property_ops *ops =
 				hdmi->plat_data->property_ops;
-	void *data = hdmi->plat_data->phy_data;
 	enum drm_connector_status connect_status =
 		hdmi->phy.ops->read_hpd(hdmi, hdmi->phy.data);
 
 	if ((connect_status == connector_status_connected) &&
 	    hdmi->initialized) {
-		if (hdmi->plat_data->get_grf_color_fmt)
-			color = hdmi->plat_data->get_grf_color_fmt(data);
+		color = dw_hdmi_qp_get_color_fmt(hdmi);
 
 		val = (hdmi_readl(hdmi, PKT_VSI_CONTENTS1) >> 8) & 0xffffff;
 		if (val == HDMI_FORUM_OUI)
@@ -3614,6 +3710,7 @@ static void dw_hdmi_qp_bridge_atomic_disable(struct drm_bridge *bridge,
 
 	cancel_work_sync(&hdmi->flt_work);
 	flush_workqueue(hdmi->workqueue);
+	dw_hdmi_qp_flt_ltsl(hdmi);
 
 	if (hdmi->panel)
 		drm_panel_unprepare(hdmi->panel);
