@@ -2907,6 +2907,8 @@ static void _dw_dp_loader_protect(struct dw_dp *dp, bool on)
 		}
 
 		phy_power_on(dp->phy);
+		link->train.clock_recovered = true;
+		link->train.channel_equalized = true;
 	} else {
 		phy_power_off(dp->phy);
 	}
