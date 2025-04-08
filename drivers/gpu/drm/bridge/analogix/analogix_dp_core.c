@@ -741,7 +741,7 @@ static int analogix_dp_select_rx_bandwidth(struct analogix_dp_device *dp)
 		 * Select the smaller one between rx DP_MAX_LINK_RATE
 		 * and the max link rate supported by the platform.
 		 */
-		dp->link_train.link_rate = min_t(u32, dp->link_train.link_rate,
+		dp->link_train.link_rate = min_t(u32, dp->link_train.max_link_rate,
 						 dp->video_info.max_link_rate);
 	if (!dp->link_train.link_rate)
 		return -EINVAL;
@@ -1545,13 +1545,13 @@ analogix_dp_detect(struct analogix_dp_device *dp)
 
 	if (!analogix_dp_detect_hpd(dp)) {
 		/* Initialize by reading RX's DPCD */
-		ret = analogix_dp_get_max_rx_bandwidth(dp, &dp->link_train.link_rate);
+		ret = analogix_dp_get_max_rx_bandwidth(dp, &dp->link_train.max_link_rate);
 		if (ret) {
 			dev_err(dp->dev, "failed to read max link rate\n");
 			goto out;
 		}
 
-		ret = analogix_dp_get_max_rx_lane_count(dp, &dp->link_train.lane_count);
+		ret = analogix_dp_get_max_rx_lane_count(dp, &dp->link_train.max_lane_count);
 		if (ret) {
 			dev_err(dp->dev, "failed to read max lane count\n");
 			goto out;
@@ -2099,9 +2099,9 @@ analogix_dp_bridge_mode_valid(struct drm_bridge *bridge,
 		min_bpp = 24;
 
 	max_link_rate = min_t(u32, dp->video_info.max_link_rate,
-			      dp->link_train.link_rate);
+			      dp->link_train.max_link_rate);
 	max_lane_count = min_t(u32, dp->video_info.max_lane_count,
-			       dp->link_train.lane_count);
+			       dp->link_train.max_lane_count);
 	if (analogix_dp_link_config_validate(max_link_rate, max_lane_count) &&
 	    !analogix_dp_bandwidth_ok(dp, &m, min_bpp,
 				      drm_dp_bw_code_to_link_rate(max_link_rate),
@@ -2149,8 +2149,8 @@ static u32 *analogix_dp_bridge_atomic_get_output_bus_fmts(struct drm_bridge *bri
 
 		if (!analogix_dp_bandwidth_ok(dp, &crtc_state->mode,
 					      analogix_dp_get_output_bpp(fmt),
-					      drm_dp_bw_code_to_link_rate(dp->link_train.link_rate),
-					      dp->link_train.lane_count))
+					      drm_dp_bw_code_to_link_rate(dp->link_train.max_link_rate),
+					      dp->link_train.max_lane_count))
 			continue;
 
 		output_fmts[j++] = fmt->bus_format;
