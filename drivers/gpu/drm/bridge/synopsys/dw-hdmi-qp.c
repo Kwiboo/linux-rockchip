@@ -2637,6 +2637,8 @@ out:
 		extcon_set_state_sync(hdmi->extcon, EXTCON_DISP_HDMI, true);
 		handle_plugged_change(hdmi, true);
 	} else {
+		if (!hdmi->next_bridge)
+			drm_connector_update_edid_property(&hdmi->connector, NULL);
 		extcon_set_state_sync(hdmi->extcon, EXTCON_DISP_HDMI, false);
 		handle_plugged_change(hdmi, false);
 	}
