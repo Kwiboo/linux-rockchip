@@ -1643,7 +1643,6 @@ static void vop_crtc_atomic_disable_for_psr(struct drm_crtc *crtc,
 		VOP_CTRL_SET(vop, mcu_hold_mode, 1);
 	else
 		vop_disable_all_planes(vop);
-	drm_crtc_vblank_off(crtc);
 	vop->aclk_rate = clk_get_rate(vop->aclk);
 	clk_set_rate(vop->aclk, vop->aclk_rate / 3);
 	vop->aclk_rate_reset = true;
@@ -3266,7 +3265,6 @@ static void vop_crtc_atomic_enable(struct drm_crtc *crtc,
 	bool dclk_inv, yc_swap = false;
 
 	if (old_state && old_state->self_refresh_active) {
-		drm_crtc_vblank_on(crtc);
 		if (vop->aclk_rate_reset)
 			clk_set_rate(vop->aclk, vop->aclk_rate);
 		vop->aclk_rate_reset = false;
