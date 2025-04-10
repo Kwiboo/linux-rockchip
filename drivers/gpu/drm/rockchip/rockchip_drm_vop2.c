@@ -5005,7 +5005,6 @@ static void vop2_crtc_atomic_enter_psr(struct drm_crtc *crtc, struct drm_crtc_st
 
 	vop2_cfg_done(crtc);
 	vop2_wait_for_fs_by_done_bit_status(vp);
-	drm_crtc_vblank_off(crtc);
 	if (hweight8(vop2->active_vp_mask) == 1) {
 		u32 adjust_aclk_rate = 0;
 		u32 htotal = (VOP_MODULE_GET(vop2, vp, htotal_pw) >> 16) & 0xffff;
@@ -5035,7 +5034,6 @@ static void vop2_crtc_atomic_exit_psr(struct drm_crtc *crtc, struct drm_crtc_sta
 	struct vop2_win *win;
 	unsigned long enabled_win_mask = vp->enabled_win_mask;
 
-	drm_crtc_vblank_on(crtc);
 	if (vop2->aclk_rate_reset)
 		clk_set_rate(vop2->aclk, vop2->aclk_current_freq);
 	vop2->aclk_rate_reset = false;
