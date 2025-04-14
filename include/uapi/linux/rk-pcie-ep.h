@@ -109,6 +109,7 @@ struct pcie_ep_obj_poll_virtual_id_cfg {
 };
 
 #define PCIE_BASE	'P'
+#define PCIE_EP_GET_FUNC_DRV_VERSION	_IOR(PCIE_BASE, 0, unsigned int)
 #define PCIE_DMA_CACHE_INVALIDE		_IOW(PCIE_BASE, 1, struct pcie_ep_dma_cache_cfg)
 #define PCIE_DMA_CACHE_FLUSH		_IOW(PCIE_BASE, 2, struct pcie_ep_dma_cache_cfg)
 #define PCIE_DMA_IRQ_MASK_ALL		_IOW(PCIE_BASE, 3, int)

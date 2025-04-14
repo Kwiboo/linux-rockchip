@@ -31,6 +31,7 @@
 #endif
 
 #define DRV_NAME "pcie-rkep"
+#define DRV_VERSION 0x00030000
 
 #ifndef PCI_VENDOR_ID_ROCKCHIP
 #define PCI_VENDOR_ID_ROCKCHIP          0x1d87
@@ -638,6 +639,7 @@ static long pcie_rkep_ioctl(struct file *file, unsigned int cmd, unsigned long a
 	int ret;
 	int index;
 	u64 addr;
+	u32 val;
 
 	argp = (void __user *)args;
 
@@ -766,6 +768,11 @@ static long pcie_rkep_ioctl(struct file *file, unsigned int cmd, unsigned long a
 		}
 
 		pcie_rkep->cur_mmap_res = mmap_res;
+		break;
+	case PCIE_EP_GET_FUNC_DRV_VERSION:
+		val = DRV_VERSION;
+		if (copy_to_user(argp, &val, sizeof(val)))
+			return -EFAULT;
 		break;
 	default:
 		break;
@@ -1344,6 +1351,7 @@ static int pcie_rkep_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	dev_info(&pdev->dev, "did=%x\n", val);
 	dev_info(&pdev->dev, "obj_info magic=%x, ver=%x\n", pcie_rkep->obj_info->magic,
 		 pcie_rkep->obj_info->version);
+	dev_info(&pdev->dev, "func_ver=%x\n", DRV_VERSION);
 
 	pci_save_state(pdev);
 
