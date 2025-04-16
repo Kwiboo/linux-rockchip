@@ -315,6 +315,7 @@ struct rockchip_pwm_chip {
 	struct dentry *debugfs;
 	struct completion ir_trans_completion;
 	struct completion freq_meter_completion;
+	struct completion biphasic_completion;
 	void __iomem *base;
 	unsigned long clk_rate;
 	unsigned long is_clk_enabled;
@@ -330,7 +331,6 @@ struct rockchip_pwm_chip {
 	bool wave_support;
 	bool biphasic_support;
 	bool ledc_support;
-	bool biphasic_res_valid;
 	int channel_id;
 	int irq;
 	u32 scaler;
@@ -745,7 +745,8 @@ static irqreturn_t rockchip_pwm_irq_v4(int irq, void *data)
 
 	if (val & BIPHASIC_INT) {
 		writel_relaxed(BIPHASIC_INT, pc->base + INTSTS);
-		pc->biphasic_res_valid = true;
+		complete(&pc->biphasic_completion);
+
 		ret = IRQ_HANDLED;
 	}
 
@@ -1735,7 +1736,9 @@ static int rockchip_pwm_set_biphasic_v4(struct pwm_chip *chip, struct pwm_device
 		ret = clk_enable(pc->clk);
 		if (ret)
 			return ret;
-		pc->biphasic_res_valid = false;
+
+		if (!config->is_continuous)
+			reinit_completion(&pc->biphasic_completion);
 
 		ctrl = BIPHASIC_EN(true) |
 		       BIPHASIC_CONTINOUS_MODE_EN(config->is_continuous) |
@@ -1831,26 +1834,27 @@ static int rockchip_pwm_get_biphasic_result_v4(struct pwm_chip *chip, struct pwm
 	const struct rockchip_pwm_biphasic_config *config = pc->biphasic_config;
 	u32 val;
 	u32 biphasic_timer;
+	int ret = 0;
 
 	if (!config->is_continuous) {
-		usleep_range(config->delay_ms * USEC_PER_MSEC, config->delay_ms * USEC_PER_MSEC);
-
-		if (pc->biphasic_res_valid) {
-			*biphasic_res = readl_relaxed(pc->base + BIPHASIC_RESULT_VALUE);
-			if (!*biphasic_res)
-				return -EINVAL;
-
-			if (pc->biphasic_config->mode == PWM_BIPHASIC_COUNTER_MODE0_FREQ) {
-				val = *biphasic_res;
-				biphasic_timer = readl_relaxed(pc->base + BIPHASIC_TIMER_VALUE);
-				*biphasic_res = DIV_ROUND_CLOSEST_ULL((u64)pc->clk_rate * val,
-								      biphasic_timer);
-			}
-
-			pc->biphasic_res_valid = false;
-		} else {
-			dev_err(chip->dev, "failed to wait for biphasic counter interrupt\n");
+		ret = wait_for_completion_timeout(&pc->biphasic_completion,
+						  msecs_to_jiffies(config->delay_ms * 3 / 2));
+		if (!ret) {
+			dev_err(chip->dev,
+				"Failed to wait for PWM%d biphasic counter result to be valid\n",
+				pc->channel_id);
 			return -ETIMEDOUT;
+		}
+
+		*biphasic_res = readl_relaxed(pc->base + BIPHASIC_RESULT_VALUE);
+		if (!*biphasic_res)
+			return -EINVAL;
+
+		if (pc->biphasic_config->mode == PWM_BIPHASIC_COUNTER_MODE0_FREQ) {
+			val = *biphasic_res;
+			biphasic_timer = readl_relaxed(pc->base + BIPHASIC_TIMER_VALUE);
+			*biphasic_res = DIV_ROUND_CLOSEST_ULL((u64)pc->clk_rate * val,
+							      biphasic_timer);
 		}
 	} else {
 		*biphasic_res = readl_relaxed(pc->base + BIPHASIC_RESULT_VALUE_SYNC);
@@ -2379,6 +2383,9 @@ static int rockchip_pwm_probe(struct platform_device *pdev)
 
 	if (pc->freq_meter_support)
 		init_completion(&pc->freq_meter_completion);
+
+	if (pc->biphasic_support)
+		init_completion(&pc->biphasic_completion);
 
 	if (pc->data->funcs.irq_handler) {
 		/*
