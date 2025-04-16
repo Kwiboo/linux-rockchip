@@ -1105,10 +1105,8 @@ static int rk628_hdmirx_cec_log_addr(struct cec_adapter *adap, u8 logical_addr)
 	else
 		cec->addresses |= BIT(logical_addr) | BIT(15);
 
-	mutex_lock(&rk628->rst_lock);
 	rk628_i2c_write(rk628, HDMI_RX_CEC_ADDR_L, cec->addresses & 0xff);
 	rk628_i2c_write(rk628, HDMI_RX_CEC_ADDR_H, (cec->addresses >> 8) & 0xff);
-	mutex_unlock(&rk628->rst_lock);
 
 	return 0;
 }
@@ -1118,7 +1116,6 @@ static int rk628_hdmirx_cec_enable(struct cec_adapter *adap, bool enable)
 	struct rk628_hdmirx_cec *cec = cec_get_drvdata(adap);
 	struct rk628 *rk628 = cec->rk628;
 
-	mutex_lock(&rk628->rst_lock);
 	if (!enable) {
 		rk628_i2c_write(rk628, HDMI_RX_AUD_CEC_IEN_CLR, ~0);
 		rk628_i2c_update_bits(rk628, HDMI_RX_DMI_DISABLE_IF, CEC_ENABLE_MASK, 0);
@@ -1135,7 +1132,6 @@ static int rk628_hdmirx_cec_enable(struct cec_adapter *adap, bool enable)
 		irqs = ERROR_INIT_ENSET | NACK_ENSET | EOM_ENSET | DONE_ENSET;
 		rk628_i2c_write(rk628, HDMI_RX_AUD_CEC_IEN_SET, irqs);
 	}
-	mutex_unlock(&rk628->rst_lock);
 
 	return 0;
 }
@@ -1167,13 +1163,11 @@ static int rk628_hdmirx_cec_transmit(struct cec_adapter *adap, u8 attempts,
 	if (msg_len <= 0)
 		return 0;
 
-	mutex_lock(&rk628->rst_lock);
 	for (i = 0; i < msg_len; i++)
 		rk628_i2c_write(rk628, HDMI_RX_CEC_TX_DATA_0 + i * 4, msg->msg[i]);
 
 	rk628_i2c_write(rk628, HDMI_RX_CEC_TX_CNT, msg_len);
 	rk628_i2c_write(rk628, HDMI_RX_CEC_CTRL, ctrl | CEC_SEND);
-	mutex_unlock(&rk628->rst_lock);
 
 	return 0;
 }
@@ -1277,7 +1271,6 @@ struct rk628_hdmirx_cec *rk628_hdmirx_cec_register(struct rk628 *rk628)
 	rk628_i2c_update_bits(rk628, HDMI_RX_DMI_DISABLE_IF, CEC_ENABLE_MASK, CEC_ENABLE_MASK);
 
 	rk628_i2c_write(rk628, HDMI_RX_CEC_TX_CNT, 0);
-	rk628_i2c_write(rk628, HDMI_RX_CEC_RX_CNT, 0);
 	/* clk_hdmirx_cec = 32.768k */
 	rk628_clk_set_rate(rk628, CGU_CLK_HDMIRX_CEC, 32768);
 
@@ -1612,6 +1605,7 @@ static int rk628_hdmirx_read_timing(struct rk628 *rk628,
 
 	rk628_i2c_read(rk628, HDMI_RX_PDEC_AVI_PB, &val);
 	vic = (val & VID_IDENT_CODE_MASK) >> 24;
+	rk628->vic = vic;
 	rk628_i2c_read(rk628, HDMI_RX_PDEC_GCP_AVMUTE, &format);
 	format = (format & PKTDEC_GCP_CD_MASK) >> 4;
 	video_fmt = rk628_hdmirx_get_format(rk628);
@@ -1620,6 +1614,8 @@ static int rk628_hdmirx_read_timing(struct rk628 *rk628,
 	rk628->color_range = color_range;
 	color_space = rk628_hdmirx_get_color_space(rk628);
 	rk628->color_space = color_space;
+	rk628_i2c_read(rk628, HDMI_RX_PDEC_STS, &val);
+	rk628->dvi_mode = val & DVI_DET;
 	if (video_fmt == BUS_FMT_YUV420) {
 		//format:color depth, 5: 10bit, 4: 8bit
 		if (format == 5) {
@@ -1844,12 +1840,12 @@ void rk628_hdmirx_controller_reset(struct rk628 *rk628)
 	udelay(10);
 	rk628_control_deassert(rk628, RGU_HDMIRX);
 	rk628_control_deassert(rk628, RGU_HDMIRX_PON);
-	udelay(10);
+	usleep_range(20 * 1000, 20 * 1100);
+	mutex_unlock(&rk628->rst_lock);
 	rk628_i2c_write(rk628, HDMI_RX_DMI_SW_RST, 0x000101ff);
 	rk628_i2c_write(rk628, HDMI_RX_DMI_DISABLE_IF, 0x00000000);
 	rk628_i2c_write(rk628, HDMI_RX_DMI_DISABLE_IF, 0x0000017f);
 	rk628_i2c_write(rk628, HDMI_RX_DMI_DISABLE_IF, 0x0001017f);
-	mutex_unlock(&rk628->rst_lock);
 }
 EXPORT_SYMBOL(rk628_hdmirx_controller_reset);
 

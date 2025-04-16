@@ -491,6 +491,7 @@ static void rk628_hdmirx_plugout(struct v4l2_subdev *sd)
 	rk628_csi_enable_interrupts(sd, false);
 	cancel_delayed_work(&csi->delayed_work_res_change);
 	rk628_hdmirx_audio_cancel_work_audio(csi->audio_info, true);
+	rk628_csi_hdmirx_reset(sd);
 	rk628_hdmirx_hpd_ctrl(sd, false);
 	rk628_hdmirx_inno_phy_power_off(sd);
 	rk628_hdmirx_verisyno_phy_power_off(csi->rk628);
@@ -544,7 +545,7 @@ static void rk628_csi_delayed_work_enable_hotplug(struct work_struct *work)
 	v4l2_dbg(1, debug, sd, "%s: 5v_det:%d\n", __func__, plugin);
 	if (plugin) {
 		rk628_csi_enable_interrupts(sd, false);
-		cancel_delayed_work_sync(&csi->delayed_work_res_change);
+		cancel_delayed_work(&csi->delayed_work_res_change);
 		rk628_hdmirx_audio_setup(csi->audio_info);
 		rk628_hdmirx_set_hdcp(csi->rk628, &csi->hdcp, csi->hdcp.enable);
 		rk628_hdmirx_controller_setup(csi->rk628);
@@ -608,13 +609,14 @@ static void rk628_delayed_work_res_change(struct work_struct *work)
 			if (csi->rk628->version >= RK628F_VERSION) {
 				rk628_csi_enable_interrupts(sd, false);
 				rk628_hdmirx_audio_cancel_work_audio(csi->audio_info, true);
+				rk628_csi_hdmirx_reset(sd);
 				rk628_hdmirx_verisyno_phy_power_off(csi->rk628);
 				schedule_delayed_work(&csi->delayed_work_enable_hotplug,
 						      msecs_to_jiffies(100));
 			} else {
 				rk628_hdmirx_audio_cancel_work_audio(csi->audio_info, true);
 				rk628_hdmirx_inno_phy_power_off(sd);
-				rk628_hdmirx_controller_reset(csi->rk628);
+				rk628_csi_hdmirx_reset(sd);
 				rk628_hdmirx_audio_setup(csi->audio_info);
 				rk628_hdmirx_set_hdcp(csi->rk628, &csi->hdcp, csi->hdcp.enable);
 				rk628_hdmirx_controller_setup(csi->rk628);
@@ -627,6 +629,7 @@ static void rk628_delayed_work_res_change(struct work_struct *work)
 			}
 		} else {
 			rk628_csi_format_change(sd);
+			csi->nosignal = false;
 			rk628_csi_enable_interrupts(sd, true);
 		}
 	}
@@ -1827,11 +1830,9 @@ static int rk628_hdmirx_isr(struct v4l2_subdev *sd, u32 status, bool *handled)
 {
 	struct rk628_csi *csi = to_csi(sd);
 
-	mutex_lock(&csi->rk628->rst_lock);
 	rk628_hdmirx_general_isr(sd, status, handled);
 	if (csi->cec_enable && csi->cec)
 		rk628_hdmirx_cec_irq(csi->rk628, csi->cec);
-	mutex_unlock(&csi->rk628->rst_lock);
 
 	rk628_csi_clear_hdmirx_interrupts(sd);
 
@@ -2522,7 +2523,6 @@ static long rk628_csi_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	long ret = 0;
 	struct rkmodule_csi_dphy_param *dphy_param;
 	struct rkmodule_capture_info  *capture_info;
-	u32 val;
 	u32 stream = 0;
 	int edid_version, i;
 
@@ -2575,8 +2575,7 @@ static long rk628_csi_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		*(int *)arg = rk628_hdmirx_get_hdcp_enc_status(csi->rk628);
 		break;
 	case RK_HDMIRX_CMD_GET_INPUT_MODE:
-		rk628_i2c_read(csi->rk628, HDMI_RX_PDEC_STS, &val);
-		*(int *)arg = val & DVI_DET;
+		*(int *)arg = csi->rk628->dvi_mode;
 		break;
 	case RK_HDMIRX_CMD_GET_SIGNAL_STABLE_STATUS:
 		*(int *)arg = !csi->nosignal;
@@ -2593,10 +2592,10 @@ static long rk628_csi_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	case RK_HDMIRX_CMD_SET_EDID_MODE:
 		break;
 	case RK_HDMIRX_CMD_GET_COLOR_RANGE:
-		*(int *)arg = rk628_hdmirx_get_range(csi->rk628);
+		*(int *)arg = csi->rk628->color_range;
 		break;
 	case RK_HDMIRX_CMD_GET_COLOR_SPACE:
-		*(int *)arg = rk628_hdmirx_get_color_space(csi->rk628);
+		*(int *)arg = csi->rk628->color_space;
 		break;
 	case RKMODULE_GET_DSI_MODE:
 		*(int *)arg = csi->dsi.vid_mode;
