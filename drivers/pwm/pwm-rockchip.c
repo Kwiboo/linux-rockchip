@@ -1805,7 +1805,7 @@ int rockchip_pwm_set_biphasic(struct pwm_device *pwm, struct rockchip_pwm_biphas
 		dev_err(chip->dev, "Failed to setup biphasic counter mode for PWM%d\n",
 			pc->channel_id);
 	} else {
-		if (pc->biphasic_config->enable && !config->is_continuous) {
+		if (pc->biphasic_config && pc->biphasic_config->enable && !config->is_continuous) {
 			ret = pc->data->funcs.get_biphasic_result(chip, pwm, biphasic_res);
 			if (ret) {
 				dev_err(chip->dev,
