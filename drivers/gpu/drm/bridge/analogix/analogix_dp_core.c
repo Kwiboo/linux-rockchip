@@ -847,7 +847,7 @@ static int analogix_dp_full_link_train(struct analogix_dp_device *dp,
 	analogix_dp_reset_macro(dp);
 
 	/* Setup TX lane count */
-	dp->link_train.lane_count = min_t(u32, dp->link_train.lane_count, max_lanes);
+	dp->link_train.lane_count = min_t(u32, dp->link_train.max_lane_count, max_lanes);
 
 	/* Setup TX lane rate */
 	if (analogix_dp_select_rx_bandwidth(dp)) {
