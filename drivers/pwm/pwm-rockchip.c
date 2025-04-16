@@ -314,6 +314,7 @@ struct rockchip_pwm_chip {
 	struct resource *res;
 	struct dentry *debugfs;
 	struct completion ir_trans_completion;
+	struct completion freq_meter_completion;
 	void __iomem *base;
 	unsigned long clk_rate;
 	unsigned long is_clk_enabled;
@@ -329,7 +330,6 @@ struct rockchip_pwm_chip {
 	bool wave_support;
 	bool biphasic_support;
 	bool ledc_support;
-	bool freq_res_valid;
 	bool biphasic_res_valid;
 	int channel_id;
 	int irq;
@@ -738,7 +738,7 @@ static irqreturn_t rockchip_pwm_irq_v4(int irq, void *data)
 
 	if (val & FREQ_INT) {
 		writel_relaxed(FREQ_INT, pc->base + INTSTS);
-		pc->freq_res_valid = true;
+		complete(&pc->freq_meter_completion);
 
 		ret = IRQ_HANDLED;
 	}
@@ -1239,7 +1239,7 @@ static int rockchip_pwm_set_freq_meter_v4(struct pwm_chip *chip, struct pwm_devi
 	int ret;
 
 	if (enable) {
-		pc->freq_res_valid = false;
+		reinit_completion(&pc->freq_meter_completion);
 
 		arbiter = BIT(pc->channel_id) << FREQ_READ_LOCK_SHIFT |
 			  BIT(pc->channel_id) << FREQ_GRANT_SHIFT;
@@ -1279,21 +1279,21 @@ static int rockchip_pwm_get_freq_meter_result_v4(struct pwm_chip *chip, struct p
 	struct rockchip_pwm_chip *pc = to_rockchip_pwm_chip(chip);
 	u32 freq_res;
 	u32 freq_timer;
+	int ret = 0;
 
-	usleep_range(delay_ms * USEC_PER_MSEC, delay_ms * USEC_PER_MSEC);
-
-	if (pc->freq_res_valid) {
-		freq_res = readl_relaxed(pc->base + FREQ_RESULT_VALUE);
-		freq_timer = readl_relaxed(pc->base + FREQ_TIMER_VALUE);
-		*freq_hz = DIV_ROUND_CLOSEST_ULL((u64)pc->clk_rate * freq_res, freq_timer);
-		if (!*freq_hz)
-			return -EINVAL;
-
-		pc->freq_res_valid = false;
-	} else {
-		dev_err(chip->dev, "failed to wait for freq_meter interrupt\n");
+	ret = wait_for_completion_timeout(&pc->freq_meter_completion,
+					  msecs_to_jiffies(delay_ms * 3 / 2));
+	if (!ret) {
+		dev_err(chip->dev, "Failed to wait for PWM%d frequency meter result to be valid\n",
+			pc->channel_id);
 		return -ETIMEDOUT;
 	}
+
+	freq_res = readl_relaxed(pc->base + FREQ_RESULT_VALUE);
+	freq_timer = readl_relaxed(pc->base + FREQ_TIMER_VALUE);
+	*freq_hz = DIV_ROUND_CLOSEST_ULL((u64)pc->clk_rate * freq_res, freq_timer);
+	if (!*freq_hz)
+		return -EINVAL;
 
 	return 0;
 }
@@ -2376,6 +2376,9 @@ static int rockchip_pwm_probe(struct platform_device *pdev)
 		ret = -EINVAL;
 		goto err_pclk;
 	}
+
+	if (pc->freq_meter_support)
+		init_completion(&pc->freq_meter_completion);
 
 	if (pc->data->funcs.irq_handler) {
 		/*
