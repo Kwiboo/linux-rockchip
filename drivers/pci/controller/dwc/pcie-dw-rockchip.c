@@ -1716,14 +1716,21 @@ static int rk1808_pcie_fixup(struct rk_pcie *rk_pcie, struct device_node *np)
 	return ret;
 }
 
-static void rk_pcie_fast_link_setup(struct rk_pcie *rk_pcie)
+static void rk_pcie_fast_link_setup(struct rk_pcie *rk_pcie, bool enable_dly2_en)
 {
 	u32 val;
 
 	/* LTSSM EN ctrl mode */
 	val = rk_pcie_readl_apb(rk_pcie, PCIE_CLIENT_HOT_RESET_CTRL);
-	val |= (PCIE_LTSSM_ENABLE_ENHANCE | PCIE_LTSSM_APP_DLY2_EN)
-		| ((PCIE_LTSSM_APP_DLY2_EN | PCIE_LTSSM_ENABLE_ENHANCE) << 16);
+	val |= PCIE_LTSSM_ENABLE_ENHANCE | (PCIE_LTSSM_ENABLE_ENHANCE << 16);
+
+	if (enable_dly2_en) {
+		val |= PCIE_LTSSM_APP_DLY2_EN | (PCIE_LTSSM_APP_DLY2_EN << 16);
+	} else {
+		val &= ~PCIE_LTSSM_APP_DLY2_EN;
+		val |= PCIE_LTSSM_APP_DLY2_EN << 16;
+	}
+
 	rk_pcie_writel_apb(rk_pcie, PCIE_CLIENT_HOT_RESET_CTRL, val);
 }
 
@@ -2104,6 +2111,7 @@ retry_regulator:
 		goto disable_phy;
 	}
 
+	/* Release resets after PHY is working */
 	reset_control_deassert(rk_pcie->rsts);
 
 	ret = phy_calibrate(rk_pcie->phy);
@@ -2141,7 +2149,7 @@ retry_regulator:
 		if (ret)
 			goto disable_clk;
 	} else {
-		rk_pcie_fast_link_setup(rk_pcie);
+		rk_pcie_fast_link_setup(rk_pcie, true);
 	}
 
 	/* Legacy interrupt is optional */
@@ -2494,8 +2502,6 @@ static int __maybe_unused rockchip_dw_pcie_resume(struct device *dev)
 	int ret;
 
 	reset_control_assert(rk_pcie->rsts);
-	udelay(10);
-	reset_control_deassert(rk_pcie->rsts);
 
 	ret = rk_pcie_enable_power(rk_pcie);
 	if (ret)
@@ -2524,6 +2530,9 @@ static int __maybe_unused rockchip_dw_pcie_resume(struct device *dev)
 
 	phy_power_on(rk_pcie->phy);
 
+	/* Release resets after PHY is working */
+	reset_control_deassert(rk_pcie->rsts);
+
 	dw_pcie_dbi_ro_wr_en(rk_pcie->pci);
 
 	if (rk_pcie->is_rk1808) {
@@ -2532,7 +2541,14 @@ static int __maybe_unused rockchip_dw_pcie_resume(struct device *dev)
 		if (ret)
 			return ret;
 	} else {
-		rk_pcie_fast_link_setup(rk_pcie);
+		/*
+		 * S2R is in noirq phase which couldn't ack hot reset or link down event.
+		 * But we need to deal with dly2_en enable case, otherwise the ltssm will
+		 * be stuck waiting for dlye_done. We could set dly2_done in advance,
+		 * however, it's slef-clear. So the only option here is to disable dly2_en
+		 * when resuming.
+		 */
+		rk_pcie_fast_link_setup(rk_pcie, false);
 	}
 
 	/* Set PCIe mode */
@@ -2564,6 +2580,7 @@ static int __maybe_unused rockchip_dw_pcie_resume(struct device *dev)
 	rk_pcie->in_suspend = false;
 
 std_rc_done:
+	rk_pcie_fast_link_setup(rk_pcie, true);
 	/* Enable L0s capability */
 	if (rk_pcie->linkcap_off) {
 		rk_pcie->pci->n_fts[0] = 255; /* Gen1 */
