@@ -974,13 +974,6 @@ static int rockchip_pcie_config_host(struct rockchip_pcie *rockchip)
 already_linkup:
 	/* Enable client reset or link down interrupt */
 	rockchip_pcie_writel_apb(rockchip, 0x40000, PCIE_CLIENT_INTR_MASK);
-	rockchip->hot_rst_wq = create_singlethread_workqueue("rkep_hot_rst_wq");
-	if (!rockchip->hot_rst_wq) {
-		dev_err(dev, "Failed to create hot_rst workqueue\n");
-		return -ENOMEM;
-	}
-	INIT_WORK(&rockchip->hot_rst_work, rockchip_pcie_hot_rst_work);
-	init_waitqueue_head(&rockchip->wq_head);
 
 	/* Enable client elbi interrupt */
 	rockchip_pcie_writel_apb(rockchip, 0x80000000, PCIE_CLIENT_INTR_MASK);
@@ -994,6 +987,29 @@ already_linkup:
 	dw_pcie_writel_dbi(&rockchip->pci, PCIE_DMA_OFFSET + PCIE_DMA_WR_INT_MASK, 0x0);
 	dw_pcie_writel_dbi(&rockchip->pci, PCIE_DMA_OFFSET + PCIE_DMA_RD_INT_MASK, 0x0);
 
+	/* Setting device */
+	if (dw_pcie_readl_dbi(&rockchip->pci, PCIE_ATU_VIEWPORT) == 0xffffffff)
+		rockchip->pci.iatu_unroll_enabled = 1;
+	for (i = 0; i < PCIE_BAR_MAX_NUM; i++)
+		if (rockchip->ib_target_size[i])
+			rockchip_pcie_ep_set_bar(rockchip, i, rockchip->ib_target_address[i]);
+
+	return 0;
+}
+
+static int rockchip_pcie_config_irq_and_works(struct rockchip_pcie *rockchip)
+{
+	struct device *dev = rockchip->pci.dev;
+	int ret;
+
+	rockchip->hot_rst_wq = create_singlethread_workqueue("rkep_hot_rst_wq");
+	if (!rockchip->hot_rst_wq) {
+		dev_err(dev, "Failed to create hot_rst workqueue\n");
+		return -ENOMEM;
+	}
+	INIT_WORK(&rockchip->hot_rst_work, rockchip_pcie_hot_rst_work);
+	init_waitqueue_head(&rockchip->wq_head);
+
 	ret = devm_request_irq(dev, rockchip->irq, rockchip_pcie_sys_irq_handler,
 			       IRQF_SHARED, "pcie-sys", rockchip);
 	if (ret) {
@@ -1001,12 +1017,6 @@ already_linkup:
 		return ret;
 	}
 
-	/* Setting device */
-	if (dw_pcie_readl_dbi(&rockchip->pci, PCIE_ATU_VIEWPORT) == 0xffffffff)
-		rockchip->pci.iatu_unroll_enabled = 1;
-	for (i = 0; i < PCIE_BAR_MAX_NUM; i++)
-		if (rockchip->ib_target_size[i])
-			rockchip_pcie_ep_set_bar(rockchip, i, rockchip->ib_target_address[i]);
 	rockchip_pcie_devmode_update(rockchip, RKEP_MODE_KERNEL, RKEP_SMODE_LNKUP);
 
 	return 0;
@@ -1396,6 +1406,12 @@ static int rockchip_pcie_ep_probe(struct platform_device *pdev)
 	ret = rockchip_pcie_config_host(rockchip);
 	if (ret) {
 		dev_err(dev, "Failed to config host!\n");
+		goto deinit_host;
+	}
+
+	ret = rockchip_pcie_config_irq_and_works(rockchip);
+	if (ret) {
+		dev_err(dev, "Failed to config irq and works\n");
 		goto deinit_host;
 	}
 
