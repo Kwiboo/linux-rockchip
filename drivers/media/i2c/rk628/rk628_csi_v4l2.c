@@ -932,7 +932,8 @@ static void enable_stream(struct v4l2_subdev *sd, bool en)
 			enable_csitx(sd);
 
 		rk628_hdmirx_vid_enable(sd, true);
-		if (csi->plat_data->tx_mode == CSI_MODE) {
+		if (csi->plat_data->tx_mode == CSI_MODE &&
+		    csi->rk628->version >= RK628F_VERSION) {
 			msleep(20);
 			rk628_mipi_txdata_reset(sd);
 			rk628_csi_enable_csi_interrupts(sd, true);
@@ -944,8 +945,10 @@ static void enable_stream(struct v4l2_subdev *sd, bool en)
 				      GCPFORCE_CLRAVMUTE_MASK, GCPFORCE_CLRAVMUTE(0));
 	} else {
 		if (csi->plat_data->tx_mode == CSI_MODE) {
-			rk628_csi_enable_csi_interrupts(sd, false);
-			msleep(20);
+			if (csi->rk628->version >= RK628F_VERSION) {
+				rk628_csi_enable_csi_interrupts(sd, false);
+				msleep(20);
+			}
 			rk628_hdmirx_vid_enable(sd, false);
 			rk628_csi_disable_stream(sd);
 		} else {
