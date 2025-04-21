@@ -990,6 +990,8 @@ already_linkup:
 	/* Setting device */
 	if (dw_pcie_readl_dbi(&rockchip->pci, PCIE_ATU_VIEWPORT) == 0xffffffff)
 		rockchip->pci.iatu_unroll_enabled = 1;
+	memset(rockchip->ib_window_map, 0, BITS_TO_LONGS(rockchip->num_ib_windows) * sizeof(long));
+	memset(rockchip->ob_window_map, 0, BITS_TO_LONGS(rockchip->num_ob_windows) * sizeof(long));
 	for (i = 0; i < PCIE_BAR_MAX_NUM; i++)
 		if (rockchip->ib_target_size[i])
 			rockchip_pcie_ep_set_bar(rockchip, i, rockchip->ib_target_address[i]);
