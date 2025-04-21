@@ -1324,9 +1324,6 @@ static int pcie_ep_mmap(struct file *file, struct vm_area_struct *vma)
 		return -EINVAL;
 	}
 
-	vma->vm_flags |= VM_IO;
-	vma->vm_flags |= (VM_DONTEXPAND | VM_DONTDUMP);
-
 	if (rockchip->cur_mmap_res == PCIE_EP_MMAP_RESOURCE_BAR2)
 		vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
 	else
