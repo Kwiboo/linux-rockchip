@@ -1091,7 +1091,7 @@ static void rockchip_i2s_tdm_xfer_stop(struct rk_i2s_tdm_dev *i2s_tdm,
 {
 	unsigned int msk, val, clr;
 
-	if (i2s_tdm->quirks & QUIRK_ALWAYS_ON && !force)
+	if (i2s_tdm->is_master_mode && i2s_tdm->quirks & QUIRK_ALWAYS_ON && !force)
 		return;
 
 	if (i2s_tdm->clk_trcm) {
@@ -1197,7 +1197,8 @@ static void rockchip_i2s_tdm_start(struct rk_i2s_tdm_dev *i2s_tdm, int stream)
 	 * so, for new data start, suggested to STOP-CLEAR-START to make sure
 	 * data aligned.
 	 */
-	if ((i2s_tdm->quirks & QUIRK_HDMI_PATH) &&
+	if ((i2s_tdm->is_master_mode) &&
+	    (i2s_tdm->quirks & QUIRK_HDMI_PATH) &&
 	    (i2s_tdm->quirks & QUIRK_ALWAYS_ON) &&
 	    (stream == SNDRV_PCM_STREAM_PLAYBACK)) {
 		rockchip_i2s_tdm_xfer_stop(i2s_tdm, stream, true);
@@ -1486,7 +1487,7 @@ static int rockchip_i2s_tdm_set_fmt(struct snd_soc_dai *cpu_dai,
 	}
 
 	/* Enable the xfer in the last card init stage. */
-	if (i2s_tdm->quirks & QUIRK_ALWAYS_ON && !i2s_tdm->clk_trcm)
+	if (i2s_tdm->is_master_mode && i2s_tdm->quirks & QUIRK_ALWAYS_ON && !i2s_tdm->clk_trcm)
 		rockchip_i2s_tdm_xfer_start(i2s_tdm, SNDRV_PCM_STREAM_PLAYBACK);
 
 err_pm_put:
@@ -1932,7 +1933,8 @@ static int rockchip_i2s_tdm_params(struct snd_pcm_substream *substream,
 	 * on HDMI-PATH-ALWAYS-ON situation, this workaround for some TVs no
 	 * sound issue. at the moment, it's 8K@60Hz display situation.
 	 */
-	if ((i2s_tdm->quirks & QUIRK_HDMI_PATH) &&
+	if ((i2s_tdm->is_master_mode) &&
+	    (i2s_tdm->quirks & QUIRK_HDMI_PATH) &&
 	    (i2s_tdm->quirks & QUIRK_ALWAYS_ON) &&
 	    (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)) {
 		rockchip_i2s_tdm_xfer_start(i2s_tdm, SNDRV_PCM_STREAM_PLAYBACK);
