@@ -268,7 +268,9 @@ allOf:
       properties:
         compatible:
           contains:
-            const: rockchip,rk3568-mali
+            enum:
+              - rockchip,rk3568-mali
+              - rockchip,rk3576-mali
     then:
       properties:
         clocks:
