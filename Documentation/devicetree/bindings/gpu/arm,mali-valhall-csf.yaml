@@ -40,7 +40,7 @@ properties:
 
   clocks:
     minItems: 1
-    maxItems: 3
+    maxItems: 4
 
   clock-names:
     minItems: 1
@@ -50,6 +50,7 @@ properties:
           - coregroup
           - stacks
       - const: stacks
+      - const: bus
 
   nvmem-cells:
     items:
