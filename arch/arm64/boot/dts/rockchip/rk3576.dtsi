@@ -347,6 +347,12 @@
 	gpu_opp_table: opp-table-gpu {
 		compatible = "operating-points-v2";
 
+		opp-200000000 {
+			opp-hz = /bits/ 64 <200000000>;
+			opp-microvolt = <712500 712500 875000>;
+			opp-suspend;
+		};
+
 		opp-300000000 {
 			opp-hz = /bits/ 64 <300000000>;
 			opp-microvolt = <712500 712500 875000>;
@@ -1259,10 +1265,10 @@
 		gpu: gpu@27800000 {
 			compatible = "rockchip,rk3576-mali", "arm,mali-bifrost";
 			reg = <0x0 0x27800000 0x0 0x20000>;
-			assigned-clocks = <&scmi_clk SCMI_CLK_GPU>;
-			assigned-clock-rates = <198000000>;
-			clocks = <&cru CLK_GPU>;
-			clock-names = "core";
+			assigned-clocks = <&cru CLK_GPU>, <&scmi_clk SCMI_CLK_GPU>;
+			assigned-clock-rates = <198000000>, <200000000>;
+			clocks = <&scmi_clk SCMI_CLK_GPU>, <&cru CLK_GPU>;
+			clock-names = "gpu", "bus";
 			dynamic-power-coefficient = <1625>;
 			interrupts = <GIC_SPI 347 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 348 IRQ_TYPE_LEVEL_HIGH>,
