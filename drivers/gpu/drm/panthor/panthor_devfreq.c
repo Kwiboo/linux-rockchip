@@ -130,6 +130,41 @@ static struct devfreq_dev_profile panthor_devfreq_profile = {
 	.get_cur_freq = panthor_devfreq_get_cur_freq,
 };
 
+static int panthor_devfreq_config_clks(struct device *dev,
+				       struct opp_table *opp_table,
+				       struct dev_pm_opp *opp,
+				       void *data, bool scaling_down)
+{
+	struct panthor_device *ptdev = dev_get_drvdata(dev);
+	struct devfreq *devfreq = ptdev->devfreq->devfreq;
+	unsigned long *target = data;
+	unsigned long freq;
+	int ret = 0;
+
+	/* One of target and opp must be available */
+	if (target) {
+		freq = *target;
+	} else if (opp) {
+		freq = dev_pm_opp_get_freq(opp);
+	} else {
+		WARN_ON(1);
+		return -EINVAL;
+	}
+
+	pm_runtime_get_noresume(dev);
+
+	if (!pm_runtime_suspended(dev) || !devfreq || !devfreq->suspend_freq) {
+		ret = clk_set_rate(ptdev->clks.core, freq);
+		if (ret)
+			dev_err(dev, "failed to set clock rate %lu: %d\n",
+				freq, ret);
+	}
+
+	pm_runtime_put_noidle(dev);
+
+	return ret;
+}
+
 int panthor_devfreq_init(struct panthor_device *ptdev)
 {
 	/* There's actually 2 regulators (mali and sram), but the OPP core only
@@ -139,6 +174,11 @@ int panthor_devfreq_init(struct panthor_device *ptdev)
 	 * the coupling logic deal with voltage updates.
 	 */
 	static const char * const reg_names[] = { "mali", NULL };
+	static const char * const clk_names[] = { "core", NULL };
+	struct dev_pm_opp_config config = {
+		.clk_names = clk_names,
+		.config_clks = panthor_devfreq_config_clks,
+	};
 	struct thermal_cooling_device *cooling;
 	struct device *dev = ptdev->base.dev;
 	struct panthor_devfreq *pdevfreq;
@@ -164,6 +204,10 @@ int panthor_devfreq_init(struct panthor_device *ptdev)
 	 */
 	table = dev_pm_opp_get_opp_table(dev);
 	if (IS_ERR_OR_NULL(table)) {
+		ret = devm_pm_opp_set_config(dev, &config);
+		if (ret)
+			return ret;
+
 		ret = devm_pm_opp_set_regulators(dev, reg_names);
 		if (ret && ret != -ENODEV) {
 			if (ret != -EPROBE_DEFER)
