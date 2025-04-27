@@ -269,6 +269,7 @@ allOf:
         compatible:
           contains:
             const: rockchip,rk3568-mali
+            const: rockchip,rk3576-mali
     then:
       properties:
         clocks:
