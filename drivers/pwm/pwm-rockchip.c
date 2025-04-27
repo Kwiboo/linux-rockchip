@@ -1674,18 +1674,8 @@ int rockchip_pwm_set_wave(struct pwm_device *pwm, struct rockchip_pwm_wave_confi
 		}
 	}
 
-	if (config->duty_table) {
-		ret = pc->data->funcs.set_wave_table(chip, pwm, config->duty_table,
-						     config->width_mode);
-		if (ret) {
-			dev_err(chip->dev, "Failed to set wave duty table for PWM%d\n",
-				pc->channel_id);
-			goto err_disable_clk_osc;
-		}
-	}
-
-	if (config->period_table) {
-		ret = pc->data->funcs.set_wave_table(chip, pwm, config->period_table,
+	if (config->wave_table) {
+		ret = pc->data->funcs.set_wave_table(chip, pwm, config->wave_table,
 						     config->width_mode);
 		if (ret) {
 			dev_err(chip->dev, "Failed to set wave period table for PWM%d\n",
