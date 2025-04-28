@@ -614,12 +614,14 @@ static irqreturn_t rk_dma_irq_handler(int irq, void *dev_id)
 		c = l->vchan;
 		if (c) {
 			spin_lock(&c->vc.lock);
-			if (c->cyclic) {
-				vchan_cyclic_callback(&l->ds_run->vd);
-			} else {
-				vchan_cookie_complete(&l->ds_run->vd);
-				l->ds_done = l->ds_run;
-				task = 1;
+			if (l->ds_run) {
+				if (c->cyclic) {
+					vchan_cyclic_callback(&l->ds_run->vd);
+				} else {
+					vchan_cookie_complete(&l->ds_run->vd);
+					l->ds_done = l->ds_run;
+					task = 1;
+				}
 			}
 			spin_unlock(&c->vc.lock);
 			writel(readl(RK_DMA_LCH_IS), RK_DMA_LCH_IS);
