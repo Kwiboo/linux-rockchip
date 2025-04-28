@@ -776,8 +776,8 @@
 		compatible = "rockchip,rk3588-pcie3-phy";
 		reg = <0x0 0xfee80000 0x0 0x20000>;
 		#phy-cells = <0>;
-		clocks = <&cru PCLK_PCIE_COMBO_PIPE_PHY>;
-		clock-names = "pclk";
+		clocks = <&cru PCLK_PCIE_COMBO_PIPE_PHY>, <&cru PCLK_PHP_ROOT>;
+		clock-names = "pclk", "phpclk";
 		resets = <&cru SRST_PCIE30_PHY>;
 		reset-names = "phy";
 		rockchip,pipe-grf = <&php_grf>;
