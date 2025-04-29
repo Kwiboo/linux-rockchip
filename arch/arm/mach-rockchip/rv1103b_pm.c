@@ -1306,6 +1306,8 @@ static void pd_pmu1_regs_restore(void)
 
 static void hptimer_init(void)
 {
+	rk_hptimer_v2_clear_int_st(hptimer_base, RK_HPTIMER_V2_INT_SYNC);
+
 	if (rk_hptimer_get_mode(hptimer_base) == RK_HPTIMER_HARD_ADJUST_MODE)
 		return;
 
