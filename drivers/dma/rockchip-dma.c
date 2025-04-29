@@ -666,6 +666,19 @@ static int rk_dma_lch_get_bytes_xfered(struct rk_dma_lch *l)
 	else
 		bytes = ds->desc_hw[0].dar - ds->desc_hw[1].dar;
 
+	/*
+	 * The transferred bytes are calculated by subtracting first_lli.base from
+	 * current position (cur_pos). However, cur_pos remains 0 until the first
+	 * burst transfer completes, which could result in a negative value.
+	 * This leads to incorrect byte count reporting.
+	 *
+	 * Fix the overflow by clamping the calculated bytes to 0 when negative,
+	 * ensuring the reported transfer position matches hardware state before
+	 * the first burst completion.
+	 */
+	if (bytes < 0)
+		bytes = 0;
+
 	return bytes;
 }
 
