@@ -1087,7 +1087,7 @@ static int rk_dma_terminate_all(struct dma_chan *chan)
 {
 	struct rk_dma_chan *c = to_rk_chan(chan);
 	struct rk_dma_dev *d = to_rk_dma(chan->device);
-	struct rk_dma_lch *l = c->lch;
+	struct rk_dma_lch *l;
 	unsigned long flags;
 	LIST_HEAD(head);
 
@@ -1098,6 +1098,7 @@ static int rk_dma_terminate_all(struct dma_chan *chan)
 	spin_unlock_irqrestore(&d->lock, flags);
 
 	spin_lock_irqsave(&c->vc.lock, flags);
+	l = c->lch;
 	if (l) {
 		rk_dma_terminate_chan(l, d);
 		if (l->ds_run)
@@ -1125,9 +1126,14 @@ static int rk_dma_transfer_pause(struct dma_chan *chan)
 static int rk_dma_transfer_resume(struct dma_chan *chan)
 {
 	struct rk_dma_chan *c = to_rk_chan(chan);
-	struct rk_dma_lch *l = c->lch;
+	struct rk_dma_lch *l;
+	unsigned long flags;
 
-	writel(LCH_TRF_CMD_DMA_RESUME, RK_DMA_LCH_TRF_CMD);
+	spin_lock_irqsave(&c->vc.lock, flags);
+	l = c->lch;
+	if (l)
+		writel(LCH_TRF_CMD_DMA_RESUME, RK_DMA_LCH_TRF_CMD);
+	spin_unlock_irqrestore(&c->vc.lock, flags);
 
 	return 0;
 }
