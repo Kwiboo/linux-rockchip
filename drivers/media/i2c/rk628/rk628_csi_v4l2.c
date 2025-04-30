@@ -994,6 +994,16 @@ static void rk628_post_process_setup(struct v4l2_subdev *sd)
 	dst.vback_porch = dst_bt->vbackporch;
 	dst.pixelclock = dst_bt->pixelclock;
 
+	if (csi->scaler_en) {
+		dst.vfront_porch = DIV_ROUND_UP(src.vfront_porch * dst_bt->height, src.vactive);
+		dst.vsync_len = DIV_ROUND_UP(src.vsync_len * dst_bt->height, src.vactive);
+		dst.vback_porch = DIV_ROUND_UP(src.vback_porch * dst_bt->height, src.vactive);
+		v4l2_info(sd, "%s: src timing: vfp: %d, vs: %d, vbp: %d\n",
+			__func__, src.vfront_porch, src.vsync_len, src.vback_porch);
+		v4l2_info(sd, "%s: dst timing: vfp: %d, vs: %d, vbp: %d\n",
+			__func__, dst.vfront_porch, dst.vsync_len, dst.vback_porch);
+	}
+
 	rk628_post_process_en(csi->rk628, &src, &dst, &dst_pclk);
 	dst_bt->pixelclock = dst_pclk;
 }
