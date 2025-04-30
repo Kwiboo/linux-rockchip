@@ -1311,9 +1311,11 @@ static int analogix_dp_commit(struct analogix_dp_device *dp)
 		return ret;
 	}
 
-	if (device_property_read_bool(dp->dev, "panel-self-test"))
+	if (device_property_read_bool(dp->dev, "panel-self-test")) {
+		dev_info(dp->dev, "Enter panel self test mode\n");
 		return drm_dp_dpcd_writeb(&dp->aux, DP_EDP_CONFIGURATION_SET,
 					  DP_PANEL_SELF_TEST_ENABLE);
+	}
 
 	ret = analogix_dp_train_link(dp);
 	if (ret) {
