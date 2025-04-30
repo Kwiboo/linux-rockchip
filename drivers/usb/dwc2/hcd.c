@@ -3399,6 +3399,7 @@ static int dwc2_hcd_hub_control(struct dwc2_hsotg *hsotg, u16 typereq,
 				u16 wvalue, u16 windex, char *buf, u16 wlength)
 {
 	struct usb_hub_descriptor *hub_desc;
+	struct usb_hcd *hcd = dwc2_hsotg_to_hcd(hsotg);
 	int retval = 0;
 	u32 hprt0;
 	u32 port_status;
@@ -3640,7 +3641,8 @@ static int dwc2_hcd_hub_control(struct dwc2_hsotg *hsotg, u16 typereq,
 		if (wvalue != USB_PORT_FEAT_TEST && (!windex || windex > 1))
 			goto error;
 
-		if (!hsotg->flags.b.port_connect_status) {
+		if (!hsotg->flags.b.port_connect_status &&
+		    (!HCD_POWER_ON(hcd))) {
 			/*
 			 * The port is disconnected, which means the core is
 			 * either in device mode or it soon will be. Just
@@ -3669,6 +3671,7 @@ static int dwc2_hcd_hub_control(struct dwc2_hsotg *hsotg, u16 typereq,
 			hprt0 = dwc2_read_hprt0(hsotg);
 			pwr = hprt0 & HPRT0_PWR;
 			hprt0 |= HPRT0_PWR;
+			clear_bit(HCD_FLAG_POWER_ON, &hcd->flags);
 			dwc2_writel(hsotg, hprt0, HPRT0);
 			if (!pwr)
 				dwc2_vbus_supply_init(hsotg);
