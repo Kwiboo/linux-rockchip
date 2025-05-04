@@ -910,7 +910,7 @@ static struct rockchip_clk_branch rk3576_clk_branches[] __initdata = {
 			RK3576_CLKGATE_CON(69), 1, GFLAGS),
 	GATE(CLK_GPU, "clk_gpu", "clk_gpu_src_pre", 0,
 			RK3576_CLKGATE_CON(69), 3, GFLAGS),
-	COMPOSITE_NODIV(PCLK_GPU_ROOT, "pclk_gpu_root", mux_100m_50m_24m_p, 0,
+	COMPOSITE_NODIV(PCLK_GPU_ROOT, "pclk_gpu_root", mux_100m_50m_24m_p, CLK_IS_CRITICAL,
 			RK3576_CLKSEL_CON(166), 10, 2, MFLAGS,
 			RK3576_CLKGATE_CON(69), 8, GFLAGS),
 
