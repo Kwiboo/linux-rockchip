@@ -107,6 +107,10 @@ struct panfrost_compatible {
 	/* Only required if num_pm_domains > 1. */
 	const char * const *pm_domain_names;
 
+	/* OPP clock count and names. */
+	int num_opp_clocks;
+	const char * const *opp_clk_names;
+
 	/* Vendor implementation quirks callback */
 	void (*vendor_quirk)(struct panfrost_device *pfdev);
 
