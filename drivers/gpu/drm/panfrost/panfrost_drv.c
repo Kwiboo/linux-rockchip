@@ -1152,6 +1152,17 @@ static const struct panfrost_compatible mediatek_mt8370_data = {
 	.gpu_quirks = BIT(GPU_QUIRK_FORCE_AARCH64_PGTABLE),
 };
 
+static const char * const rockchip_opp_clks[] = { "gpu", NULL };
+static const struct panfrost_compatible rockchip_data = {
+	.num_supplies = ARRAY_SIZE(default_supplies) - 1,
+	.supply_names = default_supplies,
+	.num_pm_domains = 1,
+	.pm_domain_names = NULL,
+	.num_opp_clocks = ARRAY_SIZE(rockchip_opp_clks) - 1,
+	.opp_clk_names = rockchip_opp_clks,
+	.pm_features = BIT(GPU_PM_CLK_DIS) | BIT(GPU_PM_VREG_OFF),
+};
+
 static const struct of_device_id dt_match[] = {
 	/* Set first to probe before the generic compatibles */
 	{ .compatible = "amlogic,meson-gxm-mali",
@@ -1178,6 +1189,8 @@ static const struct of_device_id dt_match[] = {
 	{ .compatible = "mediatek,mt8192-mali", .data = &mediatek_mt8192_data },
 	{ .compatible = "mediatek,mt8370-mali", .data = &mediatek_mt8370_data },
 	{ .compatible = "allwinner,sun50i-h616-mali", .data = &default_pm_rt_data },
+	{ .compatible = "rockchip,rk3568-mali", .data = &rockchip_data },
+	{ .compatible = "rockchip,rk3576-mali", .data = &rockchip_data },
 	{}
 };
 MODULE_DEVICE_TABLE(of, dt_match);
