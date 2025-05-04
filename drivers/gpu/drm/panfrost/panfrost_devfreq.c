@@ -7,6 +7,7 @@
 #include <linux/nvmem-consumer.h>
 #include <linux/platform_device.h>
 #include <linux/pm_opp.h>
+#include <linux/pm_runtime.h>
 
 #include "panfrost_device.h"
 #include "panfrost_devfreq.h"
@@ -89,6 +90,42 @@ static struct devfreq_dev_profile panfrost_devfreq_profile = {
 	.get_dev_status = panfrost_devfreq_get_dev_status,
 };
 
+static int panfrost_devfreq_config_clks(struct device *dev,
+					struct opp_table *opp_table,
+					struct dev_pm_opp *opp,
+					void *data, bool scaling_down)
+{
+	struct panfrost_device *pfdev = dev_get_drvdata(dev);
+	unsigned long *target = data;
+	unsigned long freq;
+	int ret = 0;
+
+	if (!pm_runtime_enabled(dev))
+		return 0;
+
+	/* One of target and opp must be available */
+	if (target) {
+		freq = *target;
+	} else if (opp) {
+		freq = dev_pm_opp_get_freq_indexed(opp, 0);
+	} else {
+		WARN_ON(1);
+		return -EINVAL;
+	}
+
+	pm_runtime_get_noresume(dev);
+
+	if (!pm_runtime_suspended(dev)) {
+		ret = clk_set_rate(pfdev->clock, freq);
+		if (ret)
+			dev_err(dev, "failed to set clock rate: %lu\n", freq);
+	}
+
+	pm_runtime_put_noidle(dev);
+
+	return ret;
+}
+
 static int panfrost_read_speedbin(struct device *dev)
 {
 	u32 val;
@@ -146,6 +183,17 @@ int panfrost_devfreq_init(struct panfrost_device *pfdev)
 				DRM_DEV_ERROR(dev, "Couldn't set OPP regulators\n");
 			return ret;
 		}
+	}
+
+	if (pfdev->comp->opp_clk_names) {
+		struct dev_pm_opp_config config = {
+			.clk_names = pfdev->comp->opp_clk_names,
+			.config_clks = panfrost_devfreq_config_clks,
+		};
+
+		ret = devm_pm_opp_set_config(dev, &config);
+		if (ret)
+			return ret;
 	}
 
 	ret = devm_pm_opp_of_add_table(dev);
