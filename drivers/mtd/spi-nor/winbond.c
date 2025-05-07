@@ -140,8 +140,18 @@ static void winbond_default_init(struct spi_nor *nor)
 	nor->params->set_4byte_addr_mode = winbond_set_4byte_addr_mode;
 }
 
+static void winbond_nor_post_sfdp(struct spi_nor *nor)
+{
+	/*
+	 * All winbond flash support 35H command, but some flash do
+	 * not accurately feedback information after SDFP param parsing.
+	 */
+	nor->flags &= ~SNOR_F_NO_READ_CR;
+}
+
 static const struct spi_nor_fixups winbond_fixups = {
 	.default_init = winbond_default_init,
+	.post_sfdp = winbond_nor_post_sfdp,
 };
 
 const struct spi_nor_manufacturer spi_nor_winbond = {
