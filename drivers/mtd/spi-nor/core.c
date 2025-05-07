@@ -2061,8 +2061,10 @@ int spi_nor_sr2_bit1_quad_enable(struct spi_nor *nor)
 {
 	int ret;
 
-	if (nor->flags & SNOR_F_NO_READ_CR)
+	if (nor->flags & SNOR_F_NO_READ_CR) {
+		dev_warn(nor->dev, "it is recommended to optimize the SNOR_F_NO_READ_CR!\n");
 		return spi_nor_write_16bit_cr_and_check(nor, SR2_QUAD_EN_BIT1);
+	}
 
 	ret = spi_nor_read_cr(nor, nor->bouncebuf);
 	if (ret)
