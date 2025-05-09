@@ -9,6 +9,7 @@
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/pinctrl/rockchip.h>
 #include <dt-bindings/clock/rockchip,rk3528-cru.h>
+#include <dt-bindings/power/rockchip,rk3528-power.h>
 #include <dt-bindings/reset/rockchip,rk3528-cru.h>
 
 / {
@@ -385,6 +386,70 @@
 		ioc_grf: syscon@ff540000 {
 			compatible = "rockchip,rk3528-ioc-grf", "syscon";
 			reg = <0x0 0xff540000 0x0 0x40000>;
+		};
+
+		pmu: power-management@ff600000 {
+			compatible = "rockchip,rk3528-pmu", "syscon", "simple-mfd";
+			reg = <0x0 0xff600000 0x0 0x2000>;
+
+			power: power-controller {
+				compatible = "rockchip,rk3528-power-controller";
+				#power-domain-cells = <1>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				/* These power domains are grouped by VD_GPU */
+				power-domain@RK3528_PD_GPU {
+					reg = <RK3528_PD_GPU>;
+					clocks = <&cru ACLK_GPU_MALI>,
+						 <&cru PCLK_GPU_ROOT>;
+					pm_qos = <&qos_gpu_m0>,
+						 <&qos_gpu_m1>;
+					#power-domain-cells = <0>;
+				};
+
+				/* These power domains are grouped by VD_LOGIC */
+				power-domain@RK3528_PD_RKVDEC {
+					reg = <RK3528_PD_RKVDEC>;
+					pm_qos = <&qos_rkvdec>;
+					#power-domain-cells = <0>;
+					status = "disabled";
+				};
+				power-domain@RK3528_PD_RKVENC {
+					reg = <RK3528_PD_RKVENC>;
+					pm_qos = <&qos_rkvenc>;
+					#power-domain-cells = <0>;
+					status = "disabled";
+				};
+				power-domain@RK3528_PD_VO {
+					reg = <RK3528_PD_VO>;
+					pm_qos = <&qos_gmac0>,
+						 <&qos_hdcp>,
+						 <&qos_jpegdec>,
+						 <&qos_rga2_m0ro>,
+						 <&qos_rga2_m0wo>,
+						 <&qos_sdmmc0>,
+						 <&qos_usb2host>,
+						 <&qos_vdpp>,
+						 <&qos_vop>;
+					#power-domain-cells = <0>;
+					status = "disabled";
+				};
+				power-domain@RK3528_PD_VPU {
+					reg = <RK3528_PD_VPU>;
+					pm_qos = <&qos_emmc>,
+						 <&qos_fspi>,
+						 <&qos_gmac1>,
+						 <&qos_pcie>,
+						 <&qos_sdio0>,
+						 <&qos_sdio1>,
+						 <&qos_tsp>,
+						 <&qos_usb3otg>,
+						 <&qos_vpu>;
+					#power-domain-cells = <0>;
+					status = "disabled";
+				};
+			};
 		};
 
 		uart0: serial@ff9f0000 {
