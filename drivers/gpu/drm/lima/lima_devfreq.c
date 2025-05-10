@@ -11,6 +11,7 @@
 #include <linux/device.h>
 #include <linux/platform_device.h>
 #include <linux/pm_opp.h>
+#include <linux/pm_runtime.h>
 #include <linux/property.h>
 
 #include "lima_device.h"
@@ -87,6 +88,41 @@ static struct devfreq_dev_profile lima_devfreq_profile = {
 	.get_dev_status = lima_devfreq_get_dev_status,
 };
 
+static int lima_devfreq_config_clks(struct device *dev,
+				    struct opp_table *opp_table,
+				    struct dev_pm_opp *opp,
+				    void *data, bool scaling_down)
+{
+	struct lima_device *ldev = dev_get_drvdata(dev);
+	struct devfreq *devfreq = ldev->devfreq.devfreq;
+	unsigned long *target = data;
+	unsigned long freq;
+	int ret = 0;
+
+	/* One of target and opp must be available */
+	if (target) {
+		freq = *target;
+	} else if (opp) {
+		freq = dev_pm_opp_get_freq(opp);
+	} else {
+		WARN_ON(1);
+		return -EINVAL;
+	}
+
+	pm_runtime_get_noresume(dev);
+
+	if (!pm_runtime_suspended(dev) || !devfreq || !devfreq->suspend_freq) {
+		ret = clk_set_rate(ldev->clk_gpu, freq);
+		if (ret)
+			dev_err(dev, "failed to set clock rate %lu: %d\n",
+				freq, ret);
+	}
+
+	pm_runtime_put_noidle(dev);
+
+	return ret;
+}
+
 void lima_devfreq_fini(struct lima_device *ldev)
 {
 	struct lima_devfreq *devfreq = &ldev->devfreq;
@@ -112,6 +148,11 @@ int lima_devfreq_init(struct lima_device *ldev)
 	unsigned long cur_freq;
 	int ret;
 	const char *regulator_names[] = { "mali", NULL };
+	const char *clk_names[] = { "core", NULL };
+	struct dev_pm_opp_config config = {
+		.clk_names = clk_names,
+		.config_clks = lima_devfreq_config_clks,
+	};
 
 	if (!device_property_present(dev, "operating-points-v2"))
 		/* Optional, continue without devfreq */
@@ -123,7 +164,7 @@ int lima_devfreq_init(struct lima_device *ldev)
 	 * clkname is set separately so it is not affected by the optional
 	 * regulator setting which may return error.
 	 */
-	ret = devm_pm_opp_set_clkname(dev, "core");
+	ret = devm_pm_opp_set_config(dev, &config);
 	if (ret)
 		return ret;
 
