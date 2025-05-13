@@ -88,14 +88,15 @@ struct pcie_ep_obj_info {
 		__u16 submode;
 	} devmode;
 	__u32 msi_data[PCIE_EP_OBJ_INFO_MSI_DATA_NUM];
-	__u8 reserved[0x1D0];
-
+	__u8 rsvd0[0x1D0];
 	__u32 irq_type_rc;					/* Generate in ep isr, valid only for rc, clear in rc */
 	struct pcie_ep_obj_irq_dma_status dma_status_rc;	/* Generate in ep isr, valid only for rc, clear in rc */
 	__u32 irq_type_ep;					/* Generate in ep isr, valid only for ep, clear in ep */
 	struct pcie_ep_obj_irq_dma_status dma_status_ep;	/* Generate in ep isr, valid only for ep, clear in ep */
 	__u32 irq_user_data_rc;					/* Generate in ep, valid only for rc, No need to clear */
 	__u32 irq_user_data_ep;					/* Generate in rc, valid only for ep, No need to clear */
+	__u8 rsvd1[0xE4];
+	__u8 rsvd2_user[0x100];
 };
 
 /*
