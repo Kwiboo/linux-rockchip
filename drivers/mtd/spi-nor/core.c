@@ -3769,6 +3769,7 @@ static void spi_nor_shutdown(struct spi_mem *spimem)
 {
 	struct spi_nor *nor = spi_mem_get_drvdata(spimem);
 
+	mutex_lock(&nor->lock);
 	spi_nor_restore(nor);
 }
 
