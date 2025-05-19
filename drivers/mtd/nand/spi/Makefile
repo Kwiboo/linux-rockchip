@@ -13,6 +13,7 @@ spinand-$(CONFIG_MTD_SPI_NAND_GSTO)		+= gsto.o
 spinand-$(CONFIG_MTD_SPI_NAND_HIKSEMI)		+= hiksemi.o
 spinand-$(CONFIG_MTD_SPI_NAND_HYF)		+= hyf.o
 spinand-$(CONFIG_MTD_SPI_NAND_JSC)		+= jsc.o
+spinand-$(CONFIG_MTD_SPI_NAND_KINGSTON)		+= kingston.o
 spinand-$(CONFIG_MTD_SPI_NAND_MACRONIX)		+= macronix.o
 spinand-$(CONFIG_MTD_SPI_NAND_MICRON)		+= micron.o
 spinand-$(CONFIG_MTD_SPI_NAND_PARAGON)		+= paragon.o
