@@ -577,6 +577,7 @@
 			interrupts = <GIC_SPI 131 IRQ_TYPE_LEVEL_HIGH>;
 			dmas = <&dmac 25>, <&dmac 24>;
 			dma-names = "tx", "rx";
+			power-domains = <&power RK3528_PD_RKVENC>;
 			#address-cells = <1>;
 			#size-cells = <0>;
 			status = "disabled";
@@ -591,6 +592,7 @@
 			interrupts = <GIC_SPI 132 IRQ_TYPE_LEVEL_HIGH>;
 			dmas = <&dmac 31>, <&dmac 30>;
 			dma-names = "tx", "rx";
+			power-domains = <&power RK3528_PD_VPU>;
 			#address-cells = <1>;
 			#size-cells = <0>;
 			status = "disabled";
