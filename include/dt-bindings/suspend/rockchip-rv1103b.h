@@ -42,6 +42,13 @@
 #define RKPM_AOV_WKUP_EN		BIT(9)
 #define RKPM_TIMEOUT_WKUP_EN		BIT(10)
 
+/* sleep pin */
+#define RKPM_SLEEP_PIN0_EN		BIT(0)	/* GPIO0_A3 */
+#define RKPM_SLEEP_PIN1_EN		BIT(1)	/* GPIO0_A4 */
+
+#define RKPM_SLEEP_PIN0_ACT_LOW		BIT(0)	/* GPIO0_A3 */
+#define RKPM_SLEEP_PIN1_ACT_LOW		BIT(1)	/* GPIO0_A4 */
+
 /* io config */
 #define RKPM_IO_CFG_IOMUX_SFT		0
 #define RKPM_IO_CFG_GPIO_DIR_SFT	8
