@@ -1440,6 +1440,7 @@ static const struct pci_error_handlers pcie_rkep_err_handler = {
 
 static const struct pci_device_id pcie_rkep_pcidev_id[] = {
 	{ PCI_VDEVICE(ROCKCHIP, 0x356a), 1,  },
+	{ PCI_VDEVICE(ROCKCHIP, 0x182a), 1,  },
 	{ }
 };
 MODULE_DEVICE_TABLE(pcie_rkep, pcie_rkep_pcidev_id);
