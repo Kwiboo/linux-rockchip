@@ -1117,6 +1117,34 @@ static void gpio0_set_lvl(u32 pin_id, int lvl)
 			       gpio_base[0] + RV1103B_GPIO_SWPORT_DR_H);
 }
 
+static void sleep_pin_config(void)
+{
+	u32 en_msk = slp_cfg.sleep_pin_config[0] & 0x3;
+	u32 act_val = slp_cfg.sleep_pin_config[1] & 0x3;
+
+	/* pwr0 sleep: gpio0_a3 */
+	if (en_msk & RKPM_SLEEP_PIN0_EN) {
+		writel_relaxed(BITS_WITH_WMASK(0, 0x3, 0),
+			       pmugrf_base + RV1103B_PMUGRF_SOC_CON(1));
+		writel_relaxed(BITS_WITH_WMASK(act_val & 0x1, 0x1, 4),
+			       pmugrf_base + RV1103B_PMUGRF_SOC_CON(1));
+		writel_relaxed(BITS_WITH_WMASK(1, 0xf, 12), ioc0_base + 0x0);
+		dsb();
+		writel_relaxed(BITS_WITH_WMASK(0, 0x3, 6), ioc0_base + 0x200);
+	}
+
+	/* pwr1 sleep: gpio_a4 */
+	if (en_msk & RKPM_SLEEP_PIN1_EN) {
+		writel_relaxed(BITS_WITH_WMASK(0, 0x3, 2),
+			       pmugrf_base + RV1103B_PMUGRF_SOC_CON(1));
+		writel_relaxed(BITS_WITH_WMASK((act_val >> 1) & 0x1, 0x1, 5),
+			       pmugrf_base + RV1103B_PMUGRF_SOC_CON(1));
+		writel_relaxed(BITS_WITH_WMASK(1, 0xf, 0), ioc0_base + 0x4);
+		dsb();
+		writel_relaxed(BITS_WITH_WMASK(0, 0x3, 8), ioc0_base + 0x200);
+	}
+}
+
 static void gpio_config(void)
 {
 	u32 iomux, dir, lvl, pull, id;
@@ -1158,6 +1186,8 @@ static void gpio_config(void)
 		writel_relaxed(0x01ff01ff, pmu_base + RV1103B_PMU0_INFO_TX_CON);
 		writel_relaxed(BITS_WITH_WMASK(0x5, 0xf, 4), ioc1_base + 0x8); /* gpio0_b1 */
 	}
+
+	sleep_pin_config();
 }
 
 static void gpio_restore(void)
