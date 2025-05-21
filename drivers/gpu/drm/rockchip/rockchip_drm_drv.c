@@ -1478,7 +1478,7 @@ static int rockchip_drm_create_properties(struct drm_device *dev)
 	private->cubic_lut_size_prop = drm_property_create_range(dev, DRM_MODE_PROP_IMMUTABLE,
 								 "CUBIC_LUT_SIZE", 0, UINT_MAX);
 
-	return drm_mode_create_tv_properties(dev, 0, NULL);
+	return drm_mode_create_tv_properties_legacy(dev, 0, NULL);
 }
 
 static void rockchip_attach_connector_property(struct drm_device *drm)
