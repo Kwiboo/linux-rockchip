@@ -893,6 +893,11 @@ static void pmu_sleep_config(void)
 			  BIT(RV1103B_PMU_INPUT_CLAMP) |
 			  0);
 
+		pmu1_ddr_con =
+			BIT(RV1103B_PMU_DDR_SREF_C) |
+			BIT(RV1103B_PMU_DDR_SREF_A) |
+			0;
+
 		/* resume from pmusram */
 		writel_relaxed(BITS_WITH_WMASK(2, 0x3, 10),
 			       pmusgrf_base + RV1103B_PMUSGRF_SOC_CON(1));
@@ -904,7 +909,7 @@ static void pmu_sleep_config(void)
 		writel_relaxed(0x007f007e, pmugrf_base + RV1103B_PMUGRF_SOC_CON(5));
 		writel_relaxed(0xffffffff, pmugrf_base + RV1103B_PMUGRF_SOC_CON(6));
 
-		/* resume from pmusram */
+		/* resume from bootrom */
 		writel_relaxed(BITS_WITH_WMASK(0, 0x3, 10),
 			       pmusgrf_base + RV1103B_PMUSGRF_SOC_CON(1));
 	} else if (cfg & RKPM_SLP_ARMOFF_PMUOFF) {
