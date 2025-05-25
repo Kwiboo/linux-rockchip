@@ -817,7 +817,7 @@ static inline void __free_iova(struct dma_iommu_mapping *mapping,
 	unsigned int start, count;
 	size_t mapping_size = mapping->bits << PAGE_SHIFT;
 	unsigned long flags;
-	dma_addr_t bitmap_base;
+	unsigned long long bitmap_base;
 	u32 bitmap_index;
 
 	if (!size)
@@ -1414,7 +1414,7 @@ static void arm_iommu_unmap_page(struct device *dev, dma_addr_t handle,
 	int offset = handle & ~PAGE_MASK;
 	int len = PAGE_ALIGN(size + offset);
 
-	if (!iova)
+	if (WARN(handle == DMA_MAPPING_ERROR, "invalid iommu iova address.\n"))
 		return;
 
 	if (!dev->dma_coherent && !(attrs & DMA_ATTR_SKIP_CPU_SYNC)) {
@@ -1476,7 +1476,7 @@ static void arm_iommu_unmap_resource(struct device *dev, dma_addr_t dma_handle,
 	unsigned int offset = dma_handle & ~PAGE_MASK;
 	size_t len = PAGE_ALIGN(size + offset);
 
-	if (!iova)
+	if (WARN(dma_handle == DMA_MAPPING_ERROR, "invalid iommu iova address.\n"))
 		return;
 
 	iommu_unmap(mapping->domain, iova, len);
@@ -1491,7 +1491,7 @@ static void arm_iommu_sync_single_for_cpu(struct device *dev,
 	struct page *page;
 	unsigned int offset = handle & ~PAGE_MASK;
 
-	if (dev->dma_coherent || !iova)
+	if (dev->dma_coherent || WARN(handle == DMA_MAPPING_ERROR, "invalid iommu iova address.\n"))
 		return;
 
 	page = phys_to_page(iommu_iova_to_phys(mapping->domain, iova));
@@ -1506,7 +1506,7 @@ static void arm_iommu_sync_single_for_device(struct device *dev,
 	struct page *page;
 	unsigned int offset = handle & ~PAGE_MASK;
 
-	if (dev->dma_coherent || !iova)
+	if (dev->dma_coherent || WARN(handle == DMA_MAPPING_ERROR, "invalid iommu iova address.\n"))
 		return;
 
 	page = phys_to_page(iommu_iova_to_phys(mapping->domain, iova));
@@ -1532,6 +1532,11 @@ static const struct dma_map_ops iommu_ops = {
 	.map_resource		= arm_iommu_map_resource,
 	.unmap_resource		= arm_iommu_unmap_resource,
 };
+
+#ifdef CONFIG_ARCH_ROCKCHIP
+#define RK_DMA_IOMMU_IOVA_BLOCK_SIZE	SZ_2G
+#define RK_DMA_IOMMU_BITMAP_SIZE	((RK_DMA_IOMMU_IOVA_BLOCK_SIZE >> PAGE_SHIFT) >> 3)
+#endif
 
 /**
  * arm_iommu_create_mapping
@@ -1562,10 +1567,17 @@ arm_iommu_create_mapping(const struct bus_type *bus, dma_addr_t base, u64 size)
 	if (!bitmap_size)
 		return ERR_PTR(-EINVAL);
 
+#ifdef RK_DMA_IOMMU_BITMAP_SIZE
+	if (bitmap_size > RK_DMA_IOMMU_BITMAP_SIZE) {
+		extensions = bitmap_size / RK_DMA_IOMMU_BITMAP_SIZE;
+		bitmap_size = RK_DMA_IOMMU_BITMAP_SIZE;
+	}
+#else
 	if (bitmap_size > PAGE_SIZE) {
 		extensions = bitmap_size / PAGE_SIZE;
 		bitmap_size = PAGE_SIZE;
 	}
+#endif
 
 	mapping = kzalloc(sizeof(struct dma_iommu_mapping), GFP_KERNEL);
 	if (!mapping)

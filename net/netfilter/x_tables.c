@@ -2012,5 +2012,9 @@ static void __exit xt_fini(void)
 	kfree(xt);
 }
 
+#ifdef CONFIG_INITCALL_ASYNC
+rootfs_initcall(xt_init);
+#else
 module_init(xt_init);
+#endif
 module_exit(xt_fini);
