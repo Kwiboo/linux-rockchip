@@ -3,6 +3,7 @@
 # Rockchip Soc drivers
 #
 obj-$(CONFIG_ROCKCHIP_AMP) += rockchip_amp.o
+obj-$(CONFIG_ROCKCHIP_AMP_RPMSG_SHAREDMEM) += rockchip_amp_rpmsg_sharedmem.o
 obj-$(CONFIG_ROCKCHIP_AMP_RPMSG_TIMESYNC) += rockchip_amp_rpmsg_timesync.o
 obj-$(CONFIG_ROCKCHIP_CPUINFO) += rockchip-cpuinfo.o
 obj-$(CONFIG_ROCKCHIP_CSU) += rockchip_csu.o
