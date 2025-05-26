@@ -2353,18 +2353,21 @@ s32 gt1x_init(void)
 	ret = gt1x_get_chip_type();
 	if (ret != 0) {
 		GTP_ERROR("Get chip type failed!");
+		goto init_err;
 	}
 
 	/* read version information */
 	ret = gt1x_read_version(&gt1x_version);
 	if (ret != 0) {
 		GTP_ERROR("Get verision failed!");
+		goto init_err;
 	}
 
 	/* init and send configs */
 	ret = gt1x_init_panel();
 	if (ret != 0) {
 		GTP_ERROR("Init panel failed.");
+		goto init_err;
 	}
 
 	gt1x_workqueue = create_singlethread_workqueue("gt1x_workthread");
@@ -2402,6 +2405,8 @@ s32 gt1x_init(void)
 #if GTP_WITH_STYLUS
 	gt1x_pen_init();
 #endif
+
+init_err:
 	if (ret != 0)
 		gt1x_power_switch(SWITCH_OFF);
 

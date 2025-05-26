@@ -572,26 +572,27 @@ static int gt1x_ts_probe(struct i2c_client *client, const struct i2c_device_id *
 	if (client->dev.of_node) {
 		ret = gt1x_parse_dt(&client->dev);
 		if (ret)
-			return ret;
+			goto probe_err;
 	}
 #endif
 
 	ret = gt1x_request_io_port();
 	if (ret < 0) {
 		GTP_ERROR("GTP request IO port failed.");
-		return ret;
+		goto probe_err;
 	}
 
 	ret = gt1x_init();
 	if (ret != 0) {
 		GTP_ERROR("GTP init failed!!!");
-		return ret;
+		goto probe_err;
 	}
 
 	gt1x_wq = create_singlethread_workqueue("gt1x_wq");
 	if (!gt1x_wq) {
 		GTP_ERROR("Creat workqueue failed.");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto probe_err;
 	}
 
 	INIT_WORK(&gt1x_work, gt1x_ts_work_func);
@@ -629,6 +630,15 @@ static int gt1x_ts_probe(struct i2c_client *client, const struct i2c_device_id *
 #endif
 	gt1x_register_powermanger();
 	return 0;
+
+probe_err:
+	if (gpio_is_valid(gt1x_int_gpio))
+		gpio_free(gt1x_int_gpio);
+
+	if (gpio_is_valid(gt1x_rst_gpio))
+		gpio_free(gt1x_rst_gpio);
+
+	return ret;
 }
 
 /**
