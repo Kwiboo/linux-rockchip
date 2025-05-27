@@ -610,7 +610,7 @@ static int sc5336p_set_gain_reg(struct sc5336p *sc5336p, u32 gain, int mode)
 		coarse_again = 0x0f;
 		coarse_dgain = 0x00;
 		fine_dgain = gain_factor * 128 / 16000;
-	} else if (gain_factor <= 32000 * 2) {	// 16.x - 32.x
+	} else if (gain_factor < 32000 * 2) {	// 32.x - 64.x
 		coarse_again = 0x1f;
 		coarse_dgain = 0x00;
 		fine_dgain = gain_factor * 128 / 32000;
