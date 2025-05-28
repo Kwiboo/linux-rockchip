@@ -3562,7 +3562,7 @@ dw_dp_mst_connector_mode_valid(struct drm_connector *connector, struct drm_displ
 	if (!dw_dp_bandwidth_ok(dp, mode, min_bpp, dp->link.lanes, dp->link.max_rate))
 		return MODE_CLOCK_HIGH;
 
-	if (drm_dp_calc_pbn_mode(mode->clock, min_bpp, false) > port->full_pbn)
+	if (drm_dp_calc_pbn_mode(mode->clock, min_bpp) > port->full_pbn)
 		return MODE_CLOCK_HIGH;
 
 	return MODE_OK;
@@ -3972,7 +3972,7 @@ static int dw_dp_mst_encoder_atomic_check(struct drm_encoder *encoder,
 		mst_state->pbn_div = drm_dp_get_vc_payload_bw(&dp->mst_mgr, dp->link.rate,
 							      dp->link.lanes);
 	}
-	pbn = drm_dp_calc_pbn_mode(crtc_state->adjusted_mode.crtc_clock, video->bpp, false);
+	pbn = drm_dp_calc_pbn_mode(crtc_state->adjusted_mode.crtc_clock, video->bpp);
 	slot = drm_dp_atomic_find_time_slots(state, &dp->mst_mgr, mst_conn->port, pbn);
 	if (slot < 0) {
 		dev_err(dp->dev, "invalid slot:%d\n", slot);
