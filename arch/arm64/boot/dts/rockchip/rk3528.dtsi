@@ -611,9 +611,8 @@
 		reg = <0x0 0xfe4f0000 0x0 0x10000>,
 		      <0x0 0xfe000000 0x0 0x400000>;
 		reg-names = "pcie-apb", "pcie-dbi";
-		resets = <&cru SRST_RESETN_PCIE_POWER_UP>, <&cru SRST_PRESETN_PCIE>,
-			 <&cru SRST_PRESETN_CRU_PCIE>;
-		reset-names = "pcie", "periph", "preset_cru";
+		resets = <&cru SRST_RESETN_PCIE_POWER_UP>, <&cru SRST_PRESETN_PCIE>;
+		reset-names = "pcie", "periph";
 		status = "disabled";
 
 		pcie2x1_intc: legacy-interrupt-controller {
