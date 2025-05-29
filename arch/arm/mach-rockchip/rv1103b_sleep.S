@@ -11,7 +11,7 @@
 #define RV1103B_GPIO0_INT_ST		0xff380050
 #define RV1103B_PMUGRF_OS_REG10		0xff020228
 #define RV1103B_PMUGRF_SOC_CON4		0xff020010
-#define RV1103B_CRU_GLB_SRST_FST		0xff3b0c08
+#define RV1103B_CRU_GLB_SRST_FST_ADDR	0xff3b0c08
 
 #define RV1103B_CRU_GLB_RST_CON_ADDR	0xff3b0c10
 #define CRU_FST_RST_PMU_VAL		0x000c000c
@@ -114,7 +114,7 @@ ENTRY(rockchip_slp_cpu_resume)
 	str	r1, [r0]
 
 	/* first reset */
-	ldr	r0, =RV1103B_CRU_GLB_SRST_FST
+	ldr	r0, =RV1103B_CRU_GLB_SRST_FST_ADDR
 	mov	r1, #0xfdb9
 	str	r1, [r0]
 	b	.
