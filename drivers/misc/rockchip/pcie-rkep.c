@@ -351,8 +351,10 @@ static int pcie_rkep_release(struct inode *inode, struct file *file)
 		mutex_lock(&pcie_file->file_lock_mutex);
 		index = find_first_bit(pcie_file->child_vid_bitmap, RKEP_EP_VIRTUAL_ID_MAX);
 
-		if (index >= RKEP_EP_VIRTUAL_ID_MAX)
+		if (index >= RKEP_EP_VIRTUAL_ID_MAX) {
+			mutex_unlock(&pcie_file->file_lock_mutex);
 			break;
+		}
 
 		__clear_bit(index, pcie_file->child_vid_bitmap);
 		mutex_unlock(&pcie_file->file_lock_mutex);
