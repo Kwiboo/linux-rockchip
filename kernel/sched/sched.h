@@ -82,7 +82,6 @@
 #ifdef CONFIG_SCHED_DEBUG
 # include <linux/static_key.h>
 #endif
-#include <soc/rockchip/rockchip_performance.h>
 
 #ifdef CONFIG_PARAVIRT
 # include <asm/paravirt.h>

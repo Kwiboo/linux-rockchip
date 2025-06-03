@@ -1820,14 +1820,6 @@ static void uclamp_sync_util_min_rt_default(void)
 	rcu_read_unlock();
 }
 
-#if IS_ENABLED(CONFIG_ROCKCHIP_PERFORMANCE)
-void rockchip_perf_uclamp_sync_util_min_rt_default(void)
-{
-	uclamp_sync_util_min_rt_default();
-}
-EXPORT_SYMBOL(rockchip_perf_uclamp_sync_util_min_rt_default);
-#endif
-
 static int sysctl_sched_uclamp_handler(struct ctl_table *table, int write,
 				void *buffer, size_t *lenp, loff_t *ppos)
 {
