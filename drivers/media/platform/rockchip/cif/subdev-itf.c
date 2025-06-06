@@ -1599,33 +1599,47 @@ struct sensor_async_subdev {
 	int lanes;
 };
 
-static int sditf_fwnode_parse(struct device *dev,
-					  struct v4l2_fwnode_endpoint *vep,
-					  struct v4l2_async_connection *asc)
+static int sditf_fwnode_parse(struct sditf_priv *sditf)
 {
-	struct sensor_async_subdev *s_asd =
-			container_of(asc, struct sensor_async_subdev, asc);
-	struct v4l2_mbus_config *config = &s_asd->mbus;
+	struct device *dev = sditf->dev;
+	struct fwnode_handle *ep = NULL;
+	struct v4l2_async_connection *s_asc = NULL;
+	struct fwnode_handle *remote_ep = NULL;
+	struct v4l2_fwnode_endpoint vep = {
+		.bus_type = V4L2_MBUS_CSI2_DPHY
+	};
+	int ret = 0;
 
-	if (vep->base.port != 0) {
-		dev_info(dev, "sditf has only parse port 0\n");
-		return 0;
+	fwnode_graph_for_each_endpoint(dev_fwnode(dev), ep) {
+		ret = v4l2_fwnode_endpoint_parse(ep, &vep);
+		if (ret)
+			goto err_parse;
+
+		/* only add fwnode form port 0 to notifier list */
+		if (vep.base.port != 0)
+			continue;
+
+		remote_ep = fwnode_graph_get_remote_port_parent(ep);
+		/* skip device dts status is disabled */
+		if (!fwnode_device_is_available(remote_ep)) {
+			fwnode_handle_put(remote_ep);
+			continue;
+		}
+
+		s_asc = v4l2_async_nf_add_fwnode(&sditf->notifier, remote_ep,
+						 struct
+						 v4l2_async_connection);
+		fwnode_handle_put(remote_ep);
+		if (IS_ERR(s_asc)) {
+			ret = PTR_ERR(s_asc);
+			goto err_parse;
+		}
 	}
-
-	if (vep->bus_type == V4L2_MBUS_CSI2_DPHY ||
-	    vep->bus_type == V4L2_MBUS_CSI2_CPHY) {
-		config->type = vep->bus_type;
-		config->bus.mipi_csi2.flags = vep->bus.mipi_csi2.flags;
-		s_asd->lanes = vep->bus.mipi_csi2.num_data_lanes;
-	} else if (vep->bus_type == V4L2_MBUS_CCP2) {
-		config->type = vep->bus_type;
-		s_asd->lanes = vep->bus.mipi_csi1.data_lane;
-	} else {
-		dev_err(dev, "type is not supported\n");
-		return -EINVAL;
-	}
-
 	return 0;
+
+err_parse:
+	fwnode_handle_put(ep);
+	return ret;
 }
 
 static int rkcif_sditf_get_ctrl(struct v4l2_ctrl *ctrl)
@@ -1746,19 +1760,16 @@ static int sditf_subdev_notifier(struct sditf_priv *sditf)
 	struct v4l2_async_notifier *ntf = &sditf->notifier;
 	int ret;
 
-	v4l2_async_nf_init(ntf);
+	v4l2_async_subdev_nf_init(ntf, &sditf->sd);
 
-	ret = v4l2_async_nf_parse_fwnode_endpoints(sditf->dev,
-							 ntf,
-							 sizeof(struct sensor_async_subdev),
-							 sditf_fwnode_parse);
+	ret = sditf_fwnode_parse(sditf);
 	if (ret < 0)
 		return ret;
 
 	sditf->sd.subdev_notifier = &sditf->notifier;
 	sditf->notifier.ops = &sditf_notifier_ops;
 
-	ret = v4l2_async_subdev_nf_register(&sditf->sd, &sditf->notifier);
+	ret = v4l2_async_nf_register(&sditf->notifier);
 	if (ret) {
 		v4l2_err(&sditf->sd,
 			 "failed to register async notifier : %d\n",

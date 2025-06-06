@@ -1041,7 +1041,7 @@ static int csi2_notifier(struct csi2_dev *csi2)
 	struct v4l2_async_notifier *ntf = &csi2->notifier;
 	int ret;
 
-	v4l2_async_nf_init(ntf);
+	v4l2_async_subdev_nf_init(ntf, &csi2->sd);
 
 	ret = csi2_fwnode_parse(csi2);
 	if (ret < 0)
@@ -1049,7 +1049,7 @@ static int csi2_notifier(struct csi2_dev *csi2)
 
 	csi2->sd.subdev_notifier = &csi2->notifier;
 	csi2->notifier.ops = &csi2_async_ops;
-	ret = v4l2_async_subdev_nf_register(&csi2->sd, &csi2->notifier);
+	ret = v4l2_async_nf_register(&csi2->notifier);
 	if (ret) {
 		v4l2_err(&csi2->sd,
 			 "failed to register async notifier : %d\n",
