@@ -413,6 +413,10 @@ struct vop_ctrl {
 
 	struct vop_reg reg_done_frm;
 	struct vop_reg cfg_done;
+
+	struct vop_reg edpi_wms_fs;
+	struct vop_reg edpi_ctrl_mode;
+	struct vop_reg edpi_te_en;
 };
 
 struct vop_intr {

@@ -303,6 +303,10 @@ static const struct vop_ctrl rk3288_ctrl_data = {
 	.mipi_dclk_pol = VOP_REG_VER(RK3368_DSP_CTRL1, 0x1, 31, 3, 2, -1),
 	.mipi_pin_pol = VOP_REG_VER(RK3368_DSP_CTRL1, 0x7, 28, 3, 2, -1),
 
+	.edpi_wms_fs = VOP_REG(RK3288_SYS_CTRL, 0x1, 10),
+	.edpi_ctrl_mode = VOP_REG(RK3288_SYS_CTRL, 0x1, 9),
+	.edpi_te_en = VOP_REG(RK3288_SYS_CTRL, 0x1, 8),
+
 	.dither_down_sel = VOP_REG(RK3288_DSP_CTRL1, 0x1, 4),
 	.dither_down_mode = VOP_REG(RK3288_DSP_CTRL1, 0x1, 3),
 	.dither_down_en = VOP_REG(RK3288_DSP_CTRL1, 0x1, 2),
@@ -1611,6 +1615,10 @@ static const struct vop_ctrl px30_ctrl_data = {
 	.mcu_type = VOP_REG(RK3366_LIT_MCU_CTRL, 0x1, 31),
 	.mcu_rw_bypass_port = VOP_REG(RK3366_LIT_MCU_RW_BYPASS_PORT,
 				      0xffffffff, 0),
+
+	.edpi_wms_fs = VOP_REG(RK3366_LIT_SYS_CTRL2, 0x1, 11),
+	.edpi_ctrl_mode = VOP_REG(RK3366_LIT_SYS_CTRL2, 0x1, 10),
+	.edpi_te_en = VOP_REG(RK3366_LIT_SYS_CTRL2, 0x1, 9),
 };
 
 static const struct vop_win_phy px30_win23_data = {
@@ -1858,6 +1866,10 @@ static const struct vop_ctrl rv1126_ctrl_data = {
 				      0xffffffff, 0),
 	.bt1120_yc_swap = VOP_REG(RK3366_LIT_DSP_CTRL0, 0x1, 30),
 	.bt1120_en = VOP_REG(RK3366_LIT_DSP_CTRL0, 0x1, 31),
+
+	.edpi_wms_fs = VOP_REG(RK3366_LIT_SYS_CTRL2, 0x1, 11),
+	.edpi_ctrl_mode = VOP_REG(RK3366_LIT_SYS_CTRL2, 0x1, 10),
+	.edpi_te_en = VOP_REG(RK3366_LIT_SYS_CTRL2, 0x1, 9),
 };
 
 static const struct vop_win_data rv1126_vop_win_data[] = {
