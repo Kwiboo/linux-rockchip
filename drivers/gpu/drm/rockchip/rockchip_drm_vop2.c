@@ -10228,9 +10228,9 @@ static void vop2_setup_dly_for_vp(struct vop2_video_port *vp)
 	struct drm_crtc *crtc = &vp->rockchip_crtc.crtc;
 	struct rockchip_crtc_state *vcstate = to_rockchip_crtc_state(crtc->state);
 	struct drm_display_mode *adjusted_mode = &crtc->state->adjusted_mode;
-	u16 hsync_len = adjusted_mode->crtc_hsync_end - adjusted_mode->crtc_hsync_start;
-	u16 hdisplay = adjusted_mode->crtc_hdisplay;
 	u32 bg_dly = vp_data->pre_scan_max_dly[0];
+	u16 hsync_len;
+	u16 hdisplay;
 	u32 pre_scan_dly;
 
 	if (vp_data->hdr_table)  {
@@ -10255,9 +10255,9 @@ static void vop2_setup_dly_for_vp(struct vop2_video_port *vp)
 	if (vp->splice_mode_right) {
 		vcstate = to_rockchip_crtc_state(left_vp->rockchip_crtc.crtc.state);
 		adjusted_mode = &left_vp->rockchip_crtc.crtc.state->adjusted_mode;
-		hsync_len = adjusted_mode->crtc_hsync_end - adjusted_mode->crtc_hsync_start;
-		hdisplay = adjusted_mode->crtc_hdisplay;
 	}
+	hsync_len = adjusted_mode->crtc_hsync_end - adjusted_mode->crtc_hsync_start;
+	hdisplay = adjusted_mode->crtc_hdisplay;
 
 	/*
 	 * splice mode: hdisplay must roundup as 4 pixel,
