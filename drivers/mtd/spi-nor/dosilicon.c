@@ -14,6 +14,12 @@ static const struct flash_info dosilicon_parts[] = {
 			   SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ) },
 	{ "FM25M64C", INFO(0xf84317, 0, 64 * 1024, 128,
 			   SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ) },
+	{ "DS25Q64A", INFO(0xe53117, 0, 64 * 1024, 128,
+			   SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ) },
+	{ "DS25Q4CB", INFO(0xe5301A, 0, 64 * 1024, 1024,
+			   SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ | SPI_NOR_4B_OPCODES) },
+	{ "DS25Q4DN", INFO(0xe5301B, 0, 64 * 1024, 2048,
+			   SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ | SPI_NOR_4B_OPCODES) },
 };
 
 const struct spi_nor_manufacturer spi_nor_dosilicon = {
