@@ -931,9 +931,23 @@ static int rk_crypto_remove(struct platform_device *pdev)
 	return 0;
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0))
+static int rk_crypto_remove_wrap(struct platform_device *pdev)
+{
+	rk_crypto_remove(pdev);
+
+	return 0;
+}
+#else
+static void rk_crypto_remove_wrap(struct platform_device *pdev)
+{
+	rk_crypto_remove(pdev);
+}
+#endif
+
 static struct platform_driver crypto_driver = {
 	.probe		= rk_crypto_probe,
-	.remove		= rk_crypto_remove,
+	.remove		= rk_crypto_remove_wrap,
 	.driver		= {
 		.name	= "rk-crypto",
 		.of_match_table	= crypto_of_id_table,
