@@ -85,6 +85,21 @@
 		};
 	};
 
+	firmware {
+		scmi: scmi {
+			compatible = "arm,scmi-smc";
+			arm,smc-id = <0x82000010>;
+			shmem = <&scmi_shmem>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			scmi_clk: protocol@14 {
+				reg = <0x14>;
+				#clock-cells = <1>;
+			};
+		};
+	};
+
 	cpu_opp_table: opp-table-cpu {
 		compatible = "operating-points-v2";
 		opp-shared;
@@ -142,21 +157,6 @@
 			opp-hz = /bits/ 64 <2016000000>;
 			opp-microvolt = <1100000 1100000 1100000>;
 			clock-latency-ns = <40000>;
-		};
-	};
-
-	firmware {
-		scmi: scmi {
-			compatible = "arm,scmi-smc";
-			arm,smc-id = <0x82000010>;
-			shmem = <&scmi_shmem>;
-			#address-cells = <1>;
-			#size-cells = <0>;
-
-			scmi_clk: protocol@14 {
-				reg = <0x14>;
-				#clock-cells = <1>;
-			};
 		};
 	};
 
