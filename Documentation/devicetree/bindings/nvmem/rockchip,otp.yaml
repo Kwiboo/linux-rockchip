@@ -62,8 +62,6 @@ allOf:
         clocks:
           maxItems: 3
         clock-names:
-          maxItems: 3
-        clock-names:
           items:
             - const: otp
             - const: apb_pclk
@@ -85,7 +83,6 @@ allOf:
       properties:
         clocks:
           minItems: 4
-          maxItems: 4
         clock-names:
           items:
             - const: otp
@@ -94,7 +91,6 @@ allOf:
             - const: sbpi
         resets:
           minItems: 4
-          maxItems: 4
         reset-names:
           items:
             - const: otp
@@ -113,7 +109,10 @@ allOf:
         clocks:
           maxItems: 3
         clock-names:
-          maxItems: 3
+          items:
+            - const: otp
+            - const: apb_pclk
+            - const: phy
         resets:
           minItems: 2
           maxItems: 2
@@ -132,9 +131,6 @@ allOf:
       properties:
         clocks:
           minItems: 4
-        clock-names:
-          minItems: 4
-          maxItems: 4
         clock-names:
           items:
             - const: otp
