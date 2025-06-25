@@ -280,6 +280,9 @@ struct dw_mipi_dsi2 {
 
 	struct gpio_desc *te_gpio;
 
+	/* rockchip,split-mode */
+	bool split_mode;
+
 	/* split with other display interface */
 	bool dual_connector_split;
 	bool left_display;
@@ -1225,14 +1228,27 @@ dw_mipi_dsi2_encoder_helper_funcs = {
 static int dw_mipi_dsi2_connector_get_modes(struct drm_connector *connector)
 {
 	struct dw_mipi_dsi2 *dsi2 = con_to_dsi2(connector);
+	struct drm_display_info *di = &connector->display_info;
+	int num_modes = 0;
 
 	if (dsi2->bridge && (dsi2->bridge->ops & DRM_BRIDGE_OP_MODES))
-		return drm_bridge_get_modes(dsi2->bridge, connector);
+		num_modes = drm_bridge_get_modes(dsi2->bridge, connector);
 
 	if (dsi2->panel)
-		return drm_panel_get_modes(dsi2->panel, connector);
+		num_modes = drm_panel_get_modes(dsi2->panel, connector);
 
-	return -EINVAL;
+	if (!num_modes)
+		return -EINVAL;
+
+	if (dsi2->split_mode && dsi2->slave) {
+		struct drm_display_mode *mode;
+
+		di->width_mm *= 2;
+		list_for_each_entry(mode, &connector->probed_modes, head)
+			drm_mode_convert_to_split_mode(mode);
+	}
+
+	return num_modes;
 }
 
 static enum drm_mode_status
@@ -1395,7 +1411,8 @@ static struct dw_mipi_dsi2 *dw_mipi_dsi2_find_by_id(struct device_driver *drv,
 
 static int dw_mipi_dsi2_dual_channel_probe(struct dw_mipi_dsi2 *dsi2)
 {
-	if (of_property_read_bool(dsi2->dev->of_node, "rockchip,dual-channel")) {
+	if (of_property_read_bool(dsi2->dev->of_node, "rockchip,dual-channel") ||
+	    of_property_read_bool(dsi2->dev->of_node, "rockchip,split-mode")) {
 		dsi2->data_swap = of_property_read_bool(dsi2->dev->of_node,
 							"rockchip,data-swap");
 
@@ -1403,8 +1420,13 @@ static int dw_mipi_dsi2_dual_channel_probe(struct dw_mipi_dsi2 *dsi2)
 		if (!dsi2->slave)
 			return -EPROBE_DEFER;
 
+		if (of_property_read_bool(dsi2->dev->of_node, "rockchip,split-mode"))
+			dsi2->split_mode = true;
+
 		dsi2->slave->master = dsi2;
-		dsi2->lanes /= 2;
+
+		if (!dsi2->split_mode)
+			dsi2->lanes /= 2;
 
 		dsi2->slave->auto_calc_mode = dsi2->auto_calc_mode;
 		dsi2->slave->lanes = dsi2->lanes;
@@ -1546,7 +1568,7 @@ static int dw_mipi_dsi2_get_dsc_params_from_sink(struct dw_mipi_dsi2 *dsi2,
 	dw_mipi_dsi2_pps_check(dsi2, pps);
 	dsi2->pps = pps;
 
-	if (dsi2->slave) {
+	if (dsi2->slave && !dsi2->split_mode) {
 		u16 pic_width = be16_to_cpu(pps->pic_width) / 2;
 
 		dsi2->pps->pic_width = cpu_to_be16(pic_width);
