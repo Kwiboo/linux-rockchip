@@ -52,6 +52,10 @@
 	status = "disabled";
 };
 
+&hynitron {
+	status = "disabled";
+};
+
 /*
  * pin conflict for rkx12x dphy0 irq
  */
