@@ -3021,8 +3021,19 @@ static int mmc_blk_probe(struct mmc_card *card)
 	dev_set_drvdata(&card->dev, md);
 
 #if defined(CONFIG_MMC_DW_ROCKCHIP) || defined(CONFIG_MMC_SDHCI_OF_ARASAN)
-	if (card->type == MMC_TYPE_MMC)
+	if (card->type == MMC_TYPE_MMC) {
+		/*
+		 * Can't support more than one MMC card if using vendor
+		 * storage area.
+		 */
+#if defined(CONFIG_ROCKCHIP_MMC_VENDOR_STORAGE)
+		if (this_card) {
+			pr_err("Only support one MMC card with CONFIG_ROCKCHIP_MMC_VENDOR_STORAGE\n");
+			BUG_ON(1);
+		}
+#endif
 		this_card = card;
+	}
 #endif
 
 	if (mmc_add_disk(md))
