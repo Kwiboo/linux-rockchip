@@ -871,6 +871,11 @@ static int rockchip_pwm_enable_v4(struct pwm_chip *chip, struct pwm_device *pwm,
 
 	writel_relaxed(PWM_EN(enable) | PWM_CLK_EN(enable), pc->base + ENABLE);
 
+	/*
+	 * For pwm v4, the disable operation, which sets polarity to inactive state,
+	 * will not take effect until the end of current period. Therefore, it makes
+	 * sense to delay one period before disabling the dclk.
+	 */
 	if (!enable) {
 		pwm_get_state(pwm, &curstate);
 		delay_us = DIV_ROUND_UP_ULL(curstate.period, NSEC_PER_USEC);
