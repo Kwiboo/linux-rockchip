@@ -321,6 +321,7 @@ struct rockchip_pwm_chip {
 	unsigned long is_clk_enabled;
 	bool vop_pwm_en; /* indicate voppwm mirror register state */
 	bool center_aligned;
+	bool oneshot_valid;
 	bool oneshot_en;
 	bool capture_en;
 	bool wave_en;
@@ -559,7 +560,7 @@ static void rockchip_pwm_config_v1(struct pwm_chip *chip, struct pwm_device *pwm
 		ctrl &= ~PWM_CLK_SEL_MASK;
 		ctrl |= PWM_SEL_SCALED_CLOCK;
 
-		pc->oneshot_en = true;
+		pc->oneshot_valid = true;
 		ctrl &= ~PWM_MODE_MASK;
 		ctrl |= PWM_ONESHOT;
 
@@ -582,7 +583,7 @@ static void rockchip_pwm_config_v1(struct pwm_chip *chip, struct pwm_device *pwm
 			dev_err(chip->dev, "Oneshot_count must be between 1 and %d.\n",
 				pc->data->oneshot_cnt_max);
 
-		pc->oneshot_en = false;
+		pc->oneshot_valid = false;
 		ctrl &= ~PWM_MODE_MASK;
 		ctrl |= PWM_CONTINUOUS;
 
@@ -649,7 +650,7 @@ static int rockchip_pwm_enable_v1(struct pwm_chip *chip, struct pwm_device *pwm,
 			val |= PWM_OUTPUT_CENTER;
 	}
 
-	if (pc->oneshot_en) {
+	if (pc->oneshot_valid) {
 		enable_conf &= ~PWM_MODE_MASK;
 		enable_conf |= PWM_ONESHOT;
 	} else if (pc->capture_en) {
@@ -676,6 +677,8 @@ static int rockchip_pwm_enable_v1(struct pwm_chip *chip, struct pwm_device *pwm,
 
 	if (!enable)
 		clk_disable(pc->clk);
+
+	pc->oneshot_en = pc->oneshot_valid ? enable : false;
 
 	return 0;
 }
@@ -828,17 +831,17 @@ static void rockchip_pwm_config_v4(struct pwm_chip *chip, struct pwm_device *pwm
 				state->duty_cycle, state->period);
 		}
 
-		pc->oneshot_en = true;
+		pc->oneshot_valid = true;
 	} else {
 		if (state->oneshot_count)
 			dev_err(chip->dev, "Oneshot_count must be between 1 and %d.\n",
 				pc->data->oneshot_cnt_max);
 
-		pc->oneshot_en = false;
+		pc->oneshot_valid = false;
 	}
 #endif
 
-	if (pc->oneshot_en) {
+	if (pc->oneshot_valid) {
 		writel_relaxed(PWM_MODE(ONESHOT_MODE) | PWM_ALIGNED_INVALID(true),
 			       pc->base + CTRL_V4);
 		writel_relaxed(offset, pc->base + OFFSET);
@@ -872,16 +875,18 @@ static int rockchip_pwm_enable_v4(struct pwm_chip *chip, struct pwm_device *pwm,
 	writel_relaxed(PWM_EN(enable) | PWM_CLK_EN(enable), pc->base + ENABLE);
 
 	/*
-	 * For pwm v4, the disable operation, which sets polarity to inactive state,
-	 * will not take effect until the end of current period. Therefore, it makes
-	 * sense to delay one period before disabling the dclk.
+	 * For pwm v4, the disable operation of continuous mode, which sets polarity
+	 * to inactive state, will not take effect until the end of current period.
+	 * Therefore, it makes sense to delay one period before disabling the dclk.
 	 */
-	if (!enable) {
+	if (!enable && !pc->oneshot_en) {
 		pwm_get_state(pwm, &curstate);
 		delay_us = DIV_ROUND_UP_ULL(curstate.period, NSEC_PER_USEC);
 		fsleep(delay_us);
 		clk_disable(pc->clk);
 	}
+
+	pc->oneshot_en = pc->oneshot_valid ? enable : false;
 
 	return 0;
 }
