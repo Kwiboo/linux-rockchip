@@ -820,7 +820,9 @@ static struct i2c_driver gt1x_ts_driver = {
 #if !defined(CONFIG_FB) && defined(CONFIG_PM)
 		   .pm = &gt1x_ts_pm_ops,
 #endif
+#if !IS_REACHABLE(CONFIG_TOUCHSCREEN_HYN)
 		   .probe_type = PROBE_PREFER_ASYNCHRONOUS,
+#endif
 		   },
 };
 
