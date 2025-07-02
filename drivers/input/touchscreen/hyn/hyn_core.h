@@ -87,12 +87,13 @@
 
 // #define __noscs __attribute__((__no_sanitize__("shadow-call-stack")))
 
+extern u8 hyn_log_level;
 #define HYN_INFO(fmt, args...) printk(KERN_INFO "[HYN]"fmt"\n", ##args)
-#define HYN_INFO2(fmt, args...) if(hyn_data->log_level > 0)printk(KERN_INFO "[HYN]"fmt"\n", ##args)
-#define HYN_INFO3(fmt, args...) if(hyn_data->log_level > 1)printk(KERN_INFO "[HYN]"fmt"\n", ##args)
-#define HYN_INFO4(fmt, args...) if(hyn_data->log_level > 2)printk(KERN_INFO "[HYN]"fmt"\n", ##args)
-#define HYN_ERROR(fmt, args...) printk(KERN_ERR "[HYN][Error]%s:"fmt"\n",__func__,##args)
-#define HYN_ENTER() printk(KERN_ERR "[HYN][enter]%s\n",__func__)
+#define HYN_INFO2(fmt, args...) if (hyn_log_level > 0) printk(KERN_INFO "[HYN]"fmt"\n", ##args)
+#define HYN_INFO3(fmt, args...) if (hyn_log_level > 1) printk(KERN_INFO "[HYN]"fmt"\n", ##args)
+#define HYN_INFO4(fmt, args...) if (hyn_log_level > 2) printk(KERN_INFO "[HYN]"fmt"\n", ##args)
+#define HYN_ERROR(fmt, args...) printk(KERN_ERR "[HYN][Error]%s:"fmt"\n", __func__, ##args)
+#define HYN_ENTER() HYN_INFO2("[enter]%s\n", __func__)
 
 #if HYN_GKI_VER
 // MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);

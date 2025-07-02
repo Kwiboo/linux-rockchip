@@ -17,6 +17,7 @@
 #include "hyn_core.h"
 #define HYN_DRIVER_NAME  "hyn_ts"
 
+u8 hyn_log_level;
 static struct hyn_ts_data *hyn_data = NULL;
 static const struct hyn_ts_fuc* hyn_fun = NULL;
 static const struct of_device_id hyn_of_match_table[] = {
@@ -88,14 +89,14 @@ static int hyn_parse_dt(struct hyn_ts_data *ts_data)
 		if (IS_ERR(dt->reset_gpio)) {
 			ret = PTR_ERR(dt->reset_gpio);
 			HYN_ERROR("failed to request reset GPIO: %d\n", ret);
-			return -EPROBE_DEFER;
+			return ret;
 		}
 
 		dt->irq_gpio = devm_gpiod_get(dev, "irq", GPIOD_ASIS);
 		if (IS_ERR(dt->irq_gpio)) {
 			ret = PTR_ERR(dt->irq_gpio);
 			HYN_ERROR("failed to request irq GPIO: %d\n", ret);
-			return -EPROBE_DEFER;
+			return ret;
 		}
 //pin_ctl
 		ret =-1;
@@ -680,7 +681,7 @@ static int hyn_ts_probe(struct spi_device *client)
 	ts_data->bus_type = bus_type;
 	ts_data->rp_buf.key_id = 0xFF;
 	ts_data->work_mode = NOMAL_MODE;
-	ts_data->log_level = 0;
+	hyn_log_level = 0;
 
 	hyn_data = ts_data;
 	ts_data->client = client;
@@ -869,7 +870,7 @@ static int hyn_ts_remove(struct spi_device *client)
 			hyn_esdcheck_switch(ts_data,DISABLE);
 			destroy_workqueue(ts_data->hyn_workqueue);
 		}
-		HYN_INFO("ts_remove1");
+		HYN_INFO2("ts_remove1");
 #if (HYN_APK_DEBUG_EN)
 		hyn_tool_fs_exit();
 #endif
@@ -878,11 +879,11 @@ static int hyn_ts_remove(struct spi_device *client)
 		hyn_gesture_exit(ts_data);
 #endif
 		hyn_release_sysfs(ts_data);
-		HYN_INFO("ts_remove2");
+		HYN_INFO2("ts_remove2");
 		if (!IS_ERR_OR_NULL(ts_data->input_dev)) {
 			input_unregister_device(ts_data->input_dev);
 		}
-		HYN_INFO("ts_remove3");
+		HYN_INFO2("ts_remove3");
 #if 0
 #if defined(CONFIG_FB)
 		fb_unregister_client(&ts_data->fb_notif);
@@ -904,7 +905,7 @@ static int hyn_ts_remove(struct spi_device *client)
 		if (!IS_ERR_OR_NULL(ts_data->plat_data.vdd_i2c)) {
 			regulator_put(ts_data->plat_data.vdd_i2c);
 		}
-		HYN_INFO("ts_remove4");
+		HYN_INFO2("ts_remove4");
 #if (I2C_USE_DMA==2)
 		if (!IS_ERR_OR_NULL(ts_data->dma_buff_va)) {
 			dma_free_coherent(NULL, 2048, ts_data->dma_buff_va, ts_data->dma_buff_pa);
@@ -912,7 +913,7 @@ static int hyn_ts_remove(struct spi_device *client)
 #endif
 		kfree(ts_data);
 		hyn_data = NULL;
-		HYN_INFO("ts_remove5");
+		HYN_INFO2("ts_remove5");
 	}
 #if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
 	return 0;

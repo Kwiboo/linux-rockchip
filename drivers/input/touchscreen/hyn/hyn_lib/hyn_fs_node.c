@@ -160,7 +160,7 @@ static  ssize_t hyn_dbg_store(struct device *dev,struct device_attribute *attr,c
 	}
 	else if(0 == strcmp(str,"log")){
 		hyn_get_word(&next_ptr,str);
-		hyn_fs_data->log_level = (u8)(str[0]-'0');
+		hyn_log_level = (u8)(str[0]-'0');
 	}
 	else if(0 == strcmp(str,"workmode")){
 		ret = hyn_get_word(&next_ptr,str);
