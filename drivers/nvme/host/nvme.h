@@ -161,6 +161,11 @@ enum nvme_quirks {
 	 * Disables simple suspend/resume path.
 	 */
 	NVME_QUIRK_FORCE_NO_SIMPLE_SUSPEND	= (1 << 20),
+
+	/*
+	 * Limit io queue depth to 32
+	 */
+	NVME_QUIRK_LIMIT_IOQD32			= (1 << 31),
 };
 
 /*

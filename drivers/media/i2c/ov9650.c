@@ -1106,9 +1106,7 @@ static int ov965x_g_frame_interval(struct v4l2_subdev *sd,
 {
 	struct ov965x *ov965x = to_ov965x(sd);
 
-	mutex_lock(&ov965x->lock);
 	fi->interval = ov965x->fiv->interval;
-	mutex_unlock(&ov965x->lock);
 
 	return 0;
 }

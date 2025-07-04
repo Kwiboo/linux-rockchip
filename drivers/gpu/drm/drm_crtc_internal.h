@@ -286,10 +286,31 @@ int drm_mode_page_flip_ioctl(struct drm_device *dev,
 			     void *data, struct drm_file *file_priv);
 
 /* drm_edid.c */
+#ifdef CONFIG_DRM_EDID
 void drm_mode_fixup_1366x768(struct drm_display_mode *mode);
 int drm_edid_override_show(struct drm_connector *connector, struct seq_file *m);
 int drm_edid_override_set(struct drm_connector *connector, const void *edid, size_t size);
 int drm_edid_override_reset(struct drm_connector *connector);
+#else
+static inline void drm_mode_fixup_1366x768(struct drm_display_mode *mode)
+{
+}
+
+static inline int drm_edid_override_show(struct drm_connector *connector, struct seq_file *m)
+{
+	return 0;
+}
+
+static inline int drm_edid_override_set(struct drm_connector *connector, const void *edid, size_t size)
+{
+	return 0;
+}
+
+static inline int drm_edid_override_reset(struct drm_connector *connector)
+{
+	return 0;
+}
+#endif
 
 /* drm_edid_load.c */
 #ifdef CONFIG_DRM_LOAD_EDID_FIRMWARE

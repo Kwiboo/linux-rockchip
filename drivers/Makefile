@@ -199,3 +199,7 @@ obj-$(CONFIG_DRM_ACCEL)		+= accel/
 obj-$(CONFIG_CDX_BUS)		+= cdx/
 
 obj-$(CONFIG_S390)		+= s390/
+obj-$(CONFIG_RK_FLASH)		+= rkflash/
+obj-$(CONFIG_RK_HEADSET)	+= headset_observe/
+obj-$(CONFIG_RK_NAND)		+= rk_nand/
+obj-$(CONFIG_ROCKCHIP_RKNPU)	+= rknpu/
