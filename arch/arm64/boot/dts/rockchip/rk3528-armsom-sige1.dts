@@ -150,7 +150,6 @@
 		pinctrl-0 = <&usb20_host1_drv_h>;
 		regulator-name = "vcc5v0_usb1_host";
 		regulator-always-on;
-		regulator-boot-on;
 		regulator-min-microvolt = <5000000>;
 		regulator-max-microvolt = <5000000>;
 		vin-supply = <&vcc5v0_sys>;
@@ -164,7 +163,6 @@
 		pinctrl-0 = <&usb20_host2_drv_h>;
 		regulator-name = "vcc5v0_usb2_host";
 		regulator-always-on;
-		regulator-boot-on;
 		regulator-min-microvolt = <5000000>;
 		regulator-max-microvolt = <5000000>;
 		vin-supply = <&vcc5v0_sys>;
@@ -225,22 +223,12 @@
 		regulator-settling-time-up-us = <250>;
 	};
 
-	rfkill {
-		compatible = "rfkill-gpio";
-		label = "rfkill-wlan";
+	sdio_pwrseq: sdio-pwrseq {
+		compatible = "mmc-pwrseq-simple";
 		pinctrl-names = "default";
-		pinctrl-0 = <&wifi_reg_on_h>;
-		radio-type = "wlan";
-		shutdown-gpios = <&gpio1 RK_PA6 GPIO_ACTIVE_HIGH>;
-	};
-
-	rfkill-bt {
-		compatible = "rfkill-gpio";
-		label = "rfkill-bt";
-		pinctrl-names = "default";
-		pinctrl-0 = <&bt_reg_on_h>;
-		radio-type = "bluetooth";
-		shutdown-gpios = <&gpio1 RK_PC1 GPIO_ACTIVE_HIGH>;
+		pinctrl-0 = <&wifi_reg_on_h>, <&clkm1_32k_out>;
+		post-power-on-delay-ms = <200>;
+		reset-gpios = <&gpio1 RK_PA6 GPIO_ACTIVE_LOW>;
 	};
 };
 
@@ -285,7 +273,6 @@
 		compatible = "haoyu,hym8563";
 		reg = <0x51>;
 		#clock-cells = <0>;
-		clock-output-names = "hym8563";
 		interrupt-parent = <&gpio4>;
 		interrupts = <RK_PA0 IRQ_TYPE_LEVEL_LOW>;
 		pinctrl-names = "default";
@@ -413,15 +400,30 @@
 	cap-sdio-irq;
 	disable-wp;
 	keep-power-in-suspend;
+	mmc-pwrseq = <&sdio_pwrseq>;
 	no-mmc;
 	no-sd;
 	non-removable;
 	pinctrl-names = "default";
-	pinctrl-0 = <&sdio0_bus4>, <&sdio0_clk>, <&sdio0_cmd>, <&clkm1_32k_out>;
+	pinctrl-0 = <&sdio0_bus4>, <&sdio0_clk>, <&sdio0_cmd>;
 	sd-uhs-sdr104;
 	vmmc-supply = <&vcc_3v3>;
 	vqmmc-supply = <&vcc_1v8>;
+	#address-cells = <1>;
+	#size-cells = <0>;
 	status = "okay";
+
+	wifi@1 {
+		compatible = "brcm,bcm4329-fmac";
+		reg = <1>;
+		clocks = <&cru CLK_DEEPSLOW>;
+		clock-names = "lpo";
+		interrupt-parent = <&gpio1>;
+		interrupts = <RK_PA7 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "host-wake";
+		pinctrl-names = "default";
+		pinctrl-0 = <&wifi_wake_host_h>;
+	};
 };
 
 &sdmmc {
@@ -442,8 +444,24 @@
 };
 
 &uart2 {
+	dma-names = "tx", "rx";
 	pinctrl-names = "default";
 	pinctrl-0 = <&uart2m1_xfer>, <&uart2m1_ctsn>, <&uart2m1_rtsn>;
 	uart-has-rtscts;
 	status = "okay";
+
+	bluetooth {
+		compatible = "brcm,bcm43438-bt";
+		clocks = <&cru CLK_DEEPSLOW>;
+		clock-names = "lpo";
+		device-wakeup-gpios = <&gpio3 RK_PC3 GPIO_ACTIVE_HIGH>;
+		interrupt-parent = <&gpio1>;
+		interrupts = <RK_PC2 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "host-wakeup";
+		pinctrl-names = "default";
+		pinctrl-0 = <&bt_reg_on_h>, <&bt_wake_host_h>, <&host_wake_bt_h>;
+		shutdown-gpios = <&gpio1 RK_PC1 GPIO_ACTIVE_HIGH>;
+		vbat-supply = <&vcc_3v3>;
+		vddio-supply = <&vcc_1v8>;
+	};
 };
