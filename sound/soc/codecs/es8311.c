@@ -686,8 +686,7 @@ static int es8311_parse_dt(struct i2c_client *client,
 	return 0;
 }
 
-static int es8311_i2c_probe(struct i2c_client *i2c_client,
-			    const struct i2c_device_id *id)
+static int es8311_i2c_probe(struct i2c_client *i2c_client)
 {
 	struct es8311_priv *es8311;
 	struct regmap *regmap;
