@@ -106,7 +106,7 @@ config PCIE_DW_DMATEST
 	  Enables support for the DW PCIe controller DMA test.
 
 config PCIE_DW_ROCKCHIP_EP
-	bool "Rockchip DesignWare PCIe EP controller"
+	tristate "Rockchip DesignWare PCIe EP controller"
 	select PCIE_DW
 	depends on ARCH_ROCKCHIP
 	depends on OF
