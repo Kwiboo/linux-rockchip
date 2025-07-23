@@ -2,6 +2,7 @@
 
 /dts-v1/;
 
+#include <dt-bindings/phy/phy.h>
 #include "rk3528-rock-2.dtsi"
 
 / {
@@ -23,6 +24,10 @@
 		regulator-max-microvolt = <5000000>;
 		vin-supply = <&vcc5v0_sys>;
 	};
+};
+
+&combphy {
+	status = "okay";
 };
 
 &gmac1 {
@@ -79,4 +84,17 @@
 			rockchip,pins = <1 RK_PC3 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
+};
+
+&usb_host0_xhci {
+	dr_mode = "host";
+	extcon = <&usb2phy>;
+	phys = <&usb2phy_otg>, <&combphy PHY_TYPE_USB3>;
+	phy-names = "usb2-phy", "usb3-phy";
+	status = "okay";
+};
+
+&usb2phy_otg {
+	phy-supply = <&vcc5v0_usb30_otg>;
+	status = "okay";
 };
