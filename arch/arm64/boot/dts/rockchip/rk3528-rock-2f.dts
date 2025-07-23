@@ -9,14 +9,23 @@
 	compatible = "radxa,rock-2f", "rockchip,rk3528";
 };
 
-&combphy {
-	status = "okay";
-};
-
 &pcie {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pciem1_pins>;
 	reset-gpios = <&gpio1 RK_PA2 GPIO_ACTIVE_HIGH>;
 	vpcie3v3-supply = <&vcc_3v3>;
+	status = "okay";
+};
+
+&usb_host0_xhci {
+	extcon = <&usb2phy>;
+	maximum-speed = "high-speed";
+	phys = <&usb2phy_otg>;
+	phy-names = "usb2-phy";
+	snps,dis_u2_susphy_quirk;
+	status = "okay";
+};
+
+&usb2phy_otg {
 	status = "okay";
 };
