@@ -296,7 +296,7 @@
 		     &gmac0_rgmii_clk
 		     &gmac0_rgmii_bus>;
 	tx_delay = <0x45>;
-	rx_delay = <0x4a>;
+	rx_delay = <0x00>;
 	status = "okay";
 };
 
@@ -311,7 +311,7 @@
 		     &gmac1_rgmii_clk
 		     &gmac1_rgmii_bus>;
 	tx_delay = <0x42>;
-	rx_delay = <0x4f>;
+	rx_delay = <0x00>;
 	status = "okay";
 };
 
