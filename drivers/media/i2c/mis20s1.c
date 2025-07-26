@@ -6,6 +6,7 @@
  *
  * V0.0X01.0X01 first version
  * V0.0X01.0X02 add support thunder boot
+ * V0.0X01.0X03 add support dcg mode
  */
 
 // #define DEBUG
@@ -30,14 +31,18 @@
 #include <linux/pinctrl/consumer.h>
 #include "../platform/rockchip/isp/rkisp_tb_helper.h"
 
-#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x02)
+#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x03)
 
 #define MIS20S1_LANES			2
 #define MIS20S1_BITS_PER_SAMPLE		12
-#define MIS20S1_LINK_FREQ_37125		222750000    //371250000  //37.125mbps
+#define MIS20S1_LINK_FREQ_222M		222750000 //445.5mbps
+#define MIS20S1_LINK_FREQ_445M		445500000 //891mbps
 
-#define PIXEL_RATE_WITH_315M_12BIT	(MIS20S1_LINK_FREQ_37125 * 2 * \
+#define PIXEL_RATE_WITH_222M_12BIT	(MIS20S1_LINK_FREQ_222M * 2 * \
 					MIS20S1_LANES / MIS20S1_BITS_PER_SAMPLE)
+#define PIXEL_RATE_WITH_445M_12BIT	(MIS20S1_LINK_FREQ_445M * 2 * \
+					MIS20S1_LANES / MIS20S1_BITS_PER_SAMPLE)
+
 #define MIS20S1_XVCLK_FREQ		27000000
 
 #define CHIP_ID				0x20e1
@@ -63,10 +68,10 @@
 #define MIS20S1_REG_ANA_GAIN_H		0x3106
 #define MIS20S1_REG_ANA_GAIN_L		0x3107
 #define MIS20S1_ONCE_GAIN_STEP		0x32
-#define MIS20S1_LCG_TO_HCG		0x5f
+#define MIS20S1_LCG_TO_HCG		0x5a
 #define MIS20S1_GAIN_MIN		MIS20S1_ONCE_GAIN_STEP
-#define MIS20S1_AGAIN_MAX		(MIS20S1_ONCE_GAIN_STEP * 32) /* just again */
-#define MIS20S1_GAIN_MAX		(MIS20S1_AGAIN_MAX * 16)
+#define MIS20S1_AGAIN_MAX		(MIS20S1_ONCE_GAIN_STEP * MIS20S1_LCG_TO_HCG  * 32 / 10) /* just again */
+#define MIS20S1_GAIN_MAX		(MIS20S1_AGAIN_MAX * 2)
 #define MIS20S1_GAIN_STEP		1
 #define MIS20S1_GAIN_DEFAULT		MIS20S1_ONCE_GAIN_STEP
 #define MIS20S1_FETCH_AGAIN_H(VAL)	(((VAL) >> 8) & 0x03)
@@ -122,7 +127,10 @@ struct mis20s1_mode {
 	u32 exp_def;
 	const struct regval *reg_list;
 	u32 hdr_mode;
+	u32 mclk;
+	u32 link_freq_idx;
 	u32 vc[PAD_MAX];
+	u8 bpp;
 };
 
 struct mis20s1 {
@@ -144,6 +152,8 @@ struct mis20s1 {
 	struct v4l2_ctrl	*digi_gain;
 	struct v4l2_ctrl	*hblank;
 	struct v4l2_ctrl	*vblank;
+	struct v4l2_ctrl	*pixel_rate;
+	struct v4l2_ctrl	*link_freq;
 	struct v4l2_ctrl	*test_pattern;
 	struct mutex		mutex;
 	bool			streaming;
@@ -155,6 +165,7 @@ struct mis20s1 {
 	const char		*module_name;
 	const char		*len_name;
 	u32			cur_vts;
+	u8			dcgData;
 	bool			is_thunderboot;
 	bool			is_first_streamoff;
 };
@@ -179,9 +190,9 @@ static const struct regval mis20s1_global_regs[] = {
  * Tline = 29.6us
  * NO1_PIS2308_1928x1088_VTS1125_HTS2200_VCO1782_PCLK74P25_BITCLK445p5_ACLK297_2LANE_raw12_202411111.ini
  */
-static const struct regval mis20s1_linear_12_1920x1080_regs[] = {
+static const struct regval mis20s1_linear_12_1920x1080_30fps_regs[] = {
 	{0x3006, 0x01},
-	{REG_DELAY, 0x05},  //delay 1ms
+	{REG_DELAY, 0x01},  //delay 1ms
 	{0x3006, 0x02},
 	{0x3018, 0x50},
 	{0x3113, 0x04},
@@ -211,7 +222,7 @@ static const struct regval mis20s1_linear_12_1920x1080_regs[] = {
 	{0x360c, 0x05},
 	{0x3612, 0x02},
 	{0x3613, 0x40},
-	{0x3615, 0xa0},
+	{0x3615, 0x90},
 	{0x361c, 0x05},
 	{0x3620, 0x05},
 	{0x3624, 0x02},
@@ -244,11 +255,10 @@ static const struct regval mis20s1_linear_12_1920x1080_regs[] = {
 	{0x3693, 0x64},
 	{0x3694, 0x05},
 	{0x36b3, 0x00},
-	{0x36b5, 0x02},
-	{0x36b6, 0x40},
-	{0x36b7, 0x02},
-	{0x36b8, 0xf0},
-	{0x36b9, 0xe4},
+	{0x36b6, 0x02},
+	{0x36b7, 0x40},
+	{0x36b8, 0x03},
+	{0x36b9, 0x00},
 	{0x36c2, 0x02},
 	{0x36c3, 0x4f},
 	{0x36c4, 0x02},
@@ -277,23 +287,36 @@ static const struct regval mis20s1_linear_12_1920x1080_regs[] = {
 	{0x375d, 0x02},
 	{0x375e, 0x4f},
 	{0x3760, 0xa0},
+	{0x3902, 0x3f},
 	{0x3903, 0x1b},
 	{0x3905, 0x0f},
-	{0x390a, 0x1f},
-	{0x390b, 0x1f},
-	{0x3a05, 0xfd},
-	{0x3a06, 0x52},
+	{0x390A, 0x10},
+	{0x390B, 0x1f},
+	{0x390c, 0x09},
+	{0x390d, 0x09},
+	{0x390e, 0x09},
+	{0x390f, 0x09},
+	{0x3910, 0x09},
+	{0x3911, 0x09},
+	{0x3913, 0x1c},
+	{0x3a05, 0x9d},
 	{0x3a08, 0x37},
-	{0x3a1b, 0x7f},
-	{0x3a1c, 0x3f},
-	{0x3a1d, 0x0f},
+	{0x3a0d, 0x0f},
+	{0x3a1b, 0x61},
+	{0x3a1c, 0x00},
+	{0x3a1d, 0x7f},
+	{0x3a1e, 0xdf},
 	{0x3a21, 0x0e},
 	{0x3b05, 0x3f},
 	{0x3b07, 0x01},
+	{0x3c03, 0x08},
+	{0x3c1a, 0x00},
 	{0x4102, 0x13},
-	{0x410e, 0x10},
+	{0x410e, 0x02},
 	{0x410f, 0x39},
 	{0x4303, 0x13},
+	{0x4304, 0x39},
+	{0x4309, 0x00},
 	{0x432E, 0x00},
 	{0x432F, 0x80},
 	{0x4330, 0x00},
@@ -313,12 +336,217 @@ static const struct regval mis20s1_linear_12_1920x1080_regs[] = {
 	{0x4368, 0x80},
 	{0x4402, 0x3f},
 	{0x4403, 0x12},
-	{0x3c1a, 0x00},
-	{0x3c03, 0x06},
+	{0x3b02, 0x07}, //mipi驱动能力设置，HS幅度在100-300mV左右
+	{0x3b03, 0x00},
 	{0x3c1a, 0x01},
 	{0x3031, 0x0c},
 	{0x3008, 0x01},
-	{0x4607, 0x14}, //en color pattern
+	{0x3006, 0x00},
+	//{REG_DELAY, 0x01},  //delay 1ms
+	//{0x300c, 0x01},
+	{REG_NULL, 0x00},
+};
+
+/*
+ * Input clock frequency:27M
+ * Image output size:1920x1080
+ * Output interface and data rate:MIPI 2Lane raw12 990Mbps -->891
+ * HTS = 3110/3111 =0x898
+ * VTS = 310e/310f =0x4E2 -- > 0x465
+ * Tline = Tline = 26.6us
+ * NO7_PIS2308_1920x1080_VTS1250_HTS2200_VCO1980_PCLK165_BITCLK990_ACLK396_2LANE_raw12_dol2_20250411_AD10_RAW12_xxxx.ini
+ */
+static const struct regval mis20s1_linear_12_1920x1080_60fps_regs[] = {
+	{0x3006, 0x01},
+	{REG_DELAY, 0x01}, //delay 1ms
+	{0x3006, 0x02},
+	{0x310c, 0x01},
+	{0x310f, 0x65},
+	{0x3113, 0x04},
+	{0x3115, 0x3b},
+	{0x3117, 0x04},
+	{0x3119, 0x83},
+	{0x3120, 0x1c}, //0x1c  linear_60fps      0x1d    hdr_30fps
+	{0x3123, 0x12},
+	{0x3205, 0xb2},
+	{0x3304, 0xc6}, //vts change (pll 0xdc vts 0x4E2) or (pll 0xc6 vts 0x465)
+	{0x3305, 0x72},
+	{0x3312, 0xc6},
+	{0x3314, 0x53},
+	{0x3316, 0x7c},
+	{0x3502, 0x0d},
+	{0x3603, 0x77},
+	{0x3604, 0x04},
+	{0x3605, 0x98},
+	{0x360b, 0x6d},
+	{0x360c, 0x04},
+	{0x360d, 0x98},
+	{0x3612, 0x02},
+	{0x3613, 0x3e},
+	{0x3615, 0x68},
+	{0x361c, 0x04},
+	{0x361d, 0x98},
+	{0x3620, 0x04},
+	{0x3621, 0x98},
+	{0x3624, 0x02},
+	{0x3625, 0x3e},
+	{0x3628, 0x04},
+	{0x3629, 0x98},
+	{0x362b, 0x14},
+	{0x362c, 0x04},
+	{0x362d, 0x84},
+	{0x362f, 0x0a},
+	{0x3630, 0x02},
+	{0x3631, 0x3e},
+	{0x3633, 0x50},
+	{0x3634, 0x01},
+	{0x3635, 0x29},
+	{0x3637, 0x50},
+	{0x3638, 0x01},
+	{0x3639, 0x20},
+	{0x363a, 0x01},
+	{0x363b, 0x47},
+	{0x363d, 0x6f},
+	{0x363f, 0xa1},
+	{0x3641, 0xc9},
+	{0x365b, 0xaa},
+	{0x365c, 0x02},
+	{0x365d, 0x2a},
+	{0x365e, 0x03},
+	{0x365f, 0x04},
+	{0x3660, 0x04},
+	{0x3661, 0x84},
+	{0x367D, 0x28},
+	{0x367b, 0x96},
+	{0x367c, 0x02},
+	{0x367d, 0x3e},
+	{0x367f, 0xf0},
+	{0x3680, 0x04},
+	{0x3681, 0x80},
+	{0x3683, 0x63},
+	{0x3685, 0x8b},
+	{0x3687, 0x96},
+	{0x3688, 0x02},
+	{0x3689, 0x3e},
+	{0x368b, 0xf0},
+	{0x368c, 0x04},
+	{0x368d, 0x98},
+	{0x368f, 0xea},
+	{0x3690, 0x02},
+	{0x3691, 0x40},
+	{0x3692, 0x03},
+	{0x3693, 0x44},
+	{0x3694, 0x04},
+	{0x3695, 0x9a},
+	{0x36af, 0x28},
+	{0x36b1, 0x96},
+	{0x36b3, 0x46},
+	{0x36b5, 0xaa},
+	{0x36b6, 0x02},
+	{0x36b7, 0x3e},
+	{0x36b8, 0x03},
+	{0x36b9, 0x04},
+	{0x36bb, 0x0a},
+	{0x36bd, 0x5b},
+	{0x36bf, 0x5b},
+	{0x36c1, 0x6f},
+	{0x36c2, 0x02},
+	{0x36c3, 0x3e},
+	{0x36c4, 0x02},
+	{0x36c5, 0x52},
+	{0x36df, 0x3c},
+	{0x36e1, 0xc6},
+	{0x36e3, 0x3c},
+	{0x36e5, 0xc6},
+	{0x36e7, 0x28},
+	{0x36e9, 0x3c},
+	{0x3702, 0x04},
+	{0x3703, 0x8e},
+	{0x3704, 0x04},
+	{0x3705, 0x98},
+	{0x3707, 0x3c},
+	{0x3709, 0xc6},
+	{0x370b, 0x3c},
+	{0x370d, 0xc6},
+	{0x3711, 0x0b},
+	{0x3713, 0xc0},
+	{0x371d, 0x02},
+	{0x371e, 0x66},
+	{0x3720, 0xb5},
+	{0x3722, 0x14},
+	{0x3723, 0x02},
+	{0x3724, 0x7a},
+	{0x3725, 0x02},
+	{0x3726, 0x28},
+	{0x3728, 0xa1},
+	{0x3729, 0x02},
+	{0x372a, 0x25},
+	{0x372b, 0x02},
+	{0x372c, 0x29},
+	{0x372e, 0xda},
+	{0x372f, 0x04},
+	{0x3730, 0x5d},
+	{0x3734, 0xaa},
+	{0x3738, 0xda},
+	{0x373c, 0xda},
+	{0x3741, 0x02},
+	{0x3742, 0x28},
+	{0x3743, 0x02},
+	{0x3744, 0xa1},
+	{0x375d, 0x02},
+	{0x375e, 0x3e},
+	{0x3760, 0xa0},
+	{0x3903, 0x1b},
+	{0x3905, 0x0f},
+	{0x390A, 0x10},
+	{0x390B, 0x1f},
+	{0x390c, 0x09},
+	{0x390d, 0x09},
+	{0x390e, 0x09},
+	{0x390f, 0x09},
+	{0x3910, 0x09},
+	{0x3911, 0x09},
+	{0x3913, 0x1c},
+	{0x3a0d, 0x0f},
+	{0x3a1b, 0x61},
+	{0x3a1c, 0x00},
+	{0x3a1d, 0x7f},
+	{0x3a1e, 0xdf},
+	{0x3a21, 0x0e},
+	{0x3b05, 0x3f},
+	{0x4102, 0x13},
+	{0x410e, 0x02},
+	{0x410f, 0x3a},
+	{0x412a, 0x02},
+	{0x412b, 0x3a},
+	{0x4303, 0x13},
+	{0x4304, 0x3a},
+	{0x4309, 0x00},
+	{0x432E, 0x00},
+	{0x432F, 0x80},
+	{0x4330, 0x00},
+	{0x4331, 0x80},
+	{0x4332, 0x00},
+	{0x4333, 0x80},
+	{0x4334, 0x00},
+	{0x4335, 0x80},
+	{0x4336, 0x13},
+	{0x4337, 0x3a},
+	{0x433c, 0x00},
+	{0x4361, 0x00},
+	{0x4362, 0x80},
+	{0x4363, 0x00},
+	{0x4364, 0x80},
+	{0x4365, 0x00},
+	{0x4366, 0x80},
+	{0x4367, 0x00},
+	{0x4368, 0x80},
+	{0x4402, 0x12},
+	{0x4403, 0x12},
+	{0x4607, 0x14},	 //固定bayer格式
+	{0x3008, 0x01},
+	{0x3031, 0x0c},
+	{0x3c1a, 0x01},
 	{0x3006, 0x00},
 	//{REG_DELAY, 0x01},  //delay 1ms
 	//{0x300c, 0x01},
@@ -337,14 +565,37 @@ static const struct mis20s1_mode supported_modes[] = {
 		.hts_def = 0x0898,
 		.vts_def = 0x0465,
 		.bus_fmt = MEDIA_BUS_FMT_SGRBG12_1X12,
-		.reg_list = mis20s1_linear_12_1920x1080_regs,
+		.reg_list = mis20s1_linear_12_1920x1080_30fps_regs,
 		.hdr_mode = NO_HDR,
+		.mclk = 27000000,
+		.link_freq_idx = 0,
+		.bpp = 12,
+		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+	},
+
+	{
+		.width = 1920,
+		.height = 1080,
+		.max_fps = {
+			.numerator = 10000,
+			.denominator = 600000,
+		},
+		.exp_def = 0x0052,
+		.hts_def = 0x0898,
+		.vts_def = 0x0465,
+		.bus_fmt = MEDIA_BUS_FMT_SGRBG12_1X12,
+		.reg_list = mis20s1_linear_12_1920x1080_60fps_regs,
+		.hdr_mode = NO_HDR,
+		.mclk = 27000000,
+		.link_freq_idx = 1,
+		.bpp = 12,
 		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
 	}
 };
 
 static const s64 link_freq_menu_items[] = {
-	MIS20S1_LINK_FREQ_37125
+	MIS20S1_LINK_FREQ_222M,
+	MIS20S1_LINK_FREQ_445M,
 };
 
 static const char *const mis20s1_test_pattern_menu[] = {
@@ -441,60 +692,95 @@ static void mis20s1_set_orientation_reg(struct mis20s1 *mis20s1, u32 en_flip_mir
 {
 	switch (en_flip_mir) {
 	case  0:
-		mis20s1_write_reg(mis20s1->client, 0x300c, MIS20S1_REG_VALUE_08BIT, 0x00);
+		mis20s1_write_reg(mis20s1->client, 0x300c,
+				  MIS20S1_REG_VALUE_08BIT, 0x00);
 		usleep_range(50000, 55000);
-		mis20s1_write_reg(mis20s1->client, 0x3007, MIS20S1_REG_VALUE_08BIT, 0x00);
-		mis20s1_write_reg(mis20s1->client, 0x300c, MIS20S1_REG_VALUE_08BIT, 0x01);
+		mis20s1_write_reg(mis20s1->client, 0x3007,
+				  MIS20S1_REG_VALUE_08BIT, 0x00);
+		mis20s1_write_reg(mis20s1->client, 0x300c,
+				  MIS20S1_REG_VALUE_08BIT, 0x01);
 		break;
 	case  1:
-		mis20s1_write_reg(mis20s1->client, 0x300c, MIS20S1_REG_VALUE_08BIT, 0x00);
+		mis20s1_write_reg(mis20s1->client, 0x300c,
+				  MIS20S1_REG_VALUE_08BIT, 0x00);
 		usleep_range(50000, 55000);
-		mis20s1_write_reg(mis20s1->client, 0x3007, MIS20S1_REG_VALUE_08BIT, 0x01);
-		mis20s1_write_reg(mis20s1->client, 0x300c, MIS20S1_REG_VALUE_08BIT, 0x01);
+		mis20s1_write_reg(mis20s1->client, 0x3007,
+				  MIS20S1_REG_VALUE_08BIT, 0x01);
+		mis20s1_write_reg(mis20s1->client, 0x300c,
+				  MIS20S1_REG_VALUE_08BIT, 0x01);
 		break;
 	case  2:
-		mis20s1_write_reg(mis20s1->client, 0x300c, MIS20S1_REG_VALUE_08BIT, 0x00);
+		mis20s1_write_reg(mis20s1->client, 0x300c,
+				  MIS20S1_REG_VALUE_08BIT, 0x00);
 		usleep_range(50000, 55000);
-		mis20s1_write_reg(mis20s1->client, 0x3007, MIS20S1_REG_VALUE_08BIT, 0x02);
-		mis20s1_write_reg(mis20s1->client, 0x300c, MIS20S1_REG_VALUE_08BIT, 0x01);
+		mis20s1_write_reg(mis20s1->client, 0x3007,
+				  MIS20S1_REG_VALUE_08BIT, 0x02);
+		mis20s1_write_reg(mis20s1->client, 0x300c,
+				  MIS20S1_REG_VALUE_08BIT, 0x01);
 		break;
 	case  3:
-		mis20s1_write_reg(mis20s1->client, 0x300c, MIS20S1_REG_VALUE_08BIT, 0x00);
+		mis20s1_write_reg(mis20s1->client, 0x300c,
+				  MIS20S1_REG_VALUE_08BIT, 0x00);
 		usleep_range(50000, 55000);
-		mis20s1_write_reg(mis20s1->client, 0x3007, MIS20S1_REG_VALUE_08BIT, 0x03);
-		mis20s1_write_reg(mis20s1->client, 0x300c, MIS20S1_REG_VALUE_08BIT, 0x01);
+		mis20s1_write_reg(mis20s1->client, 0x3007,
+				  MIS20S1_REG_VALUE_08BIT, 0x03);
+		mis20s1_write_reg(mis20s1->client, 0x300c,
+				  MIS20S1_REG_VALUE_08BIT, 0x01);
 		break;
 	default:
-		mis20s1_write_reg(mis20s1->client, 0x300c, MIS20S1_REG_VALUE_08BIT, 0x00);
+		mis20s1_write_reg(mis20s1->client, 0x300c,
+				  MIS20S1_REG_VALUE_08BIT, 0x00);
 		usleep_range(50000, 55000);
-		mis20s1_write_reg(mis20s1->client, 0x3007, MIS20S1_REG_VALUE_08BIT, 0x00);
-		mis20s1_write_reg(mis20s1->client, 0x300c, MIS20S1_REG_VALUE_08BIT, 0x01);
+		mis20s1_write_reg(mis20s1->client, 0x3007,
+				  MIS20S1_REG_VALUE_08BIT, 0x00);
+		mis20s1_write_reg(mis20s1->client, 0x300c,
+				  MIS20S1_REG_VALUE_08BIT, 0x01);
 		break;
 	}
+}
+
+static int pCus_dcgCheck(struct i2c_client *client, u8 *dcgData)
+{
+	u32 dcg_data = 0x0000;
+	int ret = 0;
+
+	ret = mis20s1_read_reg(client, 0x2003, MIS20S1_REG_VALUE_08BIT, &dcg_data);
+	if (dcg_data == 0 || dcg_data == 0xff) {
+		*dcgData = MIS20S1_LCG_TO_HCG;
+		dev_info(&(client->dev), "----- dcgData define data:%d -----\n", *dcgData);
+		return 0;
+	}
+	*dcgData = (dcg_data & 0x0f) * 10;
+	ret |= mis20s1_read_reg(client, 0x2004, MIS20S1_REG_VALUE_08BIT, &dcg_data);
+	*dcgData = *dcgData + ((dcg_data & 0xfc) >> 2);
+	dev_info(&(client->dev), "----- dcgData: %d -----\n", *dcgData);
+	return ret;
 }
 
 static int mis20s1_set_gain_reg(struct mis20s1 *mis20s1, u32 gain)
 {
 	u32 coarse_again = 0;
 	u32 dgain = 0x100;
+	u32 againMax = 32 * mis20s1->dcgData * MIS20S1_ONCE_GAIN_STEP / 10;
 	int ret = 0;
 
 	//struct device *dev = &mis20s1->client->dev;
 	if (gain > MIS20S1_GAIN_MAX - 1)
 		gain = MIS20S1_GAIN_MAX - 1;
 
-	if (gain < MIS20S1_LCG_TO_HCG * MIS20S1_ONCE_GAIN_STEP / 10) {
+	if (gain < mis20s1->dcgData * MIS20S1_ONCE_GAIN_STEP / 10) {
 		coarse_again = 1024 - (1024 * MIS20S1_ONCE_GAIN_STEP / gain);
 		mis20s1_write_reg(mis20s1->client, 0x310c, MIS20S1_REG_VALUE_08BIT, 0x00);
-	} else if (gain <= MIS20S1_AGAIN_MAX) {
-		coarse_again = 1024 - (1024 * MIS20S1_ONCE_GAIN_STEP * MIS20S1_LCG_TO_HCG) / gain / 10;
+	} else if (gain <= againMax) {
+		coarse_again = 1024 - (1024 * MIS20S1_ONCE_GAIN_STEP * mis20s1->dcgData) / gain / 10;
 		mis20s1_write_reg(mis20s1->client, 0x310c, MIS20S1_REG_VALUE_08BIT, 0x01);
 	} else {
-		coarse_again = MIS20S1_AGAIN_MAX;
-		dgain = (gain * 256  / MIS20S1_AGAIN_MAX);
+		coarse_again = 992;
+		mis20s1_write_reg(mis20s1->client, 0x310c, MIS20S1_REG_VALUE_08BIT, 0x01);
+		dgain = (gain * 256  / againMax);
 	}
-	dev_info(&(mis20s1->client->dev), "coarse_again = %d dgain = %d\n ",
-		 coarse_again, dgain);
+	dev_info(&(mis20s1->client->dev), "dcgData = %d coarse_again = %d dgain = %d\n ",
+		 mis20s1->dcgData, coarse_again, dgain);
 
 	ret |= mis20s1_write_reg(mis20s1->client,
 				 MIS20S1_REG_DIG_GAIN_H,
@@ -542,6 +828,10 @@ mis20s1_find_best_fit(struct v4l2_subdev_format *fmt)
 		if (cur_best_fit_dist == -1 || dist < cur_best_fit_dist) {
 			cur_best_fit_dist = dist;
 			cur_best_fit = i;
+		} else if (dist == cur_best_fit_dist &&
+			   framefmt->code == supported_modes[i].bus_fmt) {
+			cur_best_fit = i;
+			break;
 		}
 	}
 
@@ -555,6 +845,8 @@ static int mis20s1_set_fmt(struct v4l2_subdev *sd,
 	struct mis20s1 *mis20s1 = to_mis20s1(sd);
 	const struct mis20s1_mode *mode;
 	s64 h_blank, vblank_def;
+	u64 dst_link_freq = 0;
+	u64 dst_pixel_rate = 0;
 
 	mutex_lock(&mis20s1->mutex);
 
@@ -579,6 +871,13 @@ static int mis20s1_set_fmt(struct v4l2_subdev *sd,
 		__v4l2_ctrl_modify_range(mis20s1->vblank, vblank_def,
 					 MIS20S1_VTS_MAX - mode->height,
 					 1, vblank_def);
+		dst_link_freq = mode->link_freq_idx;
+		dst_pixel_rate = (u32)link_freq_menu_items[mode->link_freq_idx] /
+				 mode->bpp * 2 * MIS20S1_LANES;
+		__v4l2_ctrl_s_ctrl_int64(mis20s1->pixel_rate,
+					 dst_pixel_rate);
+		__v4l2_ctrl_s_ctrl(mis20s1->link_freq,
+				   dst_link_freq);
 		mis20s1->cur_fps = mode->max_fps;
 	}
 
@@ -649,7 +948,6 @@ static int mis20s1_enum_frame_sizes(struct v4l2_subdev *sd,
 	return 0;
 }
 
-
 static int mis20s1_enable_test_pattern(struct mis20s1 *mis20s1, u32 pattern)
 {
 	u32 val = 0;
@@ -678,6 +976,77 @@ static int mis20s1_g_frame_interval(struct v4l2_subdev *sd,
 		fi->interval = mis20s1->cur_fps;
 	else
 		fi->interval = mode->max_fps;
+
+	return 0;
+}
+
+static const struct mis20s1_mode *mis20s1_find_mode(struct mis20s1 *mis20s1, int fps)
+{
+	const struct mis20s1_mode *mode = NULL;
+	const struct mis20s1_mode *match = NULL;
+	int cur_fps = 0;
+	int i = 0;
+
+	for (i = 0; i < ARRAY_SIZE(supported_modes); i++) {
+		mode = &supported_modes[i];
+		if (mode->width == mis20s1->cur_mode->width &&
+		    mode->height == mis20s1->cur_mode->height &&
+		    mode->hdr_mode == mis20s1->cur_mode->hdr_mode &&
+		    mode->bus_fmt == mis20s1->cur_mode->bus_fmt) {
+			cur_fps = DIV_ROUND_CLOSEST(mode->max_fps.denominator, mode->max_fps.numerator);
+			if (cur_fps == fps) {
+				match = mode;
+				break;
+			}
+		}
+	}
+	return match;
+}
+
+static int mis20s1_s_frame_interval(struct v4l2_subdev *sd,
+				    struct v4l2_subdev_frame_interval *fi)
+{
+	struct mis20s1 *mis20s1 = to_mis20s1(sd);
+	const struct mis20s1_mode *mode = NULL;
+	struct v4l2_fract *fract = &fi->interval;
+	s64 h_blank, vblank_def;
+	u64 pixel_rate = 0;
+	int fps;
+
+	if (mis20s1->streaming)
+		return -EBUSY;
+
+	if (fi->pad != 0)
+		return -EINVAL;
+
+	if (fract->numerator == 0) {
+		v4l2_err(sd, "error param, check interval param\n");
+		return -EINVAL;
+	}
+	fps = DIV_ROUND_CLOSEST(fract->denominator, fract->numerator);
+	mode = mis20s1_find_mode(mis20s1, fps);
+	if (mode == NULL) {
+		v4l2_err(sd, "couldn't match fi\n");
+		return -EINVAL;
+	}
+
+	mis20s1->cur_mode = mode;
+
+	h_blank = mode->hts_def - mode->width;
+	__v4l2_ctrl_modify_range(mis20s1->hblank, h_blank,
+				 h_blank, 1, h_blank);
+	vblank_def = mode->vts_def - mode->height;
+	__v4l2_ctrl_modify_range(mis20s1->vblank, vblank_def,
+				 MIS20S1_VTS_MAX - mode->height,
+				 1, vblank_def);
+	pixel_rate = (u32)link_freq_menu_items[mode->link_freq_idx] /
+		     mode->bpp * 2 * MIS20S1_LANES;
+
+	__v4l2_ctrl_s_ctrl_int64(mis20s1->pixel_rate,
+				 pixel_rate);
+	__v4l2_ctrl_s_ctrl(mis20s1->link_freq,
+			   mode->link_freq_idx);
+	mis20s1->cur_fps = mode->max_fps;
 
 	return 0;
 }
@@ -713,10 +1082,84 @@ static void mis20s1_get_module_inf(struct mis20s1 *mis20s1,
 	strscpy(inf->base.lens, mis20s1->len_name, sizeof(inf->base.lens));
 }
 
+static int mis20s1_get_channel_info(struct mis20s1 *mis20s1, struct rkmodule_channel_info *ch_info)
+{
+	if (ch_info->index < PAD0 || ch_info->index >= PAD_MAX)
+		return -EINVAL;
+	ch_info->vc = mis20s1->cur_mode->vc[ch_info->index];
+	ch_info->width = mis20s1->cur_mode->width;
+	ch_info->height = mis20s1->cur_mode->height;
+	ch_info->bus_fmt = mis20s1->cur_mode->bus_fmt;
+	return 0;
+}
+
+static int mis20s1_set_setting(struct mis20s1 *mis20s1, struct rk_sensor_setting *setting)
+{
+	int i = 0;
+	int cur_fps = 0;
+	s64 h_blank, vblank_def;
+	u64 pixel_rate = 0;
+	const struct mis20s1_mode *mode = NULL;
+	const struct mis20s1_mode *match = NULL;
+
+	dev_info(&mis20s1->client->dev,
+		"sensor setting: %d x %d, fps:%d fmt:%d, mode:%d\n",
+		setting->width, setting->height,
+		setting->fps, setting->fmt, setting->mode);
+
+	for (i = 0; i < ARRAY_SIZE(supported_modes); i++) {
+		mode = &supported_modes[i];
+		if (mode->width == setting->width &&
+		    mode->height == setting->height &&
+		    mode->hdr_mode == setting->mode &&
+		    mode->bus_fmt == setting->fmt) {
+			cur_fps = DIV_ROUND_CLOSEST(mode->max_fps.denominator, mode->max_fps.numerator);
+			if (cur_fps == setting->fps) {
+				match = mode;
+				break;
+			}
+		}
+	}
+
+	if (match) {
+		dev_info(&mis20s1->client->dev, "-----%s: match the support mode, mode idx:%d-----\n",
+			__func__, i);
+		mis20s1->cur_mode = mode;
+
+		h_blank = mode->hts_def - mode->width;
+		__v4l2_ctrl_modify_range(mis20s1->hblank, h_blank,
+					 h_blank, 1, h_blank);
+		vblank_def = mode->vts_def - mode->height;
+		__v4l2_ctrl_modify_range(mis20s1->vblank, vblank_def,
+					 MIS20S1_VTS_MAX - mode->height,
+					 1, vblank_def);
+		__v4l2_ctrl_s_ctrl(mis20s1->link_freq, mode->link_freq_idx);
+		pixel_rate = (u32)link_freq_menu_items[mode->link_freq_idx] /
+			     mode->bpp * 2 * MIS20S1_LANES;
+		__v4l2_ctrl_s_ctrl_int64(mis20s1->pixel_rate, pixel_rate);
+		dev_info(&mis20s1->client->dev, "freq_idx:%d pixel_rate:%lld\n",
+			mode->link_freq_idx, pixel_rate);
+
+		mis20s1->cur_vts = mode->vts_def;
+		mis20s1->cur_fps = mode->max_fps;
+
+		dev_info(&mis20s1->client->dev, "hts_def:%d cur_vts:%d cur_fps:%d\n",
+			mode->hts_def, mode->vts_def,
+			mis20s1->cur_fps.denominator / mis20s1->cur_fps.numerator);
+	} else {
+		dev_err(&mis20s1->client->dev, "couldn't match the support modes\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static long mis20s1_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 {
 	struct mis20s1 *mis20s1 = to_mis20s1(sd);
 	struct rkmodule_hdr_cfg *hdr;
+	struct rkmodule_channel_info *ch_info;
+	struct rk_sensor_setting *setting;
 	u32 i, h, w;
 	long ret = 0;
 	u32 stream = 0;
@@ -768,6 +1211,14 @@ static long mis20s1_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 			ret = mis20s1_write_reg(mis20s1->client, MIS20S1_REG_IMAGE_EN_MODE,
 						MIS20S1_REG_VALUE_08BIT, MIS20S1_REG_IMAGE_DISABLE);
 		break;
+	case RKMODULE_GET_CHANNEL_INFO:
+		ch_info = (struct rkmodule_channel_info *)arg;
+		ret = mis20s1_get_channel_info(mis20s1, ch_info);
+		break;
+	case RKCIS_CMD_SELECT_SETTING:
+		setting = (struct rk_sensor_setting *)arg;
+		ret = mis20s1_set_setting(mis20s1, setting);
+		break;
 	default:
 		ret = -ENOIOCTLCMD;
 		break;
@@ -784,6 +1235,8 @@ static long mis20s1_compat_ioctl32(struct v4l2_subdev *sd,
 	struct rkmodule_inf *inf;
 	struct rkmodule_hdr_cfg *hdr;
 	struct preisp_hdrae_exp_s *hdrae;
+	struct rkmodule_channel_info *ch_info;
+	struct rk_sensor_setting *setting;
 	long ret;
 	u32 stream = 0;
 
@@ -851,6 +1304,35 @@ static long mis20s1_compat_ioctl32(struct v4l2_subdev *sd,
 		else
 			ret = -EFAULT;
 		break;
+	case RKMODULE_GET_CHANNEL_INFO:
+		ch_info = kzalloc(sizeof(*ch_info), GFP_KERNEL);
+		if (!ch_info) {
+			ret = -ENOMEM;
+			return ret;
+		}
+
+		ret = mis20s1_ioctl(sd, cmd, ch_info);
+		if (!ret) {
+			ret = copy_to_user(up, ch_info, sizeof(*ch_info));
+			if (ret)
+				ret = -EFAULT;
+		}
+		kfree(ch_info);
+		break;
+	case RKCIS_CMD_SELECT_SETTING:
+		setting = kzalloc(sizeof(*setting), GFP_KERNEL);
+		if (!setting) {
+			ret = -ENOMEM;
+			return ret;
+		}
+
+		ret = copy_from_user(setting, up, sizeof(*setting));
+		if (!ret)
+			ret = mis20s1_ioctl(sd, cmd, setting);
+		else
+			ret = -EFAULT;
+		kfree(setting);
+		break;
 	default:
 		ret = -ENOIOCTLCMD;
 		break;
@@ -874,13 +1356,13 @@ static int __mis20s1_start_stream(struct mis20s1 *mis20s1)
 			return ret;
 
 		ret = mis20s1_write_reg(mis20s1->client, MIS20S1_REG_CTRL_MODE,
-				 MIS20S1_REG_VALUE_08BIT, MIS20S1_MODE_STREAMING);
+					MIS20S1_REG_VALUE_08BIT, MIS20S1_MODE_STREAMING);
 		if (ret)
 			return ret;
 		usleep_range(1000, 2000);
 	}
 	ret = mis20s1_write_reg(mis20s1->client, MIS20S1_REG_IMAGE_EN_MODE,
-				 MIS20S1_REG_VALUE_08BIT, MIS20S1_REG_IMAGE_ABLE);
+				MIS20S1_REG_VALUE_08BIT, MIS20S1_REG_IMAGE_ABLE);
 	return ret;
 }
 
@@ -893,7 +1375,7 @@ static int __mis20s1_stop_stream(struct mis20s1 *mis20s1)
 		pm_runtime_put(&mis20s1->client->dev);
 	}
 	ret = mis20s1_write_reg(mis20s1->client, MIS20S1_REG_CTRL_MODE,
-				 MIS20S1_REG_VALUE_08BIT, MIS20S1_MODE_SW_STANDBY);
+				MIS20S1_REG_VALUE_08BIT, MIS20S1_MODE_SW_STANDBY);
 	ret |= mis20s1_write_reg(mis20s1->client, MIS20S1_REG_IMAGE_EN_MODE,
 				 MIS20S1_REG_VALUE_08BIT, MIS20S1_REG_IMAGE_DISABLE);
 
@@ -1154,6 +1636,7 @@ static const struct v4l2_subdev_core_ops mis20s1_core_ops = {
 static const struct v4l2_subdev_video_ops mis20s1_video_ops = {
 	.s_stream = mis20s1_s_stream,
 	.g_frame_interval = mis20s1_g_frame_interval,
+	.s_frame_interval = mis20s1_s_frame_interval,
 };
 
 static const struct v4l2_subdev_pad_ops mis20s1_pad_ops = {
@@ -1192,7 +1675,7 @@ static int mis20s1_set_ctrl(struct v4l2_ctrl *ctrl)
 	switch (ctrl->id) {
 	case V4L2_CID_VBLANK:
 		/* Update max exposure while meeting expected vblanking */
-		max = mis20s1->cur_mode->height + ctrl->val - 1;
+		max = mis20s1->cur_mode->height + ctrl->val - 4;
 		__v4l2_ctrl_modify_range(mis20s1->exposure,
 					 mis20s1->exposure->minimum, max,
 					 mis20s1->exposure->step,
@@ -1285,10 +1768,11 @@ static int mis20s1_initialize_controls(struct mis20s1 *mis20s1)
 {
 	const struct mis20s1_mode *mode;
 	struct v4l2_ctrl_handler *handler;
-	struct v4l2_ctrl *ctrl;
 	s64 exposure_max, vblank_def;
 	u32 h_blank;
 	int ret;
+	u64 dst_link_freq = 0;
+	u64 dst_pixel_rate = 0;
 
 	handler = &mis20s1->ctrl_handler;
 	mode = mis20s1->cur_mode;
@@ -1297,13 +1781,19 @@ static int mis20s1_initialize_controls(struct mis20s1 *mis20s1)
 		return ret;
 	handler->lock = &mis20s1->mutex;
 
-	ctrl = v4l2_ctrl_new_int_menu(handler, NULL, V4L2_CID_LINK_FREQ,
-				      0, 0, link_freq_menu_items);
-	if (ctrl)
-		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	mis20s1->link_freq = v4l2_ctrl_new_int_menu(handler, NULL, V4L2_CID_LINK_FREQ,
+			     0, 0, link_freq_menu_items);
+	if (mis20s1->link_freq)
+		mis20s1->link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
-	v4l2_ctrl_new_std(handler, NULL, V4L2_CID_PIXEL_RATE,
-			  0, PIXEL_RATE_WITH_315M_12BIT, 1, PIXEL_RATE_WITH_315M_12BIT);
+	dst_link_freq = mode->link_freq_idx;
+	/* pixel rate = link frequency * 2 * lanes / BITS_PER_SAMPLE */
+	dst_pixel_rate = (u32)link_freq_menu_items[mode->link_freq_idx] /
+			 mode->bpp * 2 * MIS20S1_LANES;
+	mis20s1->pixel_rate = v4l2_ctrl_new_std(handler, NULL, V4L2_CID_PIXEL_RATE,
+						0, PIXEL_RATE_WITH_445M_12BIT, 1, dst_pixel_rate);
+
+	__v4l2_ctrl_s_ctrl(mis20s1->link_freq, dst_link_freq);
 
 	h_blank = mode->hts_def - mode->width;
 	mis20s1->hblank = v4l2_ctrl_new_std(handler, NULL, V4L2_CID_HBLANK,
@@ -1484,6 +1974,7 @@ static int mis20s1_probe(struct i2c_client *client,
 	ret = mis20s1_check_sensor_id(mis20s1, client);
 	if (ret)
 		goto err_power_off;
+	pCus_dcgCheck(mis20s1->client, &mis20s1->dcgData);
 
 #ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
 	sd->internal_ops = &mis20s1_internal_ops;
