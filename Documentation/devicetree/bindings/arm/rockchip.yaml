@@ -882,9 +882,11 @@ properties:
           - const: radxa,cm3i
           - const: rockchip,rk3568
 
-      - description: Radxa E20C
+      - description: Radxa E20C/E24C
         items:
-          - const: radxa,e20c
+          - enum:
+              - radxa,e20c
+              - radxa,e24c
           - const: rockchip,rk3528
 
       - description: Radxa E52C
