@@ -197,6 +197,7 @@
 };
 
 &gmac1 {
+	/delete-property/ snps,tso;
 	clock_in_out = "output";
 	phy-mode = "rgmii-id";
 	phy-supply = <&vdd_switch>;
@@ -362,6 +363,93 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&rtc_int_l>;
 		wakeup-source;
+	};
+};
+
+&mdio1 {
+	ethernet-switch@1d {
+		compatible = "realtek,rtl8365mb";
+		reg = <0x1d>;
+		interrupt-parent = <&switch_intc>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&gmac1_rstn_l>, <&rtl8367rb_eint>;
+		reset-gpios = <&gpio4 RK_PC2 GPIO_ACTIVE_LOW>;
+
+		ethernet-ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			ethernet-port@0 {
+				reg = <0>;
+				label = "wan";
+				phy-handle = <&switchphy0>;
+			};
+
+			ethernet-port@1 {
+				reg = <1>;
+				label = "lan1";
+				phy-handle = <&switchphy1>;
+			};
+
+			ethernet-port@2 {
+				reg = <2>;
+				label = "lan2";
+				phy-handle = <&switchphy2>;
+			};
+
+			ethernet-port@3 {
+				reg = <3>;
+				label = "lan3";
+				phy-handle = <&switchphy3>;
+			};
+
+			ethernet-port@6 {
+				reg = <6>;
+				ethernet = <&gmac1>;
+				phy-mode = "rgmii";
+				rx-internal-delay-ps = <2100>;
+				tx-internal-delay-ps = <2000>;
+
+				fixed-link {
+					full-duplex;
+					pause;
+					speed = <1000>;
+				};
+			};
+		};
+
+		switch_intc: interrupt-controller {
+			interrupt-parent = <&gpio1>;
+			interrupts = <RK_PC2 IRQ_TYPE_LEVEL_LOW>;
+			interrupt-controller;
+			#address-cells = <0>;
+			#interrupt-cells = <1>;
+		};
+
+		mdio {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			switchphy0: ethernet-phy@0 {
+				reg = <0>;
+				interrupts = <0>;
+			};
+
+			switchphy1: ethernet-phy@1 {
+				reg = <1>;
+				interrupts = <1>;
+			};
+
+			switchphy2: ethernet-phy@2 {
+				reg = <2>;
+				interrupts = <2>;
+			};
+
+			switchphy3: ethernet-phy@3 {
+				reg = <3>;
+				interrupts = <3>;
+			};
+		};
 	};
 };
 
