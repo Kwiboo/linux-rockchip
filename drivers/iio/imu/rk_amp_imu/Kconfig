@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+config ROCKCHIP_AMP_IMU
+	tristate "Rockchip AMP IMU driver"
+	depends on ROCKCHIP_AMP_RPMSG_SHAREDMEM
+	select IIO_BUFFER
+	help
+	  This driver supports the Rockchip AMP IMU driver
