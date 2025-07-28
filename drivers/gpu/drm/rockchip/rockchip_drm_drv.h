@@ -15,6 +15,7 @@
 #include <drm/drm_fourcc.h>
 #include <drm/drm_edid.h>
 #include <drm/drm_gem.h>
+#include <drm/drm_panel.h>
 #include <drm/rockchip_drm.h>
 
 #include <linux/i2c.h>
@@ -23,8 +24,6 @@
 #include <linux/component.h>
 
 #include <soc/rockchip/rockchip_dmc.h>
-
-#include "../panel/panel-simple.h"
 
 #include "rockchip_drm_debugfs.h"
 
@@ -145,7 +144,7 @@ struct rockchip_drm_sub_dev {
 	struct list_head list;
 	struct drm_connector *connector;
 	struct device_node *of_node;
-	int (*loader_protect)(struct drm_encoder *encoder, bool on);
+	int (*loader_protect)(struct rockchip_drm_sub_dev *sub_dev, bool on);
 	void (*update_vfp_for_vrr)(struct drm_connector *connector, struct drm_display_mode *mode,
 				   int vfp);
 };
@@ -275,6 +274,7 @@ struct rockchip_crtc_state {
 	int output_mode;
 	int output_bpc;
 	int output_flags;
+	int data_map_mode;
 	bool enable_afbc;
 	/**
 	 * @splice_mode: enabled when display a hdisplay > 4096 on rk3588
@@ -298,6 +298,8 @@ struct rockchip_crtc_state {
 	 * So they are mutually exclusive.
 	 */
 	bool sharp_en;
+
+	bool dimming_changed;
 
 	struct drm_tv_connector_state *tv_state;
 	int left_margin;
@@ -348,6 +350,7 @@ struct rockchip_crtc_state {
 	struct drm_property_blob *post_csc_data;
 	struct drm_property_blob *post_sharp_data;
 	struct drm_property_blob *cubic_lut_data;
+	struct drm_property_blob *dimming_data;
 
 	int request_refresh_rate;
 	int max_refresh_rate;
@@ -580,6 +583,9 @@ struct rockchip_drm_private {
 	struct drm_property *connector_id_prop;
 	struct drm_property *split_area_prop;
 
+	/* private local dimming prop */
+	struct drm_property *dimming_data_prop;
+
 	const struct rockchip_crtc_funcs *crtc_funcs[ROCKCHIP_MAX_CRTC];
 
 	uint64_t iommu_fault_count;
@@ -689,6 +695,7 @@ const char *rockchip_drm_modifier_to_string(uint64_t modifier);
 void rockchip_drm_reset_iommu_fault_handler_rate_limit(void);
 void rockchip_drm_send_error_event(struct rockchip_drm_private *priv,
 				   enum rockchip_drm_error_event_type event);
+int rockchip_drm_panel_loader_protect(struct drm_panel *panel, bool on);
 
 __printf(3, 4)
 void rockchip_drm_dbg(const struct device *dev,
