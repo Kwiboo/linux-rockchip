@@ -36,7 +36,6 @@
 #include <drm/drm_gem_atomic_helper.h>
 #include <drm/drm_gem_framebuffer_helper.h>
 #include <drm/drm_probe_helper.h>
-#include <drm/drm_self_refresh_helper.h>
 #include <drm/drm_vblank.h>
 #include <drm/drm_writeback.h>
 
@@ -4839,7 +4838,7 @@ static void vop_tv_config_update(struct drm_crtc *crtc,
 
 	if (vop_data->feature & VOP_FEATURE_OUTPUT_10BIT)
 		brightness = interpolate(0, -128, 100, 127, s->tv_state->brightness);
-	else if (VOP_MAJOR(vop->version) == 2 && VOP_MINOR(vop->version) == 6) /* px30 vopb */
+	else if (vop->version == VOP_VERSION_PX30_BIG || vop->version >= VOP_VERSION_RK3506)
 		brightness = interpolate(0, -64, 100, 63, s->tv_state->brightness);
 	else
 		brightness = interpolate(0, -32, 100, 31, s->tv_state->brightness);
@@ -5743,11 +5742,6 @@ static int vop_create_crtc(struct vop *vop)
 	VOP_ATTACH_MODE_CONFIG_PROP(tv_bottom_margin_property, 100);
 #undef VOP_ATTACH_MODE_CONFIG_PROP
 	vop_crtc_create_feature_property(vop, crtc);
-	ret = drm_self_refresh_helper_init(crtc);
-	if (ret)
-		DRM_DEV_DEBUG_KMS(vop->dev,
-				  "Failed to init %s with SR helpers %d, ignoring\n",
-				  crtc->name, ret);
 
 	if (vop->lut_regs) {
 		u16 *r_base, *g_base, *b_base;
@@ -5755,8 +5749,10 @@ static int vop_create_crtc(struct vop *vop)
 
 		vop->lut = devm_kmalloc_array(dev, lut_len, sizeof(*vop->lut),
 					      GFP_KERNEL);
-		if (!vop->lut)
+		if (!vop->lut) {
+			ret = -ENOMEM;
 			goto err_unregister_crtc_funcs;
+		}
 
 		if (vop_of_init_display_lut(vop)) {
 			for (i = 0; i < lut_len; i++) {
@@ -5798,8 +5794,6 @@ static void vop_destroy_crtc(struct vop *vop)
 	struct drm_crtc *crtc = &vop->rockchip_crtc.crtc;
 	struct drm_device *drm_dev = vop->drm_dev;
 	struct drm_plane *plane, *tmp;
-
-	drm_self_refresh_helper_cleanup(crtc);
 
 	of_node_put(crtc->port);
 

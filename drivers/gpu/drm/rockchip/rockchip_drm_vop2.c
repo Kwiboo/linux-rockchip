@@ -14,7 +14,6 @@
 #include <drm/drm_gem_framebuffer_helper.h>
 #include <drm/drm_plane_helper.h>
 #include <drm/drm_probe_helper.h>
-#include <drm/drm_self_refresh_helper.h>
 
 #include <drm/drm_writeback.h>
 #ifdef CONFIG_DRM_ANALOGIX_DP
@@ -1111,6 +1110,8 @@ static inline void rk3588_vop2_dsc_cfg_done(struct drm_crtc *crtc);
 static inline void vop2_cfg_done(struct drm_crtc *crtc);
 static void vop2_wait_for_fs_by_done_bit_status(struct vop2_video_port *vp);
 static int vop2_clk_reset(struct reset_control *rstc);
+static inline bool vop2_cluster_sub_window(struct vop2_win *win);
+static inline bool vop2_multi_area_sub_window(struct vop2_win *win);
 static void vop2_wait_for_scan_timing_max_to_assigned_line(struct vop2_video_port *vp,
 							   u32 current_line,
 							   u32 wait_line);
@@ -2284,14 +2285,17 @@ static void vop2_win_disable(struct vop2_win *win, bool skip_splice_win)
 			}
 		}
 
-		vp_id = ffs(win->vp_mask) - 1;
-		if (vp_id >= ROCKCHIP_MAX_CRTC) {
-			DRM_ERROR("Unsupported vp_id: %d\n", vp_id);
-			return;
+		if (!vop2_cluster_sub_window(win) && !vop2_multi_area_sub_window(win)) {
+			vp_id = ffs(win->vp_mask) - 1;
+			if (vp_id >= ROCKCHIP_MAX_CRTC) {
+				DRM_ERROR("%s unsupported vp_id: %d, win->vp_mask:0x%x\n",
+					  win->name, vp_id, win->vp_mask);
+				return;
+			}
+			vp = &vop2->vps[vp_id];
+			if (vp->reserved_plane_phy_id != ROCKCHIP_VOP2_PHY_ID_INVALID)
+				vp->win_cfg_done_bits |= BIT(win->reg_done_bit);
 		}
-		vp = &vop2->vps[vp_id];
-		if (vp->reserved_plane_phy_id != ROCKCHIP_VOP2_PHY_ID_INVALID)
-			vp->win_cfg_done_bits |= BIT(win->reg_done_bit);
 	}
 
 	if (win->left_win && win->splice_mode_right) {
@@ -2428,8 +2432,6 @@ static enum vop2_afbc_format vop2_convert_afbc_format(uint32_t format)
 		DRM_WARN_ONCE("unsupported AFBC format %p4cc\n", &format);
 		return VOP2_AFBC_FMT_INVALID;
 	}
-
-	return VOP2_AFBC_FMT_INVALID;
 }
 
 static enum vop2_tiled_format vop2_convert_tiled_format(uint32_t format)
@@ -2454,8 +2456,6 @@ static enum vop2_tiled_format vop2_convert_tiled_format(uint32_t format)
 		DRM_WARN_ONCE("unsupported tiled format %p4cc\n", &format);
 		return VOP2_TILED_FMT_INVALID;
 	}
-
-	return VOP2_TILED_FMT_INVALID;
 }
 
 static enum vop3_tiled_format vop3_convert_tiled_format(uint32_t format, uint32_t tile_mode)
@@ -2486,8 +2486,6 @@ static enum vop3_tiled_format vop3_convert_tiled_format(uint32_t format, uint32_
 		DRM_WARN_ONCE("unsupported tiled format %p4cc\n", &format);
 		return VOP3_TILED_FMT_INVALID;
 	}
-
-	return VOP3_TILED_FMT_INVALID;
 }
 
 static enum vop2_wb_format vop2_convert_wb_format(uint32_t format)
@@ -5354,12 +5352,6 @@ static void vop2_disable(struct drm_crtc *crtc)
 	/* Disable axi irq when all vp is disabled */
 	vop2_axi_disable_irqs(vop2);
 
-	/*
-	 * Reset AXI to get a clean state, which is conducive to recovering
-	 * from exceptions when enable at next time(such as iommu page fault)
-	 */
-	vop2_clk_reset(vop2->axi_rst);
-
 	if (vop2->is_iommu_enabled) {
 		/*
 		 * vop2 standby complete, so iommu detach is safe.
@@ -5381,6 +5373,12 @@ static void vop2_disable(struct drm_crtc *crtc)
 	}
 	if (vop2->version == VOP_VERSION_RK3588 || vop2->version == VOP_VERSION_RK3576)
 		vop2_power_off_all_pd(vop2);
+
+	/*
+	 * Reset AXI to get a clean state, which is conducive to recovering
+	 * from exceptions when enable at next time(such as iommu page fault)
+	 */
+	vop2_clk_reset(vop2->axi_rst);
 
 	vop2->is_enabled = false;
 	pm_runtime_put_sync(vop2->dev);
@@ -7167,7 +7165,8 @@ static void vop2_win_atomic_update(struct vop2_win *win, struct drm_rect *src, s
 		VOP_CLUSTER_SET(vop2, win, frm_reset_en, 1);
 		VOP_CLUSTER_SET(vop2, win, dma_stride_4k_disable, 1);
 	}
-	vp->win_cfg_done_bits |= BIT(win->reg_done_bit);
+	if (!vop2_cluster_sub_window(win) && !vop2_multi_area_sub_window(win))
+		vp->win_cfg_done_bits |= BIT(win->reg_done_bit);
 	spin_unlock(&vop2->reg_lock);
 }
 
@@ -15373,12 +15372,6 @@ static int vop2_create_crtc(struct vop2 *vop2, uint8_t enabled_vp_mask)
 		vop2_crtc_create_feature_property(vop2, crtc);
 		vop2_crtc_create_vrr_property(vop2, crtc);
 
-		ret = drm_self_refresh_helper_init(crtc);
-		if (ret)
-			DRM_DEV_DEBUG_KMS(vop2->dev,
-					  "Failed to init %s with SR helpers %d, ignoring\n",
-					  crtc->name, ret);
-
 		if (vp_data->feature & (VOP_FEATURE_VIVID_HDR | VOP_FEATURE_DOVI))
 			vop2_crtc_create_hdr_property(vop2, crtc);
 		if (vp_data->feature & VOP_FEATURE_POST_ACM)
@@ -15466,7 +15459,6 @@ static void vop2_destroy_crtc(struct drm_crtc *crtc)
 {
 	struct vop2_video_port *vp = to_vop2_video_port(crtc);
 
-	drm_self_refresh_helper_cleanup(crtc);
 	if (vp->hdr_lut_gem_obj)
 		rockchip_gem_free_object(&vp->hdr_lut_gem_obj->base);
 
