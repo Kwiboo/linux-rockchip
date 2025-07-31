@@ -650,7 +650,7 @@ const u8 *drm_find_edid_extension(const struct drm_edid *drm_edid,
 #else
 static inline bool drm_probe_ddc(struct i2c_adapter *adapter)
 {
-	return 0;
+	return false;
 }
 
 static inline struct edid *drm_do_get_edid(struct drm_connector *connector,
@@ -688,7 +688,7 @@ static inline int drm_add_edid_modes(struct drm_connector *connector, struct edi
 	return 0;
 }
 
-static inline int drm_add_override_edid_modes(struct drm_connector *connector)
+static inline int drm_edid_override_connector_update(struct drm_connector *connector)
 {
 	return 0;
 }
@@ -700,18 +700,18 @@ static inline u8 drm_match_cea_mode(const struct drm_display_mode *to_match)
 
 static inline bool drm_detect_hdmi_monitor(const struct edid *edid)
 {
-	return 0;
+	return false;
 }
 
 static inline bool drm_detect_monitor_audio(const struct edid *edid)
 {
-	return 0;
+	return false;
 }
 
 static inline enum hdmi_quantization_range
 drm_default_rgb_quant_range(const struct drm_display_mode *mode)
 {
-	return 0;
+	return HDMI_QUANTIZATION_RANGE_DEFAULT;
 }
 
 static inline int drm_add_modes_noedid(struct drm_connector *connector,
@@ -733,18 +733,17 @@ static inline int drm_edid_header_is_valid(const void *edid)
 static inline bool drm_edid_block_valid(u8 *raw_edid, int block, bool print_bad_edid,
 					bool *edid_corrupt)
 {
-	return 0;
+	return false;
 }
 
 static inline bool drm_edid_is_valid(struct edid *edid)
 {
-	return 0;
+	return false;
 }
 
 static inline void drm_edid_get_monitor_name(const struct edid *edid, char *name,
 					     int buflen)
 {
-	return;
 }
 
 static inline struct drm_display_mode *drm_mode_find_dmt(struct drm_device *dev,
@@ -779,6 +778,12 @@ void drm_edid_free(const struct drm_edid *drm_edid)
 }
 
 static inline
+bool drm_edid_valid(const struct drm_edid *drm_edid)
+{
+	return false;
+}
+
+static inline
 const struct edid *drm_edid_raw(const struct drm_edid *drm_edid)
 {
 	return NULL;
@@ -789,7 +794,6 @@ const struct drm_edid *drm_edid_read(struct drm_connector *connector)
 {
 	return NULL;
 }
-
 
 static inline
 const struct drm_edid *drm_edid_read_ddc(struct drm_connector *connector,
@@ -807,10 +811,23 @@ const struct drm_edid *drm_edid_read_custom(struct drm_connector *connector,
 }
 
 static inline
+const struct drm_edid *drm_edid_read_switcheroo(struct drm_connector *connector,
+						struct i2c_adapter *adapter)
+{
+	return NULL;
+}
+
+static inline
 int drm_edid_connector_update(struct drm_connector *connector,
 			      const struct drm_edid *edid)
 {
 	return -ENODEV;
+}
+
+static inline
+int drm_edid_connector_add_modes(struct drm_connector *connector)
+{
+	return 0;
 }
 
 static inline
