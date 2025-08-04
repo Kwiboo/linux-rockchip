@@ -4,10 +4,100 @@
  */
 
 /dts-v1/;
-
-#include "rk3308-partybox-coreboard-demo.dtsi"
+#include "rk3308-partybox.dtsi"
 
 / {
 	model = "Rockchip RK3308B PARTYBOX CORE BOARD DEMO V10";
 	compatible = "rockchip,rk3308-partybox-coreboard-demo-v10", "rockchip,rk3308";
+
+	chosen {
+		bootargs = "earlycon=uart8250,mmio32,0xff0c0000 console=ttyFIQ0 root=PARTUUID=614e0000-0000 rootfstype=squashfs rootwait isolcpus=2,3 nohz_full=2,3 snd_soc_core.prealloc_buffer_size_kbytes=64";
+	};
+
+	pwm-leds {
+		compatible = "pwm-leds";
+
+		mic1-green-led {
+			label = "mic1_green";
+			pwms = <&pwm1 0 50000 0>;
+			default-state = "off";
+		};
+		mic1-red-led {
+			label = "mic1_red";
+			pwms = <&pwm2 0 50000 0>;
+			default-state = "off";
+		};
+		mic2-green-led {
+			label = "mic2_green";
+			pwms = <&pwm3 0 50000 0>;
+			default-state = "off";
+		};
+		mic2-red-led {
+			label = "mic2_red";
+			pwms = <&pwm4 0 50000 0>;
+			default-state = "off";
+		};
+		aux-green-led {
+			label = "aux_green";
+			pwms = <&pwm5 0 50000 0>;
+			default-state = "off";
+		};
+		aux-red-led {
+			label = "aux_red";
+			pwms = <&pwm6 0 50000 0>;
+			default-state = "off";
+		};
+	};
+};
+
+&mic_dummy_codec {
+	status = "disabled";
+};
+
+&mic_sound {
+	status = "disabled";
+};
+
+&pwm1 {
+	status = "okay";
+};
+
+&pwm2 {
+	status = "okay";
+};
+
+&pwm3 {
+	status = "okay";
+};
+
+&pwm4 {
+	status = "okay";
+};
+
+&pwm5 {
+	status = "okay";
+};
+
+&pwm6 {
+	status = "okay";
+};
+
+&usb_host0_ehci {
+	status = "disabled";
+};
+
+&usb_host0_ohci{
+	status = "disabled";
+};
+
+&u2phy {
+	status = "okay";
+
+	u2phy_host: host-port {
+		status = "disabled";
+	};
+
+	u2phy_otg: otg-port {
+		status = "okay";
+	};
 };
