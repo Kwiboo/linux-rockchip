@@ -1753,10 +1753,6 @@ static noinline void __init kernel_init_freeable(void)
 	sched_init_smp();
 
 	workqueue_init_topology();
-#ifdef CONFIG_ROCKCHIP_THUNDER_BOOT_DEFER_FREE_MEMBLOCK
-	kthread_run(defer_free_memblock, NULL, "defer_mem");
-#endif
-
 	padata_init();
 	page_alloc_init_late();
 
