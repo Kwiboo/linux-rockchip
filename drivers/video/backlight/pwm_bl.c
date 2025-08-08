@@ -108,7 +108,7 @@ static int pwm_backlight_update_status(struct backlight_device *bl)
 		pwm_get_state(pb->pwm, &state);
 		state.duty_cycle = compute_duty_cycle(pb, brightness, &state);
 		state.enabled = true;
-		pwm_apply_state(pb->pwm, &state);
+		pwm_apply_might_sleep(pb->pwm, &state);
 
 		pwm_backlight_power_on(pb);
 	} else {
@@ -125,7 +125,7 @@ static int pwm_backlight_update_status(struct backlight_device *bl)
 		 * inactive output.
 		 */
 		state.enabled = !pb->power_supply && !pb->enable_gpio;
-		pwm_apply_state(pb->pwm, &state);
+		pwm_apply_might_sleep(pb->pwm, &state);
 	}
 
 	if (pb->notify_after)
@@ -533,7 +533,7 @@ static int pwm_backlight_probe(struct platform_device *pdev)
 	if (!state.period && (data->pwm_period_ns > 0))
 		state.period = data->pwm_period_ns;
 
-	ret = pwm_apply_state(pb->pwm, &state);
+	ret = pwm_apply_might_sleep(pb->pwm, &state);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to apply initial PWM state: %d\n",
 			ret);
@@ -645,7 +645,7 @@ static void pwm_backlight_remove(struct platform_device *pdev)
 	pwm_get_state(pb->pwm, &state);
 	state.duty_cycle = 0;
 	state.enabled = false;
-	pwm_apply_state(pb->pwm, &state);
+	pwm_apply_might_sleep(pb->pwm, &state);
 
 	if (pb->exit)
 		pb->exit(&pdev->dev);
@@ -661,7 +661,7 @@ static void pwm_backlight_shutdown(struct platform_device *pdev)
 	pwm_get_state(pb->pwm, &state);
 	state.duty_cycle = 0;
 	state.enabled = false;
-	pwm_apply_state(pb->pwm, &state);
+	pwm_apply_might_sleep(pb->pwm, &state);
 }
 
 #ifdef CONFIG_PM_SLEEP
@@ -689,7 +689,7 @@ static int pwm_backlight_suspend(struct device *dev)
 	pwm_get_state(pb->pwm, &state);
 	state.duty_cycle = 0;
 	state.enabled = false;
-	pwm_apply_state(pb->pwm, &state);
+	pwm_apply_might_sleep(pb->pwm, &state);
 
 	if (pb->notify_after)
 		pb->notify_after(pb->dev, 0);

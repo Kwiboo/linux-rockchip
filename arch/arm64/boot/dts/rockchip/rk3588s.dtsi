@@ -6683,7 +6683,6 @@
 		dmas = <&dmac1 0>, <&dmac1 1>;
 		dma-names = "tx", "rx";
 		power-domains = <&power RK3588_PD_AUDIO>;
-		rockchip,trcm-sync-tx-only;
 		pinctrl-names = "default", "idle", "clk";
 		pinctrl-0 = <&i2s2m1_sdi
 			     &i2s2m1_sdo>;
@@ -6705,7 +6704,6 @@
 		dmas = <&dmac1 2>, <&dmac1 3>;
 		dma-names = "tx", "rx";
 		power-domains = <&power RK3588_PD_AUDIO>;
-		rockchip,trcm-sync-tx-only;
 		pinctrl-names = "default", "idle", "clk";
 		pinctrl-0 = <&i2s3_sdi
 			     &i2s3_sdo>;
