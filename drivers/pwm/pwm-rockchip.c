@@ -478,7 +478,7 @@ static irqreturn_t rockchip_pwm_irq_v1(int irq, void *data)
 		 */
 		pwm_get_state(&pc->chip.pwms[0], &state);
 		state.enabled = false;
-		pwm_apply_state(&pc->chip.pwms[0], &state);
+		pwm_apply_might_sleep(&pc->chip.pwms[0], &state);
 
 		rockchip_pwm_oneshot_callback(&pc->chip.pwms[0], &state);
 	} else if (pc->capture_en) {
@@ -705,7 +705,7 @@ static irqreturn_t rockchip_pwm_irq_v4(int irq, void *data)
 		state.enabled = false;
 		state.oneshot_count = 0;
 		state.oneshot_repeat = 0;
-		pwm_apply_state(&pc->chip.pwms[0], &state);
+		pwm_apply_might_sleep(&pc->chip.pwms[0], &state);
 
 		rockchip_pwm_oneshot_callback(&pc->chip.pwms[0], &state);
 
@@ -2495,7 +2495,7 @@ static void rockchip_pwm_remove(struct platform_device *pdev)
 				dev_err(&pdev->dev, "Wait for oneshot to complete failed\n");
 		} else {
 			state.enabled = false;
-			pwm_apply_state(&pc->chip.pwms[0], &state);
+			pwm_apply_might_sleep(&pc->chip.pwms[0], &state);
 		}
 	}
 
