@@ -333,6 +333,9 @@ static struct regmap_config rockchip_regmap_config = {
 	.reg_stride = 4,
 };
 
+static int rockchip_set_input_enable(struct rockchip_pin_bank *bank,
+				     int pin_num, int enable);
+
 static inline const struct rockchip_pin_group *pinctrl_name_to_group(
 					const struct rockchip_pinctrl *info,
 					const char *name)
@@ -1346,6 +1349,11 @@ static int rockchip_get_mux(struct rockchip_pin_bank *bank, int pin)
 	if (bank->recalced_mask & BIT(pin))
 		rockchip_get_recalced_mux(bank, pin, &reg, &bit, &mask);
 
+	if (ctrl->type == RK3572) {
+		if ((bank->bank_num == 0) && (pin >= RK_PB4) && (pin <= RK_PB7))
+			reg += 0x2000; /* GPIO0_IOC_GPIO0B_IOMUX_SEL_H */
+	}
+
 	if (ctrl->type == RK3576) {
 		if ((bank->bank_num == 0) && (pin >= RK_PB4) && (pin <= RK_PB7))
 			reg += 0x1FF4; /* GPIO0_IOC_GPIO0B_IOMUX_SEL_H */
@@ -1566,6 +1574,11 @@ static int rockchip_set_mux(struct rockchip_pin_bank *bank, int pin, int mux)
 		}
 	}
 
+	if (ctrl->type == RK3572) {
+		if ((bank->bank_num == 0) && (pin >= RK_PB4) && (pin <= RK_PB7))
+			reg += 0x2000; /* GPIO0_IOC_GPIO0B_IOMUX_SEL_H */
+	}
+
 	if (ctrl->type == RK3576) {
 		if ((bank->bank_num == 0) && (pin >= RK_PB4) && (pin <= RK_PB7))
 			reg += 0x1FF4; /* GPIO0_IOC_GPIO0B_IOMUX_SEL_H */
@@ -1663,6 +1676,9 @@ static int rockchip_set_mux(struct rockchip_pin_bank *bank, int pin, int mux)
 		data |= (mux & mask) << bit;
 		ret = regmap_update_bits(regmap, reg, rmask, data);
 	}
+
+	if (ctrl->ie_calc_reg)
+		rockchip_set_input_enable(bank, pin, 1);
 
 	return ret;
 }
@@ -3683,6 +3699,200 @@ static int rk3568_calc_drv_reg_and_bit(struct rockchip_pin_bank *bank,
 	return 0;
 }
 
+#define RK3572_DRV_BITS_PER_PIN		4
+#define RK3572_DRV_PINS_PER_REG		4
+#define RK3572_DRV_GPIO0_OFFSET		0x100
+#define RK3572_DRV_GPIO1_OFFSET		0x10120
+#define RK3572_DRV_GPIO2_OFFSET		0x12140
+#define RK3572_DRV_GPIO3_OFFSET		0x14160
+#define RK3572_DRV_GPIO4_OFFSET		0x14180
+
+static int rk3572_calc_drv_reg_and_bit(struct rockchip_pin_bank *bank,
+					int pin_num, struct regmap **regmap,
+					int *reg, u8 *bit)
+{
+	struct rockchip_pinctrl *info = bank->drvdata;
+
+	*regmap = info->regmap_base;
+
+	switch (bank->bank_num) {
+	case 0:
+		*reg = RK3572_DRV_GPIO0_OFFSET;
+		if (pin_num >= 12)
+			*reg += 0x2000;
+		break;
+	case 1:
+		*reg = RK3572_DRV_GPIO1_OFFSET;
+		break;
+	case 2:
+		*reg = RK3572_DRV_GPIO2_OFFSET;
+		break;
+	case 3:
+		*reg = RK3572_DRV_GPIO3_OFFSET;
+		break;
+	case 4:
+		*reg = RK3572_DRV_GPIO4_OFFSET;
+		if (pin_num >= 16)
+			*reg -= 0x10000;
+		break;
+	default:
+		dev_err(info->dev, "unsupported bank_num %d\n", bank->bank_num);
+		return -EINVAL;
+	}
+
+	*reg += ((pin_num / RK3572_DRV_PINS_PER_REG) * 4);
+	*bit = pin_num % RK3572_DRV_PINS_PER_REG;
+	*bit *= RK3572_DRV_BITS_PER_PIN;
+
+	return 0;
+}
+
+#define RK3572_PULL_BITS_PER_PIN	2
+#define RK3572_PULL_PINS_PER_REG	8
+#define RK3572_PULL_GPIO0_OFFSET	0x200
+#define RK3572_PULL_GPIO1_OFFSET	0x10210
+#define RK3572_PULL_GPIO2_OFFSET	0x12220
+#define RK3572_PULL_GPIO3_OFFSET	0x14230
+#define RK3572_PULL_GPIO4_OFFSET	0x14240
+
+static int rk3572_calc_pull_reg_and_bit(struct rockchip_pin_bank *bank,
+					 int pin_num, struct regmap **regmap,
+					 int *reg, u8 *bit)
+{
+	struct rockchip_pinctrl *info = bank->drvdata;
+
+	*regmap = info->regmap_base;
+
+	switch (bank->bank_num) {
+	case 0:
+		*reg = RK3572_PULL_GPIO0_OFFSET;
+		if (pin_num >= 12)
+			*reg += 0x2000;
+		break;
+	case 1:
+		*reg = RK3572_PULL_GPIO1_OFFSET;
+		break;
+	case 2:
+		*reg = RK3572_PULL_GPIO2_OFFSET;
+		break;
+	case 3:
+		*reg = RK3572_PULL_GPIO3_OFFSET;
+		break;
+	case 4:
+		*reg = RK3572_PULL_GPIO4_OFFSET;
+		if (pin_num >= 16)
+			*reg -= 0x10000;
+		break;
+	default:
+		dev_err(info->dev, "unsupported bank_num %d\n", bank->bank_num);
+		return -EINVAL;
+	}
+
+	*reg += ((pin_num / RK3572_PULL_PINS_PER_REG) * 4);
+	*bit = pin_num % RK3572_PULL_PINS_PER_REG;
+	*bit *= RK3572_PULL_BITS_PER_PIN;
+
+	return 0;
+}
+
+#define RK3572_SMT_BITS_PER_PIN		1
+#define RK3572_SMT_PINS_PER_REG		8
+#define RK3572_SMT_GPIO0_OFFSET		0x400
+#define RK3572_SMT_GPIO1_OFFSET		0x10410
+#define RK3572_SMT_GPIO2_OFFSET		0x12420
+#define RK3572_SMT_GPIO3_OFFSET		0x14430
+#define RK3572_SMT_GPIO4_OFFSET		0x14440
+
+static int rk3572_calc_schmitt_reg_and_bit(struct rockchip_pin_bank *bank,
+					   int pin_num,
+					   struct regmap **regmap,
+					   int *reg, u8 *bit)
+{
+	struct rockchip_pinctrl *info = bank->drvdata;
+
+	*regmap = info->regmap_base;
+
+	switch (bank->bank_num) {
+	case 0:
+		*reg = RK3572_SMT_GPIO0_OFFSET;
+		if (pin_num >= 12)
+			*reg += 0x2000;
+		break;
+	case 1:
+		*reg = RK3572_SMT_GPIO1_OFFSET;
+		break;
+	case 2:
+		*reg = RK3572_SMT_GPIO2_OFFSET;
+		break;
+	case 3:
+		*reg = RK3572_SMT_GPIO3_OFFSET;
+		break;
+	case 4:
+		*reg = RK3572_SMT_GPIO4_OFFSET;
+		if (pin_num >= 16)
+			*reg -= 0x10000;
+		break;
+	default:
+		dev_err(info->dev, "unsupported bank_num %d\n", bank->bank_num);
+		return -EINVAL;
+	}
+
+	*reg += ((pin_num / RK3572_SMT_PINS_PER_REG) * 4);
+	*bit = pin_num % RK3572_SMT_PINS_PER_REG;
+	*bit *= RK3572_SMT_BITS_PER_PIN;
+
+	return 0;
+}
+
+#define RK3572_IE_BITS_PER_PIN		1
+#define RK3572_IE_PINS_PER_REG		8
+#define RK3572_IE_GPIO0_OFFSET		0x300
+#define RK3572_IE_GPIO1_OFFSET		0x10310
+#define RK3572_IE_GPIO2_OFFSET		0x12320
+#define RK3572_IE_GPIO3_OFFSET		0x14330
+#define RK3572_IE_GPIO4_OFFSET		0x14340
+
+static int rk3572_calc_ie_reg_and_bit(struct rockchip_pin_bank *bank,
+					   int pin_num,
+					   struct regmap **regmap,
+					   int *reg, u8 *bit)
+{
+	struct rockchip_pinctrl *info = bank->drvdata;
+
+	*regmap = info->regmap_base;
+
+	switch (bank->bank_num) {
+	case 0:
+		*reg = RK3572_IE_GPIO0_OFFSET;
+		if (pin_num >= 12)
+			*reg += 0x2000;
+		break;
+	case 1:
+		*reg = RK3572_IE_GPIO1_OFFSET;
+		break;
+	case 2:
+		*reg = RK3572_IE_GPIO2_OFFSET;
+		break;
+	case 3:
+		*reg = RK3572_IE_GPIO3_OFFSET;
+		break;
+	case 4:
+		*reg = RK3572_IE_GPIO4_OFFSET;
+		if (pin_num >= 16)
+			*reg -= 0x10000;
+		break;
+	default:
+		dev_err(info->dev, "unsupported bank_num %d\n", bank->bank_num);
+		return -EINVAL;
+	}
+
+	*reg += ((pin_num / RK3572_IE_PINS_PER_REG) * 4);
+	*bit = pin_num % RK3572_IE_PINS_PER_REG;
+	*bit *= RK3572_IE_BITS_PER_PIN;
+
+	return 0;
+}
+
 #define RK3576_DRV_BITS_PER_PIN		4
 #define RK3576_DRV_PINS_PER_REG		4
 #define RK3576_DRV_GPIO0_AL_OFFSET	0x10
@@ -4172,6 +4382,20 @@ static int rockchip_set_drive_perpin(struct rockchip_pin_bank *bank,
 		rmask_bits = RK3568_DRV_BITS_PER_PIN;
 		ret = (1 << (strength + 1)) - 1;
 		goto config;
+	} else if (ctrl->type == RK3572) {
+		rmask_bits = RK3572_DRV_BITS_PER_PIN;
+		if ((bank->bank_num == 0 && pin_num < 12) ||
+		    (bank->bank_num == 4 && (pin_num == 24 || pin_num == 25))) {
+			/* only support 4 drive strength levels */
+			if (strength > 3)
+				return -EINVAL;
+			ret = ((strength & BIT(1)) >> 1) | ((strength & BIT(0)) << 1);
+		} else {
+			ret = ((strength & BIT(2)) >> 2) |
+			      ((strength & BIT(0)) << 2) |
+			      (strength & BIT(1));
+		}
+		goto config;
 	} else if (ctrl->type == RK3576) {
 		rmask_bits = RK3576_DRV_BITS_PER_PIN;
 		ret = ((strength & BIT(2)) >> 2) | ((strength & BIT(0)) << 2) | (strength & BIT(1));
@@ -4391,6 +4615,7 @@ static int rockchip_get_pull(struct rockchip_pin_bank *bank, int pin_num)
 	case RK3538:
 	case RK3562:
 	case RK3568:
+	case RK3572:
 	case RK3576:
 	case RK3588:
 		pull_type = bank->pull_type[pin_num / 8];
@@ -4459,6 +4684,7 @@ static int rockchip_set_pull(struct rockchip_pin_bank *bank,
 	case RK3538:
 	case RK3562:
 	case RK3568:
+	case RK3572:
 	case RK3576:
 	case RK3588:
 		rmask_bits = RK3188_PULL_BITS_PER_PIN;
@@ -4632,6 +4858,31 @@ static int rockchip_set_schmitt(struct rockchip_pin_bank *bank,
 			data |= ((enable ? 0x3 : 0) << bit);
 		}
 	}
+
+	return regmap_update_bits(regmap, reg, rmask, data);
+}
+
+static int rockchip_set_input_enable(struct rockchip_pin_bank *bank,
+				     int pin_num, int enable)
+{
+	struct rockchip_pinctrl *info = bank->drvdata;
+	struct rockchip_pin_ctrl *ctrl = info->ctrl;
+	struct device *dev = info->dev;
+	struct regmap *regmap;
+	int reg, ret;
+	u8 bit;
+	u32 data, rmask;
+
+	dev_dbg(dev, "setting input enable of GPIO%d-%d to %d\n",
+		bank->bank_num, pin_num, enable);
+
+	ret = ctrl->ie_calc_reg(bank, pin_num, &regmap, &reg, &bit);
+	if (ret)
+		return ret;
+
+	data = BIT(bit + 16);
+	rmask = data | (data >> 16);
+	data |= (enable << bit);
 
 	return regmap_update_bits(regmap, reg, rmask, data);
 }
@@ -4856,6 +5107,7 @@ static bool rockchip_pinconf_pull_valid(struct rockchip_pin_ctrl *ctrl,
 	case RK3538:
 	case RK3562:
 	case RK3568:
+	case RK3572:
 	case RK3576:
 	case RK3588:
 		return (pull != PIN_CONFIG_BIAS_PULL_PIN_DEFAULT);
@@ -4957,6 +5209,14 @@ static int rockchip_pinconf_set(struct pinctrl_dev *pctldev, unsigned int pin,
 				return rc;
 			break;
 		case PIN_CONFIG_INPUT_ENABLE:
+			if (!arg) {
+				if (info->ctrl->ie_calc_reg)
+					rockchip_set_input_enable(bank,
+								  pin - bank->pin_base,
+								  arg);
+				return 0;
+			}
+
 			rc = rockchip_set_mux(bank, pin - bank->pin_base,
 					      RK_FUNC_GPIO);
 			if (rc != RK_FUNC_GPIO)
@@ -6426,6 +6686,25 @@ static struct rockchip_pin_ctrl rk3568_pin_ctrl __maybe_unused = {
 					       PULL_TYPE_IO_1, PULL_TYPE_IO_1,	\
 					       PULL_TYPE_IO_1, PULL_TYPE_IO_1)
 
+static struct rockchip_pin_bank rk3572_pin_banks[] = {
+	RK3576_PIN_BANK(0, "gpio0", 0, 0x8, 0x2010, 0x2018),
+	RK3576_PIN_BANK(1, "gpio1", 0x10020, 0x10028, 0x10030, 0x10038),
+	RK3576_PIN_BANK(2, "gpio2", 0x12040, 0x12048, 0x12050, 0x12058),
+	RK3576_PIN_BANK(3, "gpio3", 0x14060, 0x14068, 0x14070, 0x14078),
+	RK3576_PIN_BANK(4, "gpio4", 0x14080, 0x14088, 0x4090, 0x4098),
+};
+
+static struct rockchip_pin_ctrl rk3572_pin_ctrl __maybe_unused = {
+	.pin_banks		= rk3572_pin_banks,
+	.nr_banks		= ARRAY_SIZE(rk3572_pin_banks),
+	.label			= "RK3572-GPIO",
+	.type			= RK3572,
+	.pull_calc_reg		= rk3572_calc_pull_reg_and_bit,
+	.drv_calc_reg		= rk3572_calc_drv_reg_and_bit,
+	.schmitt_calc_reg	= rk3572_calc_schmitt_reg_and_bit,
+	.ie_calc_reg		= rk3572_calc_ie_reg_and_bit,
+};
+
 static struct rockchip_pin_bank rk3576_pin_banks[] = {
 	RK3576_PIN_BANK(0, "gpio0", 0, 0x8, 0x2004, 0x200C),
 	RK3576_PIN_BANK(1, "gpio1", 0x4020, 0x4028, 0x4030, 0x4038),
@@ -6557,6 +6836,10 @@ static const struct of_device_id rockchip_pinctrl_dt_match[] = {
 #ifdef CONFIG_CPU_RK3568
 	{ .compatible = "rockchip,rk3568-pinctrl",
 		.data = &rk3568_pin_ctrl },
+#endif
+#ifdef CONFIG_CPU_RK3572
+	{ .compatible = "rockchip,rk3572-pinctrl",
+		.data = &rk3572_pin_ctrl },
 #endif
 #ifdef CONFIG_CPU_RK3576
 	{ .compatible = "rockchip,rk3576-pinctrl",
