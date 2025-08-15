@@ -123,6 +123,7 @@ struct pcie_ep_continuous_buffer_param {
 #define PCIE_EP_RAISE_MSI					_IOW(PCIE_BASE, 0x04, int)
 #define PCIE_EP_SET_MMAP_RESOURCE				_IOW(PCIE_BASE, 0x06, int)
 #define PCIE_EP_RAISE_ELBI					_IOW(PCIE_BASE, 0x07, int)
+#define PCIE_EP_RESET_CTRL					_IOW(PCIE_BASE, 0x08, int)
 #define PCIE_EP_REQUEST_VIRTUAL_ID				_IOR(PCIE_BASE, 0x10, int)
 #define PCIE_EP_RELEASE_VIRTUAL_ID				_IOW(PCIE_BASE, 0x11, int)
 #define PCIE_EP_RAISE_IRQ_USER					_IOW(PCIE_BASE, 0x12, int)
