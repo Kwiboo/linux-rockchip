@@ -2498,7 +2498,7 @@ no_l2:
 static int __maybe_unused rockchip_dw_pcie_resume(struct device *dev)
 {
 	struct rk_pcie *rk_pcie = dev_get_drvdata(dev);
-	bool std_rc = rk_pcie->mode == RK_PCIE_RC_TYPE && !rk_pcie->dma_obj;
+	bool std_rc = rk_pcie->mode == RK_PCIE_RC_TYPE;
 	int ret;
 
 	reset_control_assert(rk_pcie->rsts);
