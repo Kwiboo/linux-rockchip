@@ -1009,6 +1009,7 @@ dtb-$(CONFIG_ARCH_ROCKCHIP) += \
 	rv1106b-evb2-v10-normal-spi-nor-dual-cam.dtb \
 	rv1106b-evb2-v10-spi-nand.dtb \
 	rv1106b-evb3-v10.dtb \
+	rv1106b-evb3-v10-normal-spi-nor-quad-cam.dtb \
 	rv1106g-38x38-ipc-v10.dtb \
 	rv1106g-38x38-ipc-v10-spi-nand.dtb \
 	rv1106g-evb1-mcu-display-v11.dtb \
