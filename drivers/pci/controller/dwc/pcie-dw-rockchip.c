@@ -925,10 +925,12 @@ static int rk_pcie_init_dma_trx(struct rk_pcie *rk_pcie)
 		goto out;
 	}
 
-	rk_pcie->dma_obj = pcie_dw_dmatest_register(rk_pcie->pci->dev, true);
-	if (IS_ERR(rk_pcie->dma_obj)) {
-		dev_err(rk_pcie->pci->dev, "failed to prepare dmatest\n");
-		return -EINVAL;
+	if (IS_ENABLED(CONFIG_PCIE_DW_ROCKCHIP_RC_DMATEST)) {
+		rk_pcie->dma_obj = pcie_dw_dmatest_register(rk_pcie->pci->dev, true);
+		if (IS_ERR(rk_pcie->dma_obj)) {
+			dev_err(rk_pcie->pci->dev, "failed to prepare dmatest\n");
+			return -EINVAL;
+		}
 	}
 out:
 	/* Enable client write and read interrupt */
