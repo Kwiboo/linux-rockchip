@@ -2914,6 +2914,8 @@ static int dw_dp_loader_protect(struct drm_encoder *encoder, bool on)
 {
 	struct dw_dp *dp = encoder_to_dp(encoder);
 
+	if (dp->panel)
+		panel_simple_loader_protect(dp->panel);
 	_dw_dp_loader_protect(dp, on);
 	if (dp->right)
 		_dw_dp_loader_protect(dp->right, on);
