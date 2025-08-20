@@ -956,6 +956,17 @@ static const struct dw_dp_output_format *dw_dp_get_output_format(u32 bus_format)
 	return &possible_output_fmts[1];
 }
 
+static const struct dw_dp_output_format *dw_dp_get_bus_format_by_video_mapping(u8 video_mapping)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(possible_output_fmts); i++)
+		if (possible_output_fmts[i].video_mapping == video_mapping)
+			return &possible_output_fmts[i];
+
+	return &possible_output_fmts[1];
+}
+
 static inline struct dw_dp *connector_to_dp(struct drm_connector *c)
 {
 	return container_of(c, struct dw_dp, connector);
@@ -1344,13 +1355,12 @@ static int dw_dp_connector_atomic_check(struct drm_connector *conn,
 					struct drm_atomic_state *state)
 {
 	struct drm_connector_state *old_state, *new_state;
-	struct dw_dp_state *dp_old_state, *dp_new_state;
+	struct dw_dp_state *dp_new_state;
 	struct drm_crtc_state *crtc_state;
 	struct dw_dp *dp = connector_to_dp(conn);
 
 	old_state = drm_atomic_get_old_connector_state(state, conn);
 	new_state = drm_atomic_get_new_connector_state(state, conn);
-	dp_old_state = connector_to_dp_state(old_state);
 	dp_new_state = connector_to_dp_state(new_state);
 
 	dw_dp_hdcp_atomic_check(conn, state);
@@ -1374,10 +1384,6 @@ static int dw_dp_connector_atomic_check(struct drm_connector *conn,
 		dev_err(dp->dev, "set invalid color format:%d\n", dp_new_state->color_format);
 		return -EINVAL;
 	}
-
-	if ((dp_old_state->bpc != dp_new_state->bpc) ||
-	    (dp_old_state->color_format != dp_new_state->color_format))
-		crtc_state->mode_changed = true;
 
 	return 0;
 }
@@ -2861,8 +2867,10 @@ dw_dp_bridge_mode_valid(struct drm_bridge *bridge,
 static void _dw_dp_loader_protect(struct dw_dp *dp, bool on)
 {
 	struct dw_dp_link *link = &dp->link;
+	struct dw_dp_video *video = &dp->video;
 	struct drm_connector *conn = &dp->connector;
 	struct drm_display_info *di = &conn->display_info;
+	const struct dw_dp_output_format *output_format;
 
 	u32 value;
 
@@ -2902,6 +2910,10 @@ static void _dw_dp_loader_protect(struct dw_dp *dp, bool on)
 			break;
 		}
 
+		regmap_read(dp->regmap, DPTX_VSAMPLE_CTRL, &value);
+		output_format =
+			dw_dp_get_bus_format_by_video_mapping(FIELD_GET(VIDEO_MAPPING, value));
+		video->bus_format = output_format->bus_format;
 		phy_power_on(dp->phy);
 		link->train.clock_recovered = true;
 		link->train.channel_equalized = true;
@@ -3520,6 +3532,9 @@ static int dw_dp_bridge_atomic_check(struct drm_bridge *bridge,
 	dev_dbg(dp->dev, "input format 0x%04x, output format 0x%04x\n",
 		bridge_state->input_bus_cfg.format,
 		bridge_state->output_bus_cfg.format);
+
+	if (video->bus_format != fmt->bus_format)
+		crtc_state->mode_changed = true;
 
 	video->video_mapping = fmt->video_mapping;
 	video->color_format = fmt->color_format;
