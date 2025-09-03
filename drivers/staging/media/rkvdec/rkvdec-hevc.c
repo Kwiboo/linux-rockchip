@@ -2436,6 +2436,29 @@ static int rkvdec_hevc_adjust_fmt(struct rkvdec_ctx *ctx,
 	return 0;
 }
 
+static enum rkvdec_image_fmt rkvdec_hevc_get_image_fmt(struct rkvdec_ctx *ctx,
+						       struct v4l2_ctrl *ctrl)
+{
+	const struct v4l2_ctrl_hevc_sps *sps = ctrl->p_new.p_hevc_sps;
+
+	if (ctrl->id != V4L2_CID_STATELESS_HEVC_SPS)
+		return RKVDEC_IMG_FMT_ANY;
+
+	if (sps->bit_depth_luma_minus8 == 0) {
+		if (sps->chroma_format_idc == 2)
+			return RKVDEC_IMG_FMT_422_8BIT;
+		else
+			return RKVDEC_IMG_FMT_420_8BIT;
+	} else if (sps->bit_depth_luma_minus8 == 2) {
+		if (sps->chroma_format_idc == 2)
+			return RKVDEC_IMG_FMT_422_10BIT;
+		else
+			return RKVDEC_IMG_FMT_420_10BIT;
+	}
+
+	return RKVDEC_IMG_FMT_ANY;
+}
+
 static int rkvdec_hevc_validate_sps(struct rkvdec_ctx *ctx,
 				    const struct v4l2_ctrl_hevc_sps *sps)
 {
@@ -2454,16 +2477,6 @@ static int rkvdec_hevc_validate_sps(struct rkvdec_ctx *ctx,
 		return -EINVAL;
 
 	return 0;
-}
-
-static u32 rkvdec_hevc_valid_fmt(struct rkvdec_ctx *ctx, struct v4l2_ctrl *ctrl)
-{
-	const struct v4l2_ctrl_hevc_sps *sps = ctrl->p_new.p_hevc_sps;
-
-	if (sps->bit_depth_luma_minus8 == 2)
-		return V4L2_PIX_FMT_NV15;
-	else
-		return V4L2_PIX_FMT_NV12;
 }
 
 static int rkvdec_hevc_start(struct rkvdec_ctx *ctx)
@@ -2590,4 +2603,5 @@ const struct rkvdec_coded_fmt_ops rkvdec_hevc_fmt_ops = {
 	.stop = rkvdec_hevc_stop,
 	.run = rkvdec_hevc_run,
 	.try_ctrl = rkvdec_hevc_try_ctrl,
+	.get_image_fmt = rkvdec_hevc_get_image_fmt,
 };
