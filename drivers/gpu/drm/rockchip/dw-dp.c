@@ -4181,6 +4181,8 @@ static const struct regmap_range dw_dp_readable_ranges[] = {
 	regmap_reg_range(DPTX_VSAMPLE_CTRL, DPTX_VIDEO_HBLANK_INTERVAL),
 	regmap_reg_range(DPTX_AUD_CONFIG1, DPTX_AUD_CONFIG1),
 	regmap_reg_range(DPTX_SDP_VERTICAL_CTRL, DPTX_SDP_STATUS_EN),
+	regmap_reg_range(DPTX_SDP_REGISTER_BANK,
+			 DPTX_SDP_REGISTER_BANK + SDP_REG_BANK_SIZE * 36),
 	regmap_reg_range(DPTX_PHYIF_CTRL, DPTX_PHYIF_PWRDOWN_CTRL),
 	regmap_reg_range(DPTX_AUX_CMD, DPTX_AUX_DATA3),
 	regmap_reg_range(DPTX_GENERAL_INTERRUPT, DPTX_HPD_INTERRUPT_ENABLE),
