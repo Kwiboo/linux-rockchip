@@ -2973,6 +2973,12 @@ static void dw_dp_crtc_pre_disable(struct dw_dp *dp, struct drm_crtc *crtc, int 
 	rockchip_drm_crtc_output_pre_disable(crtc, output_if);
 }
 
+static void dw_dp_sdp_disalbe(struct dw_dp *dp)
+{
+	regmap_write(dp->regmap, DPTX_SDP_VERTICAL_CTRL, 0);
+	regmap_write(dp->regmap, DPTX_SDP_HORIZONTAL_CTRL, 0);
+}
+
 static int dw_dp_connector_init(struct dw_dp *dp)
 {
 	struct drm_connector *connector = &dp->connector;
@@ -3282,6 +3288,7 @@ static void dw_dp_bridge_atomic_disable(struct drm_bridge *bridge,
 	dw_dp_crtc_pre_disable(dp, bridge->encoder->crtc, dp->id);
 	dw_dp_hdcp_disable(dp);
 	dw_dp_video_disable(dp);
+	dw_dp_sdp_disalbe(dp);
 	dw_dp_link_disable(dp);
 	bitmap_zero(dp->sdp_reg_bank, SDP_REG_BANK_SIZE);
 
