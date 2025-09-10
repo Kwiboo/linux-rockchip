@@ -9,6 +9,14 @@
 	compatible = "radxa,rock-2f", "rockchip,rk3528";
 };
 
+&pcie {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pciem1_pins>;
+	reset-gpios = <&gpio1 RK_PA2 GPIO_ACTIVE_HIGH>;
+	vpcie3v3-supply = <&vcc_3v3>;
+	status = "okay";
+};
+
 &usb_host0_xhci {
 	extcon = <&usb2phy>;
 	maximum-speed = "high-speed";
