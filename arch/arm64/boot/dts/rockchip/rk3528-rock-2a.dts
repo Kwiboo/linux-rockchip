@@ -26,10 +26,6 @@
 	};
 };
 
-&combphy {
-	status = "okay";
-};
-
 &gmac1 {
 	clock_in_out = "output";
 	phy-handle = <&rgmii_phy>;
