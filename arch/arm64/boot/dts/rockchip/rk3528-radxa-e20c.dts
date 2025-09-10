@@ -247,8 +247,9 @@
 
 &pcie {
 	pinctrl-names = "default";
-	pinctrl-0 = <&pciem1_pins>, <&pcie_reset_g>;
+	pinctrl-0 = <&pciem1_pins>;
 	reset-gpios = <&gpio1 RK_PA2 GPIO_ACTIVE_HIGH>;
+	vpcie3v3-supply = <&vcc_3v3>;
 	status = "okay";
 };
 
