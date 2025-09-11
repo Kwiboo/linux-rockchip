@@ -796,7 +796,7 @@ static int mpp_task_run(struct mpp_dev *mpp,
 	 */
 	ret = mpp_iommu_attach(mpp->iommu_info);
 	if (ret) {
-		dev_err(mpp->dev, "mpp_iommu_attach failed\n");
+		dev_err(mpp->dev, "mpp_iommu_attach failed ret %d\n", ret);
 		mpp_reset_up_read(mpp->reset_group);
 		return -ENODATA;
 	}
@@ -2238,6 +2238,8 @@ int mpp_dev_probe(struct mpp_dev *mpp,
 	if (IS_ERR(mpp->iommu_info)) {
 		dev_err(dev, "failed to attach iommu\n");
 		mpp->iommu_info = NULL;
+	} else {
+		mpp->iommu_info->queue = mpp->queue;
 	}
 	if (mpp->hw_ops->init) {
 		ret = mpp->hw_ops->init(mpp);

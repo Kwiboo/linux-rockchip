@@ -84,6 +84,8 @@ struct mpp_iommu_info {
 	u32 av1d_iommu;
 	int irq;
 	int got_irq;
+
+	struct mpp_taskqueue *queue;
 };
 
 struct mpp_dma_session *

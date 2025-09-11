@@ -431,11 +431,18 @@ int mpp_iommu_detach(struct mpp_iommu_info *info)
 
 int mpp_iommu_attach(struct mpp_iommu_info *info)
 {
+	struct mpp_iommu_info *last_info;
+
 	if (!info)
 		return 0;
 
+	last_info = info->queue->last_iommu_info;
+	info->queue->last_iommu_info = info;
 	if (info->domain == iommu_get_domain_for_dev(info->dev))
 		return 0;
+
+	if (last_info)
+		iommu_detach_group(last_info->domain, last_info->group);
 
 	return iommu_attach_group(info->domain, info->group);
 }
@@ -557,6 +564,7 @@ int mpp_iommu_remove(struct mpp_iommu_info *info)
 	if (!info)
 		return 0;
 
+	mpp_iommu_attach(info);
 	iommu_group_put(info->group);
 	platform_device_put(info->pdev);
 
