@@ -721,7 +721,7 @@ static void ddr_sleep_config_restore(void)
 static void suspend_workaround_timeout_wkup(void)
 {
 	int wkup;
-	u32 delta_cnt;
+	u64 delta_cnt;
 
 	if (ddr_data.entered_pmu_fsm)
 		return;
@@ -737,7 +737,7 @@ static void suspend_workaround_timeout_wkup(void)
 	delta_cnt = readl_relaxed(pmu_base + RV1103B_PMU1_WAKEUP_TIMEOUT);
 
 	if (slp_cfg.mode_config & RKPM_SLP_PMU_PMUALIVE_32K)
-		delta_cnt = delta_cnt / 32 * 24000;
+		delta_cnt = delta_cnt * 24000000 / 32768;
 
 	rk_hptimer_v2_config_sleep_timeout_int(hptimer_base, delta_cnt);
 }
