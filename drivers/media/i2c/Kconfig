@@ -1137,6 +1137,17 @@ config VIDEO_GC2093
 	  To compile this driver as a module, choose M here: the
 	  module will be called gc2093.
 
+config VIDEO_GC20C3
+	tristate "GalaxyCore GC20C3 sensor support"
+	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	depends on MEDIA_CAMERA_SUPPORT
+	select V4L2_FWNODE
+	help
+	  Support for the GalaxyCore GC20C3 sensor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called gc20c3.
+
 config VIDEO_GC2145
 	tristate "GalaxyCore GC2145 sensor support"
 	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
