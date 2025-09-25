@@ -482,8 +482,8 @@ static const struct rk_gmac_ops rk3288_ops = {
 #define RK3308_GRF_MAC_CON0		0x04a0
 
 /* RK3308_GRF_MAC_CON0 */
-#define RK3308_GMAC_FLOW_CTRL		GRF_BIT(3)
-#define RK3308_GMAC_FLOW_CTRL_CLR	GRF_CLR_BIT(3)
+#define RK3308_GMAC_FLOW_CTRL		GRF_BIT(1)
+#define RK3308_GMAC_FLOW_CTRL_CLR	GRF_CLR_BIT(1)
 
 static const struct rk_gmac_ops rk3308_ops = {
 	.gmac_grf_reg = RK3308_GRF_MAC_CON0,
