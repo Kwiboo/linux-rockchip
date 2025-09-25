@@ -486,6 +486,8 @@ static const struct rk_gmac_ops rk3288_ops = {
 #define RK3308_GMAC_FLOW_CTRL_CLR	GRF_CLR_BIT(1)
 
 static const struct rk_gmac_ops rk3308_ops = {
+	.set_speed = rk_set_clk_mac_speed,
+
 	.gmac_grf_reg = RK3308_GRF_MAC_CON0,
 	.gmac_phy_intf_sel_mask = GENMASK_U16(4, 2),
 
