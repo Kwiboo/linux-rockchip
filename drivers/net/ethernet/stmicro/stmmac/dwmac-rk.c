@@ -519,8 +519,14 @@ static const struct rk_reg_speed_data rk3308_reg_speed_data = {
 static int rk3308_set_speed(struct rk_priv_data *bsp_priv,
 			    phy_interface_t interface, int speed)
 {
-	return rk_set_reg_speed(bsp_priv, &rk3308_reg_speed_data,
-				RK3308_GRF_MAC_CON0, interface, speed);
+	int ret;
+
+	ret = rk_set_reg_speed(bsp_priv, &rk3308_reg_speed_data,
+			       RK3308_GRF_MAC_CON0, interface, speed);
+	if (ret)
+		return ret;
+
+	return rk_set_clk_mac_speed(bsp_priv, interface, speed);
 }
 
 static const struct rk_gmac_ops rk3308_ops = {
