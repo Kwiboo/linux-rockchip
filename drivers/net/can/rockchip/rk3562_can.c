@@ -105,7 +105,6 @@ enum rk3562_can_reg {
 
 enum {
 	ROCKCHIP_RK3562_CAN_MODE = 0,
-	ROCKCHIP_RK3562_CANFD_MODE,
 };
 
 #define DATE_LENGTH_12_BYTE	(0x9)
@@ -121,7 +120,6 @@ enum {
 #define CAN_TX_REQ_FULL		((CAN_TX0_REQ) | (CAN_TX1_REQ))
 
 #define MODE_FDOE		BIT(15)
-#define MODE_BRSD		BIT(13)
 #define MODE_SPACE_RX		BIT(12)
 #define MODE_AUTO_RETX		BIT(10)
 #define MODE_RXSORT		BIT(7)
@@ -189,9 +187,6 @@ enum {
 #define TDCR_TDCO_MASK		(0x3f << TDCR_TDCO_SHIFT)
 #define TDCR_TDC_ENABLE		BIT(0)
 
-#define TX_FD_ENABLE		BIT(5)
-#define TX_FD_BRS_ENABLE	BIT(4)
-
 #define FIFO_ENABLE		BIT(0)
 #define FIFO_FIXED_DATA		BIT(2)
 #define RX_FIFO_CNT0_SHIFT	4
@@ -205,10 +200,6 @@ enum {
 #define FORMAT_MASK		(0x1 << FORMAT_SHIFT)
 #define RTR_SHIFT		6
 #define RTR_MASK		(0x1 << RTR_SHIFT)
-#define FDF_SHIFT		5
-#define FDF_MASK		(0x1 << FDF_SHIFT)
-#define BRS_SHIFT		4
-#define BRS_MASK		(0x1 << BRS_SHIFT)
 #define DLC_SHIFT		0
 #define DLC_MASK		(0xF << DLC_SHIFT)
 
@@ -314,7 +305,6 @@ static int rk3562_can_set_bittiming(struct net_device *ndev)
 {
 	struct rk3562_can *rcan = netdev_priv(ndev);
 	const struct can_bittiming *bt = &rcan->can.bittiming;
-	const struct can_bittiming *dbt = &rcan->can.data_bittiming;
 	u16 brp, sjw, tseg1, tseg2;
 	u32 reg_btp;
 
@@ -330,40 +320,6 @@ static int rk3562_can_set_bittiming(struct net_device *ndev)
 		reg_btp |= NBTP_MODE_3_SAMPLES;
 
 	rk3562_can_write(rcan, CAN_NBTP, reg_btp);
-
-	if (rcan->can.ctrlmode & CAN_CTRLMODE_FD) {
-		reg_btp = 0;
-		brp = (dbt->brp >> 1) - 1;
-		sjw = dbt->sjw - 1;
-		tseg1 = dbt->prop_seg + dbt->phase_seg1 - 1;
-		tseg2 = dbt->phase_seg2 - 1;
-
-		if (dbt->bitrate > 2200000) {
-			u32 tdco;
-
-			/* Equation based on Bosch's ROCKCHIP_CAN User Manual's
-			 * Transmitter Delay Compensation Section
-			 */
-			tdco = (rcan->can.clock.freq / dbt->bitrate) * 2 / 3;
-			/* Max valid TDCO value is 63 */
-			if (tdco > 63)
-				tdco = 63;
-
-			rk3562_can_write(rcan, CAN_TDCR,
-					 (tdco << TDCR_TDCO_SHIFT) |
-					 TDCR_TDC_ENABLE);
-		}
-
-		reg_btp |= (brp << DBTP_DBRP_SHIFT) |
-			   (sjw << DBTP_DSJW_SHIFT) |
-			   (tseg1 << DBTP_DTSEG1_SHIFT) |
-			   (tseg2 << DBTP_DTSEG2_SHIFT);
-
-		if (rcan->can.ctrlmode & CAN_CTRLMODE_3_SAMPLES)
-			reg_btp |= DBTP_MODE_3_SAMPLES;
-
-		rk3562_can_write(rcan, CAN_DBTP, reg_btp);
-	}
 
 	netdev_dbg(ndev, "%s NBTP=0x%08x, DBTP=0x%08x, TDCR=0x%08x\n", __func__,
 		   rk3562_can_read(rcan, CAN_NBTP),
@@ -506,7 +462,7 @@ static netdev_tx_t rk3562_can_start_xmit(struct sk_buff *skb,
 					 struct net_device *ndev)
 {
 	struct rk3562_can *rcan = netdev_priv(ndev);
-	struct canfd_frame *cf = (struct canfd_frame *)skb->data;
+	struct can_frame *cf = (struct can_frame *)skb->data;
 	u32 id, dlc;
 	u32 cmd = CAN_TX0_REQ;
 	int i;
@@ -523,7 +479,7 @@ static netdev_tx_t rk3562_can_start_xmit(struct sk_buff *skb,
 	if (cf->can_id & CAN_EFF_FLAG) {
 		/* Extended CAN ID format */
 		id = cf->can_id & CAN_EFF_MASK;
-		dlc = can_len2dlc(cf->len) & DLC_MASK;
+		dlc = cf->can_dlc & DLC_MASK;
 		dlc |= FORMAT_MASK;
 
 		/* Extended frames remote TX request */
@@ -532,23 +488,17 @@ static netdev_tx_t rk3562_can_start_xmit(struct sk_buff *skb,
 	} else {
 		/* Standard CAN ID format */
 		id = cf->can_id & CAN_SFF_MASK;
-		dlc = can_len2dlc(cf->len) & DLC_MASK;
+		dlc = cf->can_dlc & DLC_MASK;
 
 		/* Standard frames remote TX request */
 		if (cf->can_id & CAN_RTR_FLAG)
 			dlc |= RTR_MASK;
 	}
 
-	if ((rcan->can.ctrlmode & CAN_CTRLMODE_FD) && can_is_canfd_skb(skb)) {
-		dlc |= TX_FD_ENABLE;
-		if (cf->flags & CANFD_BRS)
-			dlc |= TX_FD_BRS_ENABLE;
-	}
-
 	rk3562_can_write(rcan, CAN_TXID, id);
 	rk3562_can_write(rcan, CAN_TXFIC, dlc);
 
-	for (i = 0; i < cf->len; i += 4)
+	for (i = 0; i < can_dlc2len(cf->can_dlc & DLC_MASK); i += 4)
 		rk3562_can_write(rcan, CAN_TXDAT0 + i,
 				 *(u32 *)(cf->data + i));
 
@@ -563,7 +513,7 @@ static int rk3562_can_rx(struct net_device *ndev)
 {
 	struct rk3562_can *rcan = netdev_priv(ndev);
 	struct net_device_stats *stats = &ndev->stats;
-	struct canfd_frame *cf;
+	struct can_frame *cf;
 	struct sk_buff *skb;
 	u32 id_rk3562_can, dlc;
 	int i = 0;
@@ -576,20 +526,14 @@ static int rk3562_can_rx(struct net_device *ndev)
 		data[i] = rk3562_can_read(rcan, CAN_RXFRD);
 
 	/* create zero'ed CAN frame buffer */
-	if (dlc & FDF_MASK)
-		skb = alloc_canfd_skb(ndev, &cf);
-	else
-		skb = alloc_can_skb(ndev, (struct can_frame **)&cf);
+	skb = alloc_can_skb(ndev, (struct can_frame **)&cf);
 	if (!skb) {
 		stats->rx_dropped++;
 		return 1;
 	}
 
 	/* Change CAN data length format to socketCAN data format */
-	if (dlc & FDF_MASK)
-		cf->len = can_dlc2len(dlc & DLC_MASK);
-	else
-		cf->len = get_can_dlc(dlc & DLC_MASK);
+	cf->can_dlc = get_can_dlc(dlc & DLC_MASK);
 
 	/* Change CAN ID format to socketCAN ID format */
 	if (dlc & FORMAT_MASK) {
@@ -605,17 +549,14 @@ static int rk3562_can_rx(struct net_device *ndev)
 			cf->can_id |= CAN_RTR_FLAG;
 	}
 
-	if (dlc & BRS_MASK)
-		cf->flags |= CANFD_BRS;
-
 	if (!(cf->can_id & CAN_RTR_FLAG)) {
 		/* Change CAN data format to socketCAN data format */
-		for (i = 0; i < cf->len; i += 4)
+		for (i = 0; i < can_dlc2len(cf->can_dlc); i += 4)
 			*(u32 *)(cf->data + i) = data[i / 4];
 	}
 
 	stats->rx_packets++;
-	stats->rx_bytes += cf->len;
+	stats->rx_bytes += cf->can_dlc;
 	netif_rx(skb);
 
 	can_led_event(ndev, CAN_LED_EVENT_RX);
@@ -747,10 +688,7 @@ static irqreturn_t rk3562_can_interrupt(int irq, void *dev_id)
 	if (isr & TX_FINISH_INT) {
 		dlc = rk3562_can_read(rcan, CAN_TXFIC);
 		/* transmission complete interrupt */
-		if (dlc & FDF_MASK)
-			stats->tx_bytes += can_dlc2len(dlc & DLC_MASK);
-		else
-			stats->tx_bytes += (dlc & DLC_MASK);
+		stats->tx_bytes += (dlc & DLC_MASK);
 		stats->tx_packets++;
 		rk3562_can_write(rcan, CAN_CMD, 0);
 		can_get_echo_skb(ndev, 0);
@@ -929,10 +867,6 @@ static const struct of_device_id rk3562_can_of_match[] = {
 		.compatible = "rockchip,rk3562-can",
 		.data = (void *)ROCKCHIP_RK3562_CAN_MODE
 	},
-	{
-		.compatible = "rockchip,rk3562-canfd",
-		.data = (void *)ROCKCHIP_RK3562_CANFD_MODE
-	},
 	{},
 };
 MODULE_DEVICE_TABLE(of, rk3562_can_of_match);
@@ -958,7 +892,7 @@ static int rk3562_can_probe(struct platform_device *pdev)
 
 	ndev = alloc_candev(sizeof(struct rk3562_can), 1);
 	if (!ndev) {
-		dev_err(&pdev->dev, "could not allocate memory for CANFD device\n");
+		dev_err(&pdev->dev, "could not allocate memory for CAN device\n");
 		return -ENOMEM;
 	}
 	rcan = netdev_priv(ndev);
@@ -974,7 +908,7 @@ static int rk3562_can_probe(struct platform_device *pdev)
 	rcan->reset = devm_reset_control_array_get(&pdev->dev, false, false);
 	if (IS_ERR(rcan->reset)) {
 		if (PTR_ERR(rcan->reset) != -EPROBE_DEFER)
-			dev_err(&pdev->dev, "failed to get canfd reset lines\n");
+			dev_err(&pdev->dev, "failed to get can reset lines\n");
 		return PTR_ERR(rcan->reset);
 	}
 	rcan->num_clks = devm_clk_bulk_get_all(&pdev->dev, &rcan->clks);
@@ -1000,22 +934,6 @@ static int rk3562_can_probe(struct platform_device *pdev)
 		rcan->rx_fifo_mask = RX_FIFO_CNT2_MASK;
 		rcan->rx_fifo_depth = 32;
 		rcan->rx_max_data = 4;
-		break;
-	case ROCKCHIP_RK3562_CANFD_MODE:
-		rcan->can.bittiming_const = &rk3562_can_bittiming_const;
-		rcan->can.data_bittiming_const = &rk3562_can_data_bittiming_const;
-		rcan->can.do_set_mode = rk3562_can_set_mode;
-		rcan->can.do_get_berr_counter = rk3562_can_get_berr_counter;
-		rcan->can.do_set_bittiming = rk3562_can_set_bittiming;
-		rcan->can.do_set_data_bittiming = rk3562_can_set_bittiming;
-		rcan->can.ctrlmode = CAN_CTRLMODE_FD;
-		/* IFI CANFD can do both Bosch FD and ISO FD */
-		rcan->can.ctrlmode_supported = CAN_CTRLMODE_LOOPBACK |
-					       CAN_CTRLMODE_FD;
-		rcan->rx_fifo_shift = RX_FIFO_CNT2_SHIFT;
-		rcan->rx_fifo_mask = RX_FIFO_CNT2_MASK;
-		rcan->rx_fifo_depth = 7;
-		rcan->rx_max_data = 18;
 		break;
 	default:
 		return -EINVAL;
