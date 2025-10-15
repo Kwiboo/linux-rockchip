@@ -3702,8 +3702,11 @@ static int rk628_csi_probe(struct i2c_client *client,
 						  csi,
 						  rk628_groups,
 						  "rk628");
-	if (IS_ERR(csi->classdev))
+	if (IS_ERR(csi->classdev)) {
+		err = PTR_ERR(csi->classdev);
+		v4l2_err(sd, "create device class failed\n");
 		goto err_hdl;
+	}
 
 	INIT_DELAYED_WORK(&csi->delayed_work_enable_hotplug,
 			rk628_csi_delayed_work_enable_hotplug);
