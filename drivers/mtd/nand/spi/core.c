@@ -530,6 +530,34 @@ static int spinand_lock_block(struct spinand_device *spinand, u8 lock)
 	return spinand_write_reg_op(spinand, REG_BLOCK_LOCK, lock);
 }
 
+static int spinand_read_page_wait(struct spinand_device *spinand, u8 *s)
+{
+	unsigned long timeo =  jiffies + msecs_to_jiffies(400);
+	u8 status;
+	int ret;
+
+	do {
+		ret = spinand_read_status(spinand, &status);
+		if (ret)
+			return ret;
+
+		if (status & STATUS_BUSY)
+			continue;
+
+		ret = spinand_read_status(spinand, &status);
+		if (ret)
+			return ret;
+
+		if (!(status & STATUS_BUSY))
+			break;
+
+	} while (time_before(jiffies, timeo));
+
+	*s = status;
+
+	return status & STATUS_BUSY ? -ETIMEDOUT : 0;
+}
+
 static int spinand_read_page(struct spinand_device *spinand,
 			     const struct nand_page_io_req *req,
 			     bool ecc_enabled)
@@ -541,9 +569,16 @@ static int spinand_read_page(struct spinand_device *spinand,
 	if (ret)
 		return ret;
 
-	ret = spinand_wait(spinand, &status);
-	if (ret < 0)
-		return ret;
+	/* Workaround for Skyhigh */
+	if (spinand->id.data[0] == 0x01) {
+		ret = spinand_read_page_wait(spinand, &status);
+		if (ret)
+			return ret;
+	} else {
+		ret = spinand_wait(spinand, &status);
+		if (ret < 0)
+			return ret;
+	}
 
 	ret = spinand_read_from_cache_op(spinand, req);
 	if (ret)
