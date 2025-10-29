@@ -350,6 +350,8 @@ static void rk3x_i2c_start(struct rk3x_i2c *i2c)
 {
 	u32 val = i2c_readl(i2c, REG_CON) & REG_CON_TUNING_MASK;
 	bool auto_stop = rk3x_i2c_auto_stop(i2c);
+	unsigned long flags;
+	unsigned int offset;
 	int length = 0;
 
 	/* enable appropriate interrupts */
@@ -374,10 +376,8 @@ static void rk3x_i2c_start(struct rk3x_i2c *i2c)
 	if (!(i2c->msg->flags & I2C_M_IGNORE_NAK))
 		val |= REG_CON_ACTACK;
 
-	/* enable transition */
 	if (i2c->mode == REG_CON_MOD_TX) {
-		i2c_writel(i2c, val, REG_CON);
-		i2c_writel(i2c, length, REG_MTXCNT);
+		offset = REG_MTXCNT;
 	} else {
 		if (i2c->msg->len > 32) {
 			length = 32;
@@ -386,9 +386,17 @@ static void rk3x_i2c_start(struct rk3x_i2c *i2c)
 			length = i2c->msg->len;
 			val |= REG_CON_LASTACK;
 		}
-		i2c_writel(i2c, val, REG_CON);
-		i2c_writel(i2c, length, REG_MRXCNT);
+		offset = REG_MRXCNT;
 	}
+
+	/*
+	 * Ensure the I2C atomic start condition is not broken to avoid
+	 * an excessively long start setup time on the bus.​​
+	 */
+	spin_lock_irqsave(&i2c->lock, flags);
+	i2c_writel(i2c, val, REG_CON);
+	i2c_writel(i2c, length, offset);
+	spin_unlock_irqrestore(&i2c->lock, flags);
 }
 
 /**
