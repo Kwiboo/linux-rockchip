@@ -374,13 +374,21 @@ static void rk3x_i2c_start(struct rk3x_i2c *i2c)
 	if (!(i2c->msg->flags & I2C_M_IGNORE_NAK))
 		val |= REG_CON_ACTACK;
 
-	i2c_writel(i2c, val, REG_CON);
-
 	/* enable transition */
-	if (i2c->mode == REG_CON_MOD_TX)
+	if (i2c->mode == REG_CON_MOD_TX) {
+		i2c_writel(i2c, val, REG_CON);
 		i2c_writel(i2c, length, REG_MTXCNT);
-	else
-		rk3x_i2c_prepare_read(i2c);
+	} else {
+		if (i2c->msg->len > 32) {
+			length = 32;
+			val &= ~REG_CON_LASTACK;
+		} else {
+			length = i2c->msg->len;
+			val |= REG_CON_LASTACK;
+		}
+		i2c_writel(i2c, val, REG_CON);
+		i2c_writel(i2c, length, REG_MRXCNT);
+	}
 }
 
 /**
