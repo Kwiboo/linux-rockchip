@@ -407,6 +407,7 @@ exit:
 #ifdef CONFIG_OF
 static const struct of_device_id rk_tb_crypto_dt_match[] = {
 	{ .compatible = "rockchip,rv1126-crypto" },
+	{ .compatible = "rockchip,crypto-v4" },
 	{},
 };
 #endif
