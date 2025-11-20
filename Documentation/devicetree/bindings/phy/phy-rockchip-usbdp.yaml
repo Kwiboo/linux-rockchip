@@ -78,6 +78,12 @@ properties:
       Phandle to the syscon managing the 'video output general register files'.
       When select the dp lane mapping will request its phandle.
 
+  rockchip,udphy-tune-sequence:
+    description:
+       The property is an array of 3-tuples entries, where each entry comprises
+       register offset, register value and delay (in microseconds) to be applied
+       after the register write.
+
   dp-port:
     type: object
     additionalProperties: false
