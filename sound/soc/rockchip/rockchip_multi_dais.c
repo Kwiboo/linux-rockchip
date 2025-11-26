@@ -464,7 +464,8 @@ static int rockchip_mdais_dai_prepare(struct platform_device *pdev,
 				    SNDRV_PCM_FMTBIT_S16_LE |
 				    SNDRV_PCM_FMTBIT_S20_3LE |
 				    SNDRV_PCM_FMTBIT_S24_LE |
-				    SNDRV_PCM_FMTBIT_S32_LE),
+				    SNDRV_PCM_FMTBIT_S32_LE |
+				    SNDRV_PCM_FMTBIT_IEC958_SUBFRAME_LE),
 		},
 		.capture = {
 			.stream_name = "Capture",
@@ -475,7 +476,8 @@ static int rockchip_mdais_dai_prepare(struct platform_device *pdev,
 				    SNDRV_PCM_FMTBIT_S16_LE |
 				    SNDRV_PCM_FMTBIT_S20_3LE |
 				    SNDRV_PCM_FMTBIT_S24_LE |
-				    SNDRV_PCM_FMTBIT_S32_LE),
+				    SNDRV_PCM_FMTBIT_S32_LE |
+				    SNDRV_PCM_FMTBIT_IEC958_SUBFRAME_LE),
 		},
 		.ops = &rockchip_mdais_dai_ops,
 	};
