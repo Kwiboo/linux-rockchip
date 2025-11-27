@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 Rockchip Electronics Co., Ltd.
+ */
+
+/dts-v1/;
+
+#include "rv1106g-evb1-v10.dts"
+#include "rv1106-amp.dtsi"
+
+/ {
+	model = "Rockchip RV1106G EVB1 V11 AMP Board";
+	compatible = "rockchip,rv1106g-evb1-v11-amp", "rockchip,rv1106";
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		rtos: rtos@1000000 {
+			reg = <0x1000000 0x3c000>;
+			no-map;
+		};
+
+		/* Reserved for mcu log via pstore */
+		ramoops: ramoops@103c000 {
+			compatible = "ramoops";
+			reg = <0x103c000 0x4000>;
+			record-size = <0x0>;
+			console-size = <0x0>;
+			ftrace-size = <0x0>;
+			pmsg-size = <0x0>;
+			boot-log-size = <0x4000>;
+			boot-log-count = <0x1>;
+			status = "disabled";
+		};
+
+		rpmsg_reserved: rpmsg@1040000 {
+			reg = <0x1040000 0x10000>;
+			no-map;
+		};
+
+		rpmsg_dma_reserved: rpmsg-dma@1050000 {
+			compatible = "shared-dma-pool";
+			reg = <0x1050000 0x10000>;
+			no-map;
+		};
+	};
+
+	rpmsg: rpmsg@1040000 {
+		compatible = "rockchip,rpmsg";
+		mbox-names = "rpmsg-rx", "rpmsg-tx";
+		mboxes = <&mailbox 0 &mailbox 3>;
+		rockchip,vdev-nums = <1>;
+		rockchip,link-id = <0x03>;
+		reg = <0x1040000 0x10000>;
+		memory-region = <&rpmsg_dma_reserved>;
+	};
+
+	/delete-node/ vcc5v0-usb;
+};
+
+&mailbox {
+	rockchip,txpoll-period-ms = <1>;
+	status = "okay";
+};
+
+&pinctrl {
+	/delete-node/ usb;
+};
+
+&rockchip_amp {
+	clocks = <&cru CLK_TIMER_ROOT>, <&cru PCLK_TIMER>, <&cru CLK_TIMER5>,
+		 <&cru CLK_CORE_MCU>, <&cru CLK_CORE_MCU_RTC>, <&cru PCLK_MAILBOX>,
+		 <&cru SCLK_UART5>, <&cru PCLK_UART5>;
+};
+
+&sdmmc {
+	status = "disabled";
+};
+
+&sfc {
+	status = "okay";
+
+	flash@0 {
+		compatible = "spi-nand";
+		reg = <0>;
+		spi-max-frequency = <75000000>;
+		spi-rx-bus-width = <4>;
+		spi-tx-bus-width = <1>;
+	};
+};
+
+&u2phy_otg {
+	/delete-property/ vbus-supply;
+};
+
+&usbdrd_dwc3 {
+	dr_mode = "otg";
+};
+
+&vdd_arm {
+	regulator-min-microvolt = <800000>;
+	regulator-max-microvolt = <1000000>;
+	regulator-init-microvolt = <900000>;
+};
