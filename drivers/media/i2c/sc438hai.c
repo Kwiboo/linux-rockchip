@@ -7,7 +7,7 @@
  * V0.0X01.0X01 first version
  */
 
-//#define DEBUG
+// #define DEBUG
 #include <linux/clk.h>
 #include <linux/device.h>
 #include <linux/delay.h>
@@ -703,8 +703,8 @@ static const struct sc438hai_mode supported_modes[] = {
 			.numerator = 10000,
 			.denominator = 300000,
 		},
-		.exp_def = 0x0080,//mark
-		.hts_def = 0x5dc * SC438HAI_LANES * 2,
+		.exp_def = 0x0c78,//mark
+		.hts_def = 0x5dc,
 		.vts_def = 0x0c80,
 		.bus_fmt = MEDIA_BUS_FMT_SBGGR10_1X10,
 		.reg_list = sc438hai_linear_10_2688x1520_30fps_regs,
@@ -721,8 +721,8 @@ static const struct sc438hai_mode supported_modes[] = {
 			.numerator = 10000,
 			.denominator = 300000,
 		},
-		.exp_def = 0x0080,
-		.hts_def = 0x05dc * SC438HAI_LANES * 2,
+		.exp_def = 0x0c78,
+		.hts_def = 0x05dc,
 		.vts_def = 0x0c80,
 		.bus_fmt = MEDIA_BUS_FMT_SBGGR10_1X10,
 		.reg_list = sc438hai_hdr2_10_2688x1520_30fps_regs,
@@ -730,7 +730,7 @@ static const struct sc438hai_mode supported_modes[] = {
 		.bpp = 10,
 		.xvclk_freq = SC438HAI_XVCLK_FREQ,
 		.link_freq_idx = 0,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
 		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
 		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
 		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr2
@@ -1661,7 +1661,7 @@ static int __sc438hai_power_on(struct sc438hai *sc438hai)
 		return 0;
 
 	if (!IS_ERR(sc438hai->reset_gpio))
-		gpiod_set_value_cansleep(sc438hai->reset_gpio, 1);
+		gpiod_set_value_cansleep(sc438hai->reset_gpio, 0);
 
 	ret = regulator_bulk_enable(SC438HAI_NUM_SUPPLIES, sc438hai->supplies);
 	if (ret < 0) {
@@ -1670,13 +1670,13 @@ static int __sc438hai_power_on(struct sc438hai *sc438hai)
 	}
 
 	if (!IS_ERR(sc438hai->reset_gpio))
-		gpiod_set_value_cansleep(sc438hai->reset_gpio, 0);
+		gpiod_set_value_cansleep(sc438hai->reset_gpio, 1);
 
 	usleep_range(500, 1000);
 
 	msleep(20);
 	if (!IS_ERR(sc438hai->pwdn_gpio))
-		gpiod_set_value_cansleep(sc438hai->pwdn_gpio, 0);
+		gpiod_set_value_cansleep(sc438hai->pwdn_gpio, 1);
 
 	if (!IS_ERR(sc438hai->reset_gpio))
 		usleep_range(6000, 8000);
@@ -1711,9 +1711,9 @@ static void __sc438hai_power_off(struct sc438hai *sc438hai)
 	}
 
 	if (!IS_ERR(sc438hai->pwdn_gpio))
-		gpiod_set_value_cansleep(sc438hai->pwdn_gpio, 1);
+		gpiod_set_value_cansleep(sc438hai->pwdn_gpio, 0);
 	if (!IS_ERR(sc438hai->reset_gpio))
-		gpiod_set_value_cansleep(sc438hai->reset_gpio, 1);
+		gpiod_set_value_cansleep(sc438hai->reset_gpio, 0);
 	if (!IS_ERR_OR_NULL(sc438hai->pins_sleep)) {
 		ret = pinctrl_select_state(sc438hai->pinctrl,
 					   sc438hai->pins_sleep);
@@ -2070,7 +2070,7 @@ static int sc438hai_check_sensor_id(struct sc438hai *sc438hai,
 		return -ENODEV;
 	}
 
-	dev_info(dev, "Detected OV%06x sensor\n", CHIP_ID);
+	dev_info(dev, "Detected SC438HAI sensor(CHIP_ID:0x%06x)\n", CHIP_ID);
 
 	return 0;
 }
