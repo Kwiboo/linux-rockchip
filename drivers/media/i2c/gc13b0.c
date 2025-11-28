@@ -9655,7 +9655,11 @@ static void __exit sensor_mod_exit(void)
 	i2c_del_driver(&gc13b0_i2c_driver);
 }
 
+#if defined(CONFIG_VIDEO_ROCKCHIP_THUNDER_BOOT_ISP) && !defined(CONFIG_INITCALL_ASYNC)
+subsys_initcall(sensor_mod_init);
+#else
 device_initcall_sync(sensor_mod_init);
+#endif
 module_exit(sensor_mod_exit);
 
 MODULE_DESCRIPTION("galaxycore gc13b0 sensor driver");
