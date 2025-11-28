@@ -98,6 +98,13 @@
 
 #define RK3568_NBYTES			2
 
+/* RK3572 Register */
+#define RK3572_OTPC_AUTO_CTRL		0x18
+#define RK3572_OTPC_AUTO_EN		0x2c
+#define RK3572_OTPC_INT_ST		0x94
+#define RK3572_OTPC_DOUT0		0xa0
+#define RK3572_AUTO_EN			0xffff
+
 #define RK3576_NO_SECURE_OFFSET		0x1C0
 
 #define RK3588_OTPC_AUTO_CTRL		0x04
@@ -675,6 +682,72 @@ out:
 	return ret;
 }
 
+static int rk3572_otp_wait_status(struct rockchip_otp *otp, u32 flag)
+{
+	u32 status = 0;
+	int ret;
+
+	ret = readl_poll_timeout_atomic(otp->base + RK3572_OTPC_INT_ST, status,
+					(status & flag), 1, OTPC_TIMEOUT);
+	if (ret)
+		return ret;
+
+	/* clean int status */
+	writel(flag, otp->base + RK3572_OTPC_INT_ST);
+
+	return 0;
+}
+
+static int rk3572_otp_read(void *context, unsigned int offset,
+			   void *val, size_t bytes)
+{
+	struct rockchip_otp *otp = context;
+	unsigned int addr_start, addr_end, addr_len;
+	int ret = 0, i = 0;
+	u32 data;
+	u8 *buf;
+
+	if (offset >= otp->data->size)
+		return -ENOMEM;
+	if (offset + bytes > otp->data->size)
+		bytes = otp->data->size - offset;
+
+	addr_start = round_down(offset, RK3588_NBYTES) / RK3588_NBYTES;
+	addr_end = round_up(offset + bytes, RK3588_NBYTES) / RK3588_NBYTES;
+	addr_len = addr_end - addr_start;
+	addr_start += otp->data->ns_offset;
+
+	buf = kzalloc(array_size(addr_len, RK3588_NBYTES), GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	while (addr_len--) {
+		writel((addr_start << RK3588_ADDR_SHIFT) |
+		       (RK3588_BURST_NUM << RK3588_BURST_SHIFT),
+		       otp->base + RK3572_OTPC_AUTO_CTRL);
+		writel(RK3572_AUTO_EN, otp->base + RK3572_OTPC_AUTO_EN);
+
+		ret = rk3572_otp_wait_status(otp, RK3588_RD_DONE);
+		if (ret < 0) {
+			dev_err(otp->dev, "timeout during read setup\n");
+			goto read_end;
+		}
+
+		data = readl(otp->base + RK3572_OTPC_DOUT0);
+		memcpy(&buf[i], &data, RK3588_NBYTES);
+
+		i += RK3588_NBYTES;
+		addr_start++;
+	}
+
+	memcpy(val, buf + offset % RK3588_NBYTES, bytes);
+
+read_end:
+	kfree(buf);
+
+	return ret;
+}
+
 static int rk3588_otp_wait_status(struct rockchip_otp *otp, u32 flag)
 {
 	u32 status = 0;
@@ -1067,6 +1140,14 @@ static const char * const rk3576_otp_clocks[] = {
 	"otpc", "apb",
 };
 
+static const struct rockchip_data rk3572_data = {
+	.size = 0x90,
+	.ns_offset = RK3576_NO_SECURE_OFFSET,
+	.clocks = rk3576_otp_clocks,
+	.num_clks = ARRAY_SIZE(rk3576_otp_clocks),
+	.reg_read = rk3572_otp_read,
+};
+
 static const struct rockchip_data rk3576_data = {
 	.size = 0x100,
 	.ns_offset = RK3576_NO_SECURE_OFFSET,
@@ -1163,6 +1244,12 @@ static const struct of_device_id rockchip_otp_match[] = {
 	{
 		.compatible = "rockchip,rk3568-otp",
 		.data = (void *)&rk3568_data,
+	},
+#endif
+#ifdef CONFIG_CPU_RK3572
+	{
+		.compatible = "rockchip,rk3572-otp",
+		.data = &rk3572_data,
 	},
 #endif
 #ifdef CONFIG_CPU_RK3576
