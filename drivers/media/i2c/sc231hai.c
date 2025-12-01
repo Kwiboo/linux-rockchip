@@ -668,7 +668,7 @@ static int sc231hai_set_gain_reg(struct sc231hai *sc231hai, u32 total_gain, int 
 		Coarse_gain = 1; DIG_gain = 1;
 		Coarse_gain_reg = 0x80;
 		DIG_gain_reg = 0x0; DIG_Fine_gain_reg = 0x80;
-	} else if (total_gain < 15115) {	/* 7.4x ~ 14.8x  1024 * 14.8 = 15115*/
+	} else if (total_gain < 15155) {	/* 7.4x ~ 14.8x  1024 * 14.8 = 15155*/
 		Dcg_gainx100 = 370;
 		Coarse_gain = 2; DIG_gain = 1;
 		Coarse_gain_reg = 0x81;
