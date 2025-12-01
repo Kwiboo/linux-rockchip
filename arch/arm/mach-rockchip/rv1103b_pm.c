@@ -1127,7 +1127,9 @@ static void pmu_sleep_restore(void)
 
 	resume_workaround_timeout_wkup();
 
-	sleep_rsv_mem[0] = 0;
+	if (pm_suspend_state == PM_SUSPEND_MEM_ULTRA)
+		sleep_rsv_mem[0] = 0;
+
 	writel_relaxed(0, pmugrf_base + RV1103B_PMUGRF_OS_REG(9));
 
 	writel_relaxed(0xffff0000, pmu_base + RV1103B_PMU0_PWR_CON);
