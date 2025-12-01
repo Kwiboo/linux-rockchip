@@ -871,6 +871,7 @@ disable_clk_bulk:
 
 static int rockchip_pcie_deinit_host(struct rockchip_pcie *rockchip)
 {
+	reset_control_assert(rockchip->rst);
 	phy_exit(rockchip->phy);
 	phy_power_off(rockchip->phy);
 	clk_bulk_disable_unprepare(rockchip->clk_cnt, rockchip->clks);
