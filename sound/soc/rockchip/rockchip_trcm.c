@@ -292,7 +292,7 @@ int dmaengine_trcm_dma_guard_ctrl(struct snd_soc_component *component,
 					 guard->buffer_size,
 					 guard->buffer_size,
 					 direction,
-					 DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
+					 DMA_CTRL_ACK);
 	if (!desc) {
 		dev_err(component->dev, "Failed to get dma desc\n");
 		return -ENOMEM;
