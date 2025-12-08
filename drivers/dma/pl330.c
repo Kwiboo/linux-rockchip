@@ -1469,7 +1469,8 @@ static int _period(struct pl330_dmac *pl330, unsigned int dry_run, u8 buf[],
 		}
 	}
 
-	off += _emit_SEV(dry_run, &buf[off], ev);
+	if (pxs->desc->txd.flags & DMA_PREP_INTERRUPT)
+		off += _emit_SEV(dry_run, &buf[off], ev);
 
 	return off;
 }
@@ -1607,7 +1608,8 @@ static int _setup_req(struct pl330_dmac *pl330, unsigned dry_run,
 		off += _setup_xfer(pl330, dry_run, &buf[off], pxs);
 
 		/* DMASEV peripheral/event */
-		off += _emit_SEV(dry_run, &buf[off], thrd->ev);
+		if (pxs->desc->txd.flags & DMA_PREP_INTERRUPT)
+			off += _emit_SEV(dry_run, &buf[off], thrd->ev);
 		/* DMAEND */
 		off += _emit_END(dry_run, &buf[off]);
 	} else {
@@ -2815,6 +2817,7 @@ static struct dma_pl330_desc *pl330_get_desc(struct dma_pl330_chan *pch)
 	/* Initialize the descriptor */
 	desc->pchan = pch;
 	desc->txd.cookie = 0;
+	desc->txd.flags = 0;
 	async_tx_ack(&desc->txd);
 
 	desc->peri = peri_id ? pch->chan.chan_id : 0;
