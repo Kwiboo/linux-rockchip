@@ -13,6 +13,7 @@ properties:
   compatible:
     enum:
       - rockchip,rk3568-naneng-combphy
+      - rockchip,rk3572-pipe-combphy
       - rockchip,rv1126b-usb3-phy
 
   reg:
