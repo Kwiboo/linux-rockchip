@@ -9,6 +9,7 @@
 #include <linux/delay.h>
 #include <linux/dmaengine.h>
 #include <linux/interrupt.h>
+#include <linux/ioctl.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -16,8 +17,11 @@
 #include <linux/pinctrl/devinfo.h>
 #include <linux/platform_device.h>
 #include <linux/spi/spi.h>
+#include <linux/uaccess.h>
 #include <linux/pm_runtime.h>
 #include <linux/scatterlist.h>
+
+#include <uapi/linux/rk-spi.h>
 
 #define DRIVER_NAME "rockchip-spi"
 
@@ -908,6 +912,34 @@ static int rockchip_spi_setup(struct spi_device *spi)
 	return 0;
 }
 
+static long rockchip_spi_misc_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+	struct miscdevice *misc = filp->private_data;
+	struct spi_controller *ctlr = dev_get_drvdata(misc->parent);
+	struct rockchip_spi *rs = spi_controller_get_devdata(ctlr);
+	u32 rsd_value;
+
+	switch (cmd) {
+	case ROCKCHIP_SPI_SET_RSD:
+		rsd_value = arg;
+
+		if (rsd_value > CR0_RSD_MAX) {
+			dev_warn(rs->dev, "Invalid RSD value %u, max is %u\n",
+				 rsd_value, CR0_RSD_MAX);
+			return -EINVAL;
+		}
+
+		rs->rsd = (u8)rsd_value;
+		break;
+
+	default:
+		dev_warn(rs->dev, "Unknown ioctl command: 0x%x\n", cmd);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static int rockchip_spi_misc_open(struct inode *inode, struct file *filp)
 {
 	struct miscdevice *misc = filp->private_data;
@@ -960,6 +992,8 @@ static const struct file_operations rockchip_spi_misc_fops = {
 	.open		= rockchip_spi_misc_open,
 	.release	= rockchip_spi_misc_release,
 	.mmap		= rockchip_spi_mmap,
+	.unlocked_ioctl	= rockchip_spi_misc_ioctl,
+	.compat_ioctl	= rockchip_spi_misc_ioctl,
 };
 
 static int rockchip_spi_probe(struct platform_device *pdev)
