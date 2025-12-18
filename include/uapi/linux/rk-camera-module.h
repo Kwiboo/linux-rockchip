@@ -274,6 +274,12 @@
 #define RKMODULE_GET_MERGE_WGT_CURVE       \
 	_IOR('x', 6, struct rkmodule_mge_oewgt)
 
+#define RKMODULE_GET_LCG_LOFIC_RATIO	\
+	_IOR('x', 7, struct rkmodule_dcg_ratio)
+
+#define RKMODULE_GET_LOFIC_VS_RATIO	\
+	_IOR('x', 8, struct rkmodule_dcg_ratio)
+
 #define RKMODULE_REG_LIST_MAX (16)
 struct rkmodule_reg_struct {
 	__u32 reg_addr;
@@ -998,6 +1004,7 @@ enum rkmodule_wb_type {
 	RKMODULE_LCG_WB_GAIN,
 	RKMODULE_SPD_WB_GAIN,
 	RKMODULE_VS_WB_GAIN,
+	RKMODULE_LFC_WB_GAIN,
 };
 
 struct rkmodule_wb_gain {
@@ -1020,6 +1027,7 @@ enum rkmodule_blc_type {
 	RKMODULE_LCG_BLC,
 	RKMODULE_SPD_BLC,
 	RKMODULE_VS_BLC,
+	RKMODULE_LOFIC_BLC,
 };
 
 struct rkmodule_blc_group {
