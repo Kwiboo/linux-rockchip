@@ -1933,24 +1933,6 @@ static const struct sc450ai_mode supported_modes_4lane[] = {
 
 static const struct sc450ai_mode supported_modes_2lane[] = {
 	{
-		.width = 2560,
-		.height = 1440,
-		.max_fps = {
-			.numerator = 10000,
-			.denominator = 500000,
-		},
-		.exp_def = 0x0080,//mark
-		.hts_def = 0x2ee * 4,
-		.vts_def = 0x05a0,
-		.bus_fmt = MEDIA_BUS_FMT_SBGGR10_1X10,
-		.reg_list = sc450ai_linear_10_2560x1440_50fps_2lane_regs,
-		.hdr_mode = NO_HDR,
-		.mclk = 27000000,
-		.link_freq_idx = 2,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
-		.lanes = 2,
-	},
-	{
 		.width = 2688,
 		.height = 1520,
 		.max_fps = {
@@ -1967,6 +1949,25 @@ static const struct sc450ai_mode supported_modes_2lane[] = {
 		.mclk = 27000000,
 		.link_freq_idx = 1,
 		.bpp = 10,
+		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.lanes = 2,
+	},
+	{
+		.width = 2560,
+		.height = 1440,
+		.max_fps = {
+			.numerator = 10000,
+			.denominator = 500000,
+		},
+		.exp_def = 0x0080,//mark
+		.hts_def = 0x2ee * 4,
+		.vts_def = 0x05a0,
+		.bus_fmt = MEDIA_BUS_FMT_SBGGR10_1X10,
+		.global_reg_list = sc450ai_global_regs_2lane,
+		.reg_list = sc450ai_linear_10_2560x1440_50fps_2lane_regs,
+		.hdr_mode = NO_HDR,
+		.mclk = 27000000,
+		.link_freq_idx = 2,
 		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
 		.lanes = 2,
 	},
