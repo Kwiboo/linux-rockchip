@@ -5,6 +5,11 @@
  * Copyright (C) 2025 Rockchip Electronics Co., Ltd.
  *
  * V0.0X01.0X01 first version
+ * v0.0X01.0X02 fixed power on/power off sequence
+ * v0.0X01.0X03 fixed digital gain calculation: round to nearest,
+ *             clamp fine dgain to 0x80-0xfc, fix gain fall-through
+ *             at max gain, fix swapped again/dgain regs in hdr
+ *             short gain path
  */
 
 // #define DEBUG
@@ -841,62 +846,68 @@ static int sc438hai_set_gain_reg(struct sc438hai *sc438hai, u32 gain)
 		gain = SC438HAI_GAIN_MAX;
 
 	gain_factor = gain * 2;
-	if (gain_factor < 128) {
+	if (gain_factor < 128) {		//again: 1.0x - 2.0x gain
 		coarse_again = 0x00;
 		coarse_dgain = 0x00;
 		fine_dgain = 0x80;
 		fine_again = gain_factor / 2;
-	} else if (gain_factor <= 160) {
+	} else if (gain_factor <= 160) {	//again:2.0x - 2.50x gain
 		coarse_again = 0x01;
 		coarse_dgain = 0x00;
 		fine_dgain = 0x80;
 		fine_again = gain_factor / 4;
-	} else if (gain_factor < 320) {
+	} else if (gain_factor < 320) {		//again:2.5x - 5.06x gain
 		coarse_again = 0x80;
 		coarse_dgain = 0x00;
 		fine_dgain = 0x80;
 		fine_again = gain_factor / 5;
-	} else if (gain_factor < 640) {
+	} else if (gain_factor < 640) {		//again:5.06x - 10.12x gain
 		coarse_again = 0x81;
 		coarse_dgain = 0x00;
 		fine_dgain = 0x80;
 		fine_again = gain_factor / 10;
-	} else if (gain_factor < 1280) {
+	} else if (gain_factor < 1280) {	//again:10.12x - 20.24x gain
 		coarse_again = 0x83;
 		coarse_dgain = 0x00;
 		fine_dgain = 0x80;
 		fine_again = gain_factor / 20;
-	} else if (gain_factor < 2560) {
+	} else if (gain_factor < 2560) {	//again:20.24x - 40.48x gain
 		coarse_again = 0x87;
 		coarse_dgain = 0x00;
 		fine_dgain = 0x80;
 		fine_again = gain_factor / 40;
-	} else if (gain_factor < 5120) {
+	} else if (gain_factor < 5120) {	//again:40.48x - 80.96x gain
 		coarse_again = 0x8f;
 		coarse_dgain = 0x00;
 		fine_dgain = 0x80;
 		fine_again = gain_factor / 80;
-	} else if (gain_factor < 5120 * 2) {
+	} else if (gain_factor < 5120 * 2) {	//again:79.69x, dgain: 1.0x - 2.0x gain
 		//dgain start
 		coarse_again = 0x8f;
 		coarse_dgain = 0x00;
 		fine_again = 0x3f;
-		fine_dgain = (gain_factor - 5120) / 160 * 4 + 128;
-	} else if (gain_factor < 5120 * 4) {
+		fine_dgain = DIV_ROUND_CLOSEST(gain_factor - 5120, 160) * 4 + 128;
+		fine_dgain = clamp_t(u32, fine_dgain, 128, 252);
+	} else if (gain_factor < 5120 * 4) {	//again:79.69x, dgain: 2.0x - 4.0x gain
 		coarse_again = 0x8f;
 		coarse_dgain = 0x01;
 		fine_again = 0x3f;
-		fine_dgain = (gain_factor - 5120 * 2) / 320 * 4 + 128;
-	} else if (gain_factor < 5120 * 8) {
+		fine_dgain = DIV_ROUND_CLOSEST(gain_factor - 5120 * 2, 320) * 4 + 128;
+		fine_dgain = clamp_t(u32, fine_dgain, 128, 252);
+	} else if (gain_factor < 5120 * 8) {	//again:79.69x, dgain: 4.0x - 8.0x gain
 		coarse_again = 0x8f;
 		coarse_dgain = 0x03;
 		fine_again = 0x3f;
-		fine_dgain = (gain_factor - 5120 * 4) / 640 * 4 + 128;
-	} else if (gain_factor < 5120 * 16) {
+		fine_dgain = DIV_ROUND_CLOSEST(gain_factor - 5120 * 4, 640) * 4 + 128;
+		fine_dgain = clamp_t(u32, fine_dgain, 128, 252);
+	} else {				//again:79.69x, dgain: 8.0x - 16.0x gain
+		if (gain_factor > 5120 * 16 - 1)
+			gain_factor = 5120 * 16 - 1;
 		coarse_again = 0x8f;
 		coarse_dgain = 0x07;
 		fine_again = 0x3f;
-		fine_dgain = (gain_factor - 5120 * 8) / 1280 * 4 + 128;
+		fine_dgain = DIV_ROUND_CLOSEST(gain_factor - 5120 * 8, 1280) * 4 + 128;
+		fine_dgain = clamp_t(u32, fine_dgain, 128, 252);
 	}
 	dev_dbg(&client->dev, "c_again: 0x%x, c_dgain: 0x%x, f_again: 0x%x, f_dgain: 0x%0x\n",
 		coarse_again, coarse_dgain, fine_again, fine_dgain);
@@ -965,29 +976,35 @@ static int sc438hai_set_gain_reg_hdr(struct sc438hai *sc438hai, u32 gain)
 	} else if (gain_factor < 5120) {
 		coarse_again = 0x8f;
 		coarse_dgain = 0x00;
-		fine_again = 0x80;
-		fine_dgain = gain_factor / 80;
+		fine_dgain = 0x80;
+		fine_again = gain_factor / 80;
 	} else if (gain_factor < 5120 * 2) {
 		//dgain start
 		coarse_again = 0x8f;
 		coarse_dgain = 0x00;
 		fine_again = 0x3f;
-		fine_dgain = (gain_factor - 5120) / 160 * 4 + 128;
+		fine_dgain = DIV_ROUND_CLOSEST(gain_factor - 5120, 160) * 4 + 128;
+		fine_dgain = clamp_t(u32, fine_dgain, 128, 252);
 	} else if (gain_factor < 5120 * 4) {
 		coarse_again = 0x8f;
 		coarse_dgain = 0x01;
 		fine_again = 0x3f;
-		fine_dgain = (gain_factor - 5120 * 2) / 320 * 4 + 128;
+		fine_dgain = DIV_ROUND_CLOSEST(gain_factor - 5120 * 2, 320) * 4 + 128;
+		fine_dgain = clamp_t(u32, fine_dgain, 128, 252);
 	} else if (gain_factor < 5120 * 8) {
 		coarse_again = 0x8f;
 		coarse_dgain = 0x03;
 		fine_again = 0x3f;
-		fine_dgain = (gain_factor - 5120 * 4) / 640 * 4 + 128;
-	} else if (gain_factor < 5120 * 16) {
+		fine_dgain = DIV_ROUND_CLOSEST(gain_factor - 5120 * 4, 640) * 4 + 128;
+		fine_dgain = clamp_t(u32, fine_dgain, 128, 252);
+	} else {
+		if (gain_factor > 5120 * 16 - 1)
+			gain_factor = 5120 * 16 - 1;
 		coarse_again = 0x8f;
 		coarse_dgain = 0x07;
 		fine_again = 0x3f;
-		fine_dgain = (gain_factor - 5120 * 8) / 1280 * 4 + 128;
+		fine_dgain = DIV_ROUND_CLOSEST(gain_factor - 5120 * 8, 1280) * 4 + 128;
+		fine_dgain = clamp_t(u32, fine_dgain, 128, 252);
 	}
 	dev_dbg(&client->dev, "short c_again: 0x%x, c_dgain: 0x%x, f_again: 0x%x, f_dgain: 0x%0x\n",
 		coarse_again, coarse_dgain, fine_again, fine_dgain);
