@@ -1197,14 +1197,11 @@ static void rk806_regulator_shutdown(struct platform_device *pdev)
 {
 	struct rk806 *rk806 = dev_get_drvdata(pdev->dev.parent);
 
-	if (system_state == SYSTEM_POWER_OFF)
-		if ((rk806->pins->p) && (rk806->pins->power_off))
-			pinctrl_select_state(rk806->pins->p, rk806->pins->power_off);
-
-	if (system_state == SYSTEM_RESTART)
-		if ((rk806->pins->p) && (rk806->pins->reset))
-			pinctrl_select_state(rk806->pins->p, rk806->pins->reset);
-
+	if (system_state == SYSTEM_POWER_OFF) {
+		rk806_field_write(rk806, PWRCTRL1_FUN, PWRCTRL_NULL_FUN);
+		rk806_field_write(rk806, PWRCTRL1_POL, POL_HIGH);
+		rk806_field_write(rk806, PWRCTRL1_FUN, PWRCTRL_POWOFF_FUN);
+	}
 }
 
 static const struct platform_device_id rk806_regulator_id_table[] = {
