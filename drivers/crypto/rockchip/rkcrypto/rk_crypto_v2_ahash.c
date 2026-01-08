@@ -130,7 +130,7 @@ static void rk_ahash_crypto_complete(struct crypto_async_request *base, int err)
 	}
 
 	if (base->complete)
-		base->complete(base, err);
+		base->complete(COMPLETE_PARAM(base), err);
 }
 
 static int write_key_reg(struct rk_crypto_dev *rk_dev, const u8 *key,
