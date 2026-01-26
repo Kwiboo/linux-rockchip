@@ -14100,8 +14100,10 @@ static void rkcif_check_mipi_interlaced_frame_id(struct rkcif_stream *stream)
 		 stream->id, fs_interlaced_phase, frame_id);
 	if (stream->last_fs_interlaced_phase == 0) {
 		buffer = stream->curr_buf;
-		rkcif_write_buffer(stream, buffer, CIF_CSI_FRAME0_READY, buf_offset);
-		rkcif_write_buffer(stream, buffer, CIF_CSI_FRAME1_READY, buf_offset);
+		if (buffer) {
+			rkcif_write_buffer(stream, buffer, CIF_CSI_FRAME0_READY, buf_offset);
+			rkcif_write_buffer(stream, buffer, CIF_CSI_FRAME1_READY, buf_offset);
+		}
 	} else {
 		if (fs_interlaced_phase == CIF_CSI_FRAME0_READY) {
 			buffer = stream->curr_buf;
@@ -14117,12 +14119,16 @@ static void rkcif_check_mipi_interlaced_frame_id(struct rkcif_stream *stream)
 						 "stream[%d] mipi fs interlace bad frame queue, phase %d, line %d\n",
 						 stream->id, fs_interlaced_phase, __LINE__);
 				}
-				rkcif_write_buffer(stream, buffer, CIF_CSI_FRAME0_READY, buf_offset);
-				rkcif_write_buffer(stream, buffer, CIF_CSI_FRAME1_READY, buf_offset);
+				if (buffer) {
+					rkcif_write_buffer(stream, buffer, CIF_CSI_FRAME0_READY, buf_offset);
+					rkcif_write_buffer(stream, buffer, CIF_CSI_FRAME1_READY, buf_offset);
+				}
 			} else if (stream->last_fs_interlaced_phase == CIF_CSI_FRAME0_READY) {
 				stream->interlaced_bad_frame = true;
-				rkcif_write_buffer(stream, buffer, CIF_CSI_FRAME0_READY, buf_offset);
-				rkcif_write_buffer(stream, buffer, CIF_CSI_FRAME1_READY, buf_offset);
+				if (buffer) {
+					rkcif_write_buffer(stream, buffer, CIF_CSI_FRAME0_READY, buf_offset);
+					rkcif_write_buffer(stream, buffer, CIF_CSI_FRAME1_READY, buf_offset);
+				}
 				v4l2_dbg(rkcif_debug, 3, &dev->v4l2_dev,
 					 "stream[%d] mipi fs interlace bad frame, phase %d, line %d\n",
 					 stream->id, fs_interlaced_phase, __LINE__);
@@ -14130,11 +14136,10 @@ static void rkcif_check_mipi_interlaced_frame_id(struct rkcif_stream *stream)
 		} else {
 			if (stream->last_fs_interlaced_phase == CIF_CSI_FRAME0_READY) {
 				if (stream->next_buf) {
-					if (stream->curr_buf) {
+					if (stream->curr_buf)
 						rkcif_buf_queue(&stream->curr_buf->vb.vb2_buf);
-						stream->curr_buf = stream->next_buf;
-						stream->next_buf = NULL;
-					}
+					stream->curr_buf = stream->next_buf;
+					stream->next_buf = NULL;
 					stream->interlaced_bad_frame = true;
 					v4l2_dbg(rkcif_debug, 3, &dev->v4l2_dev,
 						 "stream[%d] mipi fs interlace bad frame, phase %d\n",
@@ -14152,7 +14157,6 @@ static void rkcif_check_mipi_interlaced_frame_id(struct rkcif_stream *stream)
 					rkcif_write_buffer(stream, buffer, CIF_CSI_FRAME0_READY, buf_offset);
 					rkcif_write_buffer(stream, buffer, CIF_CSI_FRAME1_READY, buf_offset);
 				} else if (dummy_buf->vaddr) {
-					stream->interlaced_bad_frame = true;
 					rkcif_write_buffer(stream, NULL, CIF_CSI_FRAME0_READY, buf_offset);
 					rkcif_write_buffer(stream, NULL, CIF_CSI_FRAME1_READY, buf_offset);
 					v4l2_dbg(rkcif_debug, 3, &dev->v4l2_dev,
@@ -14186,7 +14190,6 @@ static void rkcif_check_mipi_interlaced_frame_id(struct rkcif_stream *stream)
 				} else if (dummy_buf->vaddr) {
 					rkcif_write_buffer(stream, NULL, CIF_CSI_FRAME0_READY, buf_offset);
 					rkcif_write_buffer(stream, NULL, CIF_CSI_FRAME1_READY, buf_offset);
-					stream->interlaced_bad_frame = true;
 					v4l2_dbg(rkcif_debug, 3, &dev->v4l2_dev,
 						 "stream[%d] mipi interlace not buf, use dummy buf, line %d\n",
 						 stream->id, __LINE__);
