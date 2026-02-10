@@ -209,6 +209,7 @@ struct rockchip_usb2phy_port_cfg {
  * struct rockchip_usb2phy_cfg - usb-phy configuration.
  * @reg: the address offset of grf for usb-phy config.
  * @num_ports: specify how many ports that the phy has.
+ * @need_reset:  reset indication set when power on phy.
  * @phy_tuning: phy default parameters tuning.
  * @vbus_detect: vbus voltage level detection function.
  * @clkout_ctl: keep on/turn off output clk of phy via commonon bit.
@@ -227,6 +228,7 @@ struct rockchip_usb2phy_port_cfg {
 struct rockchip_usb2phy_cfg {
 	unsigned int	reg;
 	unsigned int	num_ports;
+	bool		need_reset;
 	int (*phy_tuning)(struct rockchip_usb2phy *rphy);
 	int (*vbus_detect)(struct rockchip_usb2phy *rphy,
 			   const struct usb2phy_reg *vbus_det_en,
@@ -941,10 +943,7 @@ static int rockchip_usb2phy_power_on(struct phy *phy)
 	 * please keep the common_on_n 1'b0 to set these blocks
 	 * remain powered.
 	 */
-	if (rport->port_id == USB2PHY_PORT_OTG &&
-	    (of_device_is_compatible(rphy->dev->of_node, "rockchip,rk3588-usb2phy") ||
-	     of_device_is_compatible(rphy->dev->of_node, "rockchip,rk3576-usb2phy") ||
-	     of_device_is_compatible(rphy->dev->of_node, "rockchip,rk3572-usb2phy"))) {
+	if (rport->port_id == USB2PHY_PORT_OTG && rphy->phy_cfg->need_reset) {
 		ret = rockchip_usb2phy_reset(rphy);
 		if (ret) {
 			clk_disable_unprepare(rphy->clk480m);
@@ -4544,6 +4543,7 @@ static const struct rockchip_usb2phy_cfg rk3572_phy_cfgs[] = {
 	{
 		.reg = 0x0,
 		.num_ports	= 1,
+		.need_reset	= true,
 		.phy_tuning	= rk3572_usb2phy_tuning,
 		.clkout_ctl	= { 0x0008, 0, 0, 1, 0 },
 		.ls_filter_con	= { 0x0020, 19, 0, 0x30100, 0x06020 },
@@ -4600,6 +4600,7 @@ static const struct rockchip_usb2phy_cfg rk3572_phy_cfgs[] = {
 	{
 		.reg = 0x2000,
 		.num_ports	= 1,
+		.need_reset	= true,
 		.phy_tuning	= rk3572_usb2phy_tuning,
 		.clkout_ctl	= { 0x2008, 0, 0, 1, 0 },
 		.ls_filter_con	= { 0x2020, 19, 0, 0x30100, 0x06020 },
@@ -4660,6 +4661,7 @@ static const struct rockchip_usb2phy_cfg rk3576_phy_cfgs[] = {
 	{
 		.reg = 0x0,
 		.num_ports	= 1,
+		.need_reset	= true,
 		.phy_tuning	= rk3576_usb2phy_tuning,
 		.clkout_ctl	= { 0x0008, 0, 0, 1, 0 },
 		.ls_filter_con	= { 0x0020, 19, 0, 0x30100, 0x06020 },
@@ -4716,6 +4718,7 @@ static const struct rockchip_usb2phy_cfg rk3576_phy_cfgs[] = {
 	{
 		.reg = 0x2000,
 		.num_ports	= 1,
+		.need_reset	= true,
 		.phy_tuning	= rk3576_usb2phy_tuning,
 		.clkout_ctl	= { 0x2008, 0, 0, 1, 0 },
 		.ls_filter_con	= { 0x2020, 19, 0, 0x30100, 0x06020 },
@@ -4776,6 +4779,7 @@ static const struct rockchip_usb2phy_cfg rk3588_phy_cfgs[] = {
 	{
 		.reg = 0x0000,
 		.num_ports	= 1,
+		.need_reset	= true,
 		.phy_tuning	= rk3588_usb2phy_tuning,
 		.clkout_ctl	= { 0x0000, 0, 0, 1, 0 },
 		.ls_filter_con	= { 0x0040, 19, 0, 0x30100, 0x00020 },
@@ -4830,6 +4834,7 @@ static const struct rockchip_usb2phy_cfg rk3588_phy_cfgs[] = {
 	{
 		.reg = 0x4000,
 		.num_ports	= 1,
+		.need_reset	= true,
 		.phy_tuning	= rk3588_usb2phy_tuning,
 		.clkout_ctl	= { 0x0000, 0, 0, 1, 0 },
 		.ls_filter_con	= { 0x0040, 19, 0, 0x30100, 0x00020 },
@@ -4884,6 +4889,7 @@ static const struct rockchip_usb2phy_cfg rk3588_phy_cfgs[] = {
 	{
 		.reg = 0x8000,
 		.num_ports	= 1,
+		.need_reset	= true,
 		.phy_tuning	= rk3588_usb2phy_tuning,
 		.clkout_ctl	= { 0x0000, 0, 0, 0, 0 },
 		.ls_filter_con	= { 0x0040, 19, 0, 0x30100, 0x00020 },
@@ -4906,6 +4912,7 @@ static const struct rockchip_usb2phy_cfg rk3588_phy_cfgs[] = {
 	{
 		.reg = 0xc000,
 		.num_ports	= 1,
+		.need_reset	= true,
 		.phy_tuning	= rk3588_usb2phy_tuning,
 		.clkout_ctl	= { 0x0000, 0, 0, 0, 0 },
 		.ls_filter_con	= { 0x0040, 19, 0, 0x30100, 0x00020 },
