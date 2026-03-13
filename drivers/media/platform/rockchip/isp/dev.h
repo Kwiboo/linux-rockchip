@@ -302,6 +302,7 @@ struct rkisp_device {
 	bool is_frm_rd;
 	bool is_multi_one_sync;
 	bool is_wait_aiq;
+	bool is_rdbk_no_trigger;
 
 	struct rkisp_vicap_input vicap_in;
 	struct rkisp_vicap_sof vicap_sof;
