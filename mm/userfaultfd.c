@@ -734,7 +734,7 @@ static __always_inline ssize_t mfill_atomic(struct userfaultfd_ctx *ctx,
 		.dst_start = dst_start,
 		.src_start = src_start,
 		.flags = flags,
-
+		.len = len,
 		.src_addr = src_start,
 		.dst_addr = dst_start,
 	};
