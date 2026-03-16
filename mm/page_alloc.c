@@ -1379,9 +1379,11 @@ __always_inline bool __free_pages_prepare(struct page *page,
 	}
 	if (unlikely(page_has_type(page))) {
 		/* networking expects to clear its page type before releasing */
-		if (unlikely(PageNetpp(page))) {
-			bad_page(page, "page_pool leak");
-			return false;
+		if (is_check_pages_enabled()) {
+			if (unlikely(PageNetpp(page))) {
+				bad_page(page, "page_pool leak");
+				return false;
+			}
 		}
 		/* Reset the page_type (which overlays _mapcount) */
 		page->page_type = UINT_MAX;
