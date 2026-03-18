@@ -493,18 +493,16 @@ int liveupdate_register_flb(struct liveupdate_file_handler *fh,
  * owner module (acquired during registration) is released.
  *
  */
-int liveupdate_unregister_flb(struct liveupdate_file_handler *fh,
-			      struct liveupdate_flb *flb)
+void liveupdate_unregister_flb(struct liveupdate_file_handler *fh,
+			       struct liveupdate_flb *flb)
 {
 	if (!liveupdate_enabled())
-		return -EOPNOTSUPP;
+		return;
 
 	guard(rwsem_write)(&luo_flb_lock);
 	guard(rwsem_write)(&ACCESS_PRIVATE(fh, flb_lock));
 
 	luo_flb_unregister_one(fh, flb);
-
-	return 0;
 }
 
 /**
