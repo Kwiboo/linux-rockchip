@@ -597,6 +597,11 @@ static void remove_inode_hugepages(struct inode *inode, loff_t lstart,
 						  index, truncate_op);
 			freed++;
 
+			if (unlikely(folio_test_hwpoison(folio))) {
+				folio_set_hugetlb_temporary(folio);
+				folio_put(folio);
+			}
+
 			mutex_unlock(&hugetlb_fault_mutex_table[hash]);
 		}
 		folio_batch_release(&fbatch);
