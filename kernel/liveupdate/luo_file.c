@@ -879,8 +879,6 @@ int liveupdate_unregister_file_handler(struct liveupdate_file_handler *fh)
 	if (!liveupdate_enabled())
 		return -EOPNOTSUPP;
 
-	liveupdate_test_unregister(fh);
-
 	scoped_guard(rwsem_write, &luo_file_handler_lock) {
 		luo_flb_unregister_all(fh);
 		list_del(&ACCESS_PRIVATE(fh, list));
