@@ -873,6 +873,7 @@ int liveupdate_register_file_handler(struct liveupdate_file_handler *fh)
 		}
 
 		INIT_LIST_HEAD(&ACCESS_PRIVATE(fh, flb_list));
+		init_rwsem(&ACCESS_PRIVATE(fh, flb_lock));
 		INIT_LIST_HEAD(&ACCESS_PRIVATE(fh, list));
 		list_add_tail(&ACCESS_PRIVATE(fh, list), &luo_file_handler_list);
 	}

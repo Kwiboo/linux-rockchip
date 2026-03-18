@@ -12,6 +12,7 @@
 #include <linux/kho/abi/luo.h>
 #include <linux/list.h>
 #include <linux/mutex.h>
+#include <linux/rwsem.h>
 #include <linux/types.h>
 #include <uapi/linux/liveupdate.h>
 
@@ -107,6 +108,8 @@ struct liveupdate_file_handler {
 	struct list_head __private list;
 	/* A list of FLB dependencies. */
 	struct list_head __private flb_list;
+	/* Protects flb_list */
+	struct rw_semaphore __private flb_lock;
 };
 
 /**
