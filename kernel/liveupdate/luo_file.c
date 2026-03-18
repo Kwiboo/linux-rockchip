@@ -836,7 +836,6 @@ void luo_file_set_destroy(struct luo_file_set *file_set)
 int liveupdate_register_file_handler(struct liveupdate_file_handler *fh)
 {
 	struct liveupdate_file_handler *fh_iter;
-	int err;
 
 	if (!liveupdate_enabled())
 		return -EOPNOTSUPP;
@@ -861,15 +860,9 @@ int liveupdate_register_file_handler(struct liveupdate_file_handler *fh)
 			if (!strcmp(fh_iter->compatible, fh->compatible)) {
 				pr_err("File handler registration failed: Compatible string '%s' already registered.\n",
 				       fh->compatible);
-				err = -EEXIST;
-				goto err_resume;
+				luo_session_resume();
+				return -EEXIST;
 			}
-		}
-
-		/* Pin the module implementing the handler */
-		if (!try_module_get(fh->ops->owner)) {
-			err = -EAGAIN;
-			goto err_resume;
 		}
 
 		INIT_LIST_HEAD(&ACCESS_PRIVATE(fh, flb_list));
@@ -882,10 +875,6 @@ int liveupdate_register_file_handler(struct liveupdate_file_handler *fh)
 	liveupdate_test_register(fh);
 
 	return 0;
-
-err_resume:
-	luo_session_resume();
-	return err;
 }
 
 /**
@@ -907,8 +896,6 @@ err_resume:
  */
 int liveupdate_unregister_file_handler(struct liveupdate_file_handler *fh)
 {
-	int err = -EBUSY;
-
 	if (!liveupdate_enabled())
 		return -EOPNOTSUPP;
 
@@ -918,19 +905,18 @@ int liveupdate_unregister_file_handler(struct liveupdate_file_handler *fh)
 		goto err_register;
 
 	scoped_guard(rwsem_write, &luo_file_handler_lock) {
-		if (!list_empty(&ACCESS_PRIVATE(fh, flb_list)))
-			goto err_resume;
+		if (!list_empty(&ACCESS_PRIVATE(fh, flb_list))) {
+			luo_session_resume();
+			goto err_register;
+		}
 
 		list_del(&ACCESS_PRIVATE(fh, list));
 	}
-	module_put(fh->ops->owner);
 	luo_session_resume();
 
 	return 0;
 
-err_resume:
-	luo_session_resume();
 err_register:
 	liveupdate_test_register(fh);
-	return err;
+	return -EBUSY;
 }
