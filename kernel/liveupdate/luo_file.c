@@ -873,15 +873,6 @@ int liveupdate_register_file_handler(struct liveupdate_file_handler *fh)
  *
  * Unregisters the file handler from the liveupdate core. This function
  * reverses the operations of liveupdate_register_file_handler().
- *
- * It ensures safe removal by checking that:
- * No FLB registered with this file handler.
- *
- * If the unregistration fails, the internal test state is reverted.
- *
- * Return: 0 Success. -EOPNOTSUPP when live update is not enabled. -EBUSY A live
- * update is in progress, FLB is registred with
- * this file handler.
  */
 int liveupdate_unregister_file_handler(struct liveupdate_file_handler *fh)
 {
@@ -891,15 +882,9 @@ int liveupdate_unregister_file_handler(struct liveupdate_file_handler *fh)
 	liveupdate_test_unregister(fh);
 
 	scoped_guard(rwsem_write, &luo_file_handler_lock) {
-		if (!list_empty(&ACCESS_PRIVATE(fh, flb_list)))
-			goto err_register;
-
+		luo_flb_unregister_all(fh);
 		list_del(&ACCESS_PRIVATE(fh, list));
 	}
 
 	return 0;
-
-err_register:
-	liveupdate_test_register(fh);
-	return -EBUSY;
 }
