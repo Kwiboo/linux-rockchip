@@ -112,6 +112,7 @@
 #include <linux/string.h>
 #include "luo_internal.h"
 
+static DECLARE_RWSEM(luo_file_handler_lock);
 static LIST_HEAD(luo_file_handler_list);
 
 /* 2 4K pages, give space for 128 files per file_set */
@@ -277,10 +278,12 @@ int luo_preserve_file(struct luo_file_set *file_set, u64 token, int fd)
 		goto  err_fput;
 
 	err = -ENOENT;
-	list_private_for_each_entry(fh, &luo_file_handler_list, list) {
-		if (fh->ops->can_preserve(fh, file)) {
-			err = 0;
-			break;
+	scoped_guard(rwsem_read, &luo_file_handler_lock) {
+		list_private_for_each_entry(fh, &luo_file_handler_list, list) {
+			if (fh->ops->can_preserve(fh, file)) {
+				err = 0;
+				break;
+			}
 		}
 	}
 
@@ -777,10 +780,12 @@ int luo_file_deserialize(struct luo_file_set *file_set,
 		bool handler_found = false;
 		struct luo_file *luo_file;
 
-		list_private_for_each_entry(fh, &luo_file_handler_list, list) {
-			if (!strcmp(fh->compatible, file_ser[i].compatible)) {
-				handler_found = true;
-				break;
+		scoped_guard(rwsem_read, &luo_file_handler_lock) {
+			list_private_for_each_entry(fh, &luo_file_handler_list, list) {
+				if (!strcmp(fh->compatible, file_ser[i].compatible)) {
+					handler_found = true;
+					break;
+				}
 			}
 		}
 
@@ -850,25 +855,27 @@ int liveupdate_register_file_handler(struct liveupdate_file_handler *fh)
 	if (!luo_session_quiesce())
 		return -EBUSY;
 
-	/* Check for duplicate compatible strings */
-	list_private_for_each_entry(fh_iter, &luo_file_handler_list, list) {
-		if (!strcmp(fh_iter->compatible, fh->compatible)) {
-			pr_err("File handler registration failed: Compatible string '%s' already registered.\n",
-			       fh->compatible);
-			err = -EEXIST;
+	scoped_guard(rwsem_write, &luo_file_handler_lock) {
+		/* Check for duplicate compatible strings */
+		list_private_for_each_entry(fh_iter, &luo_file_handler_list, list) {
+			if (!strcmp(fh_iter->compatible, fh->compatible)) {
+				pr_err("File handler registration failed: Compatible string '%s' already registered.\n",
+				       fh->compatible);
+				err = -EEXIST;
+				goto err_resume;
+			}
+		}
+
+		/* Pin the module implementing the handler */
+		if (!try_module_get(fh->ops->owner)) {
+			err = -EAGAIN;
 			goto err_resume;
 		}
-	}
 
-	/* Pin the module implementing the handler */
-	if (!try_module_get(fh->ops->owner)) {
-		err = -EAGAIN;
-		goto err_resume;
+		INIT_LIST_HEAD(&ACCESS_PRIVATE(fh, flb_list));
+		INIT_LIST_HEAD(&ACCESS_PRIVATE(fh, list));
+		list_add_tail(&ACCESS_PRIVATE(fh, list), &luo_file_handler_list);
 	}
-
-	INIT_LIST_HEAD(&ACCESS_PRIVATE(fh, flb_list));
-	INIT_LIST_HEAD(&ACCESS_PRIVATE(fh, list));
-	list_add_tail(&ACCESS_PRIVATE(fh, list), &luo_file_handler_list);
 	luo_session_resume();
 
 	liveupdate_test_register(fh);
@@ -909,10 +916,12 @@ int liveupdate_unregister_file_handler(struct liveupdate_file_handler *fh)
 	if (!luo_session_quiesce())
 		goto err_register;
 
-	if (!list_empty(&ACCESS_PRIVATE(fh, flb_list)))
-		goto err_resume;
+	scoped_guard(rwsem_write, &luo_file_handler_lock) {
+		if (!list_empty(&ACCESS_PRIVATE(fh, flb_list)))
+			goto err_resume;
 
-	list_del(&ACCESS_PRIVATE(fh, list));
+		list_del(&ACCESS_PRIVATE(fh, list));
+	}
 	module_put(fh->ops->owner);
 	luo_session_resume();
 
