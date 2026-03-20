@@ -2326,8 +2326,7 @@ static inline void zap_deposited_table(struct mm_struct *mm, pmd_t *pmd)
 }
 
 static void zap_huge_pmd_folio(struct mm_struct *mm, struct vm_area_struct *vma,
-		pmd_t pmdval, struct folio *folio, bool is_present,
-		bool *has_deposit)
+		pmd_t pmdval, struct folio *folio, bool is_present)
 {
 	const bool is_device_private = folio_is_device_private(folio);
 
@@ -2336,7 +2335,6 @@ static void zap_huge_pmd_folio(struct mm_struct *mm, struct vm_area_struct *vma,
 		folio_remove_rmap_pmd(folio, &folio->page, vma);
 
 	if (folio_test_anon(folio)) {
-		*has_deposit = true;
 		add_mm_counter(mm, MM_ANONPAGES, -HPAGE_PMD_NR);
 	} else {
 		add_mm_counter(mm, mm_counter_file(folio),
@@ -2363,6 +2361,27 @@ static struct folio *normal_or_softleaf_folio_pmd(struct vm_area_struct *vma,
 	return pmd_to_softleaf_folio(pmdval);
 }
 
+static bool has_deposited_pgtable(struct vm_area_struct *vma, pmd_t pmdval,
+		struct folio *folio)
+{
+	/* Some architectures require unconditional depositing. */
+	if (arch_needs_pgtable_deposit())
+		return true;
+
+	/*
+	 * Huge zero always deposited except for DAX which handles itself, see
+	 * set_huge_zero_folio().
+	 */
+	if (is_huge_zero_pmd(pmdval))
+		return !vma_is_dax(vma);
+
+	/*
+	 * Otherwise, only anonymous folios are deposited, see
+	 * __do_huge_pmd_anonymous_page().
+	 */
+	return folio && folio_test_anon(folio);
+}
+
 /**
  * zap_huge_pmd - Zap a huge THP which is of PMD size.
  * @tlb: The MMU gather TLB state associated with the operation.
@@ -2375,7 +2394,6 @@ static struct folio *normal_or_softleaf_folio_pmd(struct vm_area_struct *vma,
 bool zap_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 		 pmd_t *pmd, unsigned long addr)
 {
-	bool has_deposit = arch_needs_pgtable_deposit();
 	struct mm_struct *mm = tlb->mm;
 	struct folio *folio = NULL;
 	bool is_present = false;
@@ -2401,12 +2419,9 @@ bool zap_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 	is_present = pmd_present(orig_pmd);
 	folio = normal_or_softleaf_folio_pmd(vma, addr, orig_pmd, is_present);
 	if (folio)
-		zap_huge_pmd_folio(mm, vma, orig_pmd, folio, is_present,
-				   &has_deposit);
-	else if (is_huge_zero_pmd(orig_pmd))
-		has_deposit = has_deposit || !vma_is_dax(vma);
+		zap_huge_pmd_folio(mm, vma, orig_pmd, folio, is_present);
 
-	if (has_deposit)
+	if (has_deposited_pgtable(vma, orig_pmd, folio))
 		zap_deposited_table(mm, pmd);
 
 	spin_unlock(ptl);
