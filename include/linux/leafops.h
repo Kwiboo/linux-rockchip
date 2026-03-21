@@ -363,10 +363,14 @@ static inline unsigned long softleaf_to_pfn(softleaf_t entry)
 	return swp_offset(entry) & SWP_PFN_MASK;
 }
 
-static inline void softleaf_migration_entry_check(softleaf_t entry,
-			struct folio *folio)
+static inline void softleaf_migration_sync(softleaf_t entry,
+		struct folio *folio)
 {
-	/* See __split_folio_to_order() comment */
+	/*
+	 * Ensure we do not race with split, which might alter tail pages into new
+	 * folios and thus result in observing an unlocked folio.
+	 * This matches the write barrier in __split_folio_to_order().
+	 */
 	smp_rmb();
 
 	/*
@@ -388,7 +392,7 @@ static inline struct page *softleaf_to_page(softleaf_t entry)
 
 	VM_WARN_ON_ONCE(!softleaf_has_pfn(entry));
 	if (softleaf_is_migration(entry))
-		softleaf_migration_entry_check(entry, page_folio(page));
+		softleaf_migration_sync(entry, page_folio(page));
 
 	return page;
 }
@@ -405,7 +409,7 @@ static inline struct folio *softleaf_to_folio(softleaf_t entry)
 
 	VM_WARN_ON_ONCE(!softleaf_has_pfn(entry));
 	if (softleaf_is_migration(entry))
-		softleaf_migration_entry_check(entry, folio);
+		softleaf_migration_sync(entry, folio);
 
 	return folio;
 }
