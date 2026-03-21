@@ -130,7 +130,7 @@ bool pagemap_is_huge_zero(int fd, char *start)
 {
 	uint64_t categories;
 
-	if (!pagemap_scan_supported(fd, start))
+	if (!pagemap_scan_supported(fd))
 		return false;
 
 	categories = pagemap_scan_get_categories(fd, start);
