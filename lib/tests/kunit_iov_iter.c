@@ -13,6 +13,7 @@
 #include <linux/uio.h>
 #include <linux/bvec.h>
 #include <linux/folio_queue.h>
+#include <linux/scatterlist.h>
 #include <linux/minmax.h>
 #include <kunit/test.h>
 
@@ -1014,6 +1015,141 @@ stop:
 	KUNIT_SUCCEED(test);
 }
 
+struct iov_kunit_iter_to_sg_data {
+	struct sg_table sgt;
+	u8 *buffer, *scratch;
+	struct page **pages;
+	size_t npages;
+};
+
+static void __init
+iov_kunit_iter_to_sg_init(struct kunit *test, size_t bufsize,
+			  struct iov_kunit_iter_to_sg_data *data)
+{
+	struct page **spages;
+	struct scatterlist *sg;
+	size_t i;
+
+	data->npages = bufsize / PAGE_SIZE;
+	sg = kunit_kmalloc_array(test, data->npages, sizeof(*sg), GFP_KERNEL);
+	sg_init_table(sg, data->npages);
+	memset(&data->sgt, 0, sizeof(data->sgt));
+	data->sgt.orig_nents = data->npages;
+	data->sgt.sgl = sg;
+
+	data->buffer = iov_kunit_create_buffer(test, &data->pages,
+					       data->npages);
+	data->scratch = iov_kunit_create_buffer(test, &spages, data->npages);
+	for (i = 0; i < bufsize; ++i)
+		data->buffer[i] = pattern(i);
+	memset(data->scratch, 0, bufsize);
+}
+
+static void __init
+iov_kunit_iter_to_sg_check(struct kunit *test, struct iov_iter *iter,
+			   size_t bufsize,
+			   struct iov_kunit_iter_to_sg_data *data)
+{
+	size_t i;
+
+	i = extract_iter_to_sg(iter, bufsize, &data->sgt,
+			       data->npages, 0);
+
+	KUNIT_EXPECT_EQ(test, i, bufsize);
+	KUNIT_EXPECT_LE(test, data->sgt.nents, data->npages);
+
+	i = sg_copy_to_buffer(data->sgt.sgl, data->sgt.nents,
+			      data->scratch, bufsize);
+	KUNIT_EXPECT_EQ(test, i, bufsize);
+
+	for (i = 0; i < bufsize; ++i) {
+		KUNIT_EXPECT_EQ_MSG(test, data->buffer[i], data->scratch[i],
+				    "at i=%zx", i);
+		if (data->buffer[i] != data->scratch[i])
+			break;
+	}
+
+	KUNIT_EXPECT_EQ(test, i, bufsize);
+}
+
+static void __init iov_kunit_iter_to_sg_kvec(struct kunit *test)
+{
+	struct iov_kunit_iter_to_sg_data data;
+	struct iov_iter iter;
+	struct kvec kvec;
+	size_t bufsize;
+
+	bufsize = 0x100000;
+	iov_kunit_iter_to_sg_init(test, bufsize, &data);
+
+	kvec.iov_base = data.buffer;
+	kvec.iov_len = bufsize;
+	iov_iter_kvec(&iter, READ, &kvec, 1, bufsize);
+
+	iov_kunit_iter_to_sg_check(test, &iter, bufsize, &data);
+}
+
+static void __init iov_kunit_iter_to_sg_bvec(struct kunit *test)
+{
+	struct iov_kunit_iter_to_sg_data data;
+	struct page *p, *can_merge = NULL;
+	size_t i, k, bufsize;
+	struct bio_vec *bvec;
+	struct iov_iter iter;
+
+	bufsize = 0x100000;
+	iov_kunit_iter_to_sg_init(test, bufsize, &data);
+
+	bvec = kunit_kmalloc_array(test, data.npages, sizeof(*bvec),
+				   GFP_KERNEL);
+	k = 0;
+	for (i = 0; i < data.npages; ++i) {
+		p = data.pages[i];
+		if (p == can_merge)
+			bvec[k-1].bv_len += PAGE_SIZE;
+		else
+			bvec_set_page(&bvec[k++], p, PAGE_SIZE, 0);
+		can_merge = p + 1;
+	}
+	iov_iter_bvec(&iter, READ, bvec, k, bufsize);
+
+	iov_kunit_iter_to_sg_check(test, &iter, bufsize, &data);
+}
+
+static void __init iov_kunit_iter_to_sg_folioq(struct kunit *test)
+{
+	struct iov_kunit_iter_to_sg_data data;
+	struct folio_queue *folioq;
+	struct iov_iter iter;
+	size_t bufsize;
+
+	bufsize = 0x100000;
+	iov_kunit_iter_to_sg_init(test, bufsize, &data);
+
+	folioq = iov_kunit_create_folioq(test);
+	iov_kunit_load_folioq(test, &iter, READ, folioq, data.pages,
+			      data.npages);
+
+	iov_kunit_iter_to_sg_check(test, &iter, bufsize, &data);
+}
+
+static void __init iov_kunit_iter_to_sg_xarray(struct kunit *test)
+{
+	struct iov_kunit_iter_to_sg_data data;
+	struct xarray *xarray;
+	struct iov_iter iter;
+	size_t bufsize;
+
+	bufsize = 0x100000;
+	iov_kunit_iter_to_sg_init(test, bufsize, &data);
+
+	xarray = iov_kunit_create_xarray(test);
+	iov_kunit_load_xarray(test, &iter, READ, xarray, data.pages,
+			      data.npages);
+
+	iov_kunit_iter_to_sg_check(test, &iter, bufsize, &data);
+}
+
 static struct kunit_case __refdata iov_kunit_cases[] = {
 	KUNIT_CASE(iov_kunit_copy_to_kvec),
 	KUNIT_CASE(iov_kunit_copy_from_kvec),
@@ -1027,6 +1163,10 @@ static struct kunit_case __refdata iov_kunit_cases[] = {
 	KUNIT_CASE(iov_kunit_extract_pages_bvec),
 	KUNIT_CASE(iov_kunit_extract_pages_folioq),
 	KUNIT_CASE(iov_kunit_extract_pages_xarray),
+	KUNIT_CASE(iov_kunit_iter_to_sg_kvec),
+	KUNIT_CASE(iov_kunit_iter_to_sg_bvec),
+	KUNIT_CASE(iov_kunit_iter_to_sg_folioq),
+	KUNIT_CASE(iov_kunit_iter_to_sg_xarray),
 	{}
 };
 
