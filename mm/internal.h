@@ -980,7 +980,7 @@ static inline void sparse_init_one_section(struct mem_section *ms,
 	 * from the page pointer to obtain the PFN.
 	 */
 	coded_mem_map = (unsigned long)(mem_map - section_nr_to_pfn(pnum));
-	VM_WARN_ON(coded_mem_map & ~SECTION_MAP_MASK);
+	VM_WARN_ON_ONCE(coded_mem_map & ~SECTION_MAP_MASK);
 
 	ms->section_mem_map &= ~SECTION_MAP_MASK;
 	ms->section_mem_map |= coded_mem_map;
