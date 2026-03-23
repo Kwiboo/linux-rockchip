@@ -2404,7 +2404,7 @@ bool zap_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 		zap_huge_pmd_folio(mm, vma, orig_pmd, folio, is_present,
 				   &has_deposit);
 	else if (is_huge_zero_pmd(orig_pmd))
-		has_deposit = !vma_is_dax(vma);
+		has_deposit = has_deposit || !vma_is_dax(vma);
 
 	if (has_deposit)
 		zap_deposited_table(mm, pmd);
