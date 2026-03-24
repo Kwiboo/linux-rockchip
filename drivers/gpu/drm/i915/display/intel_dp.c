@@ -1178,7 +1178,7 @@ dfp_can_convert(struct intel_dp *intel_dp,
 	return false;
 }
 
-static enum intel_output_format
+enum intel_output_format
 intel_dp_output_format(struct intel_connector *connector,
 		       enum intel_output_format sink_format)
 {
@@ -3337,17 +3337,24 @@ intel_dp_compute_output_format(struct intel_encoder *encoder,
 	struct intel_connector *connector = intel_dp->attached_connector;
 	const struct drm_display_info *info = &connector->base.display_info;
 	const struct drm_display_mode *adjusted_mode = &crtc_state->hw.adjusted_mode;
-	bool ycbcr_420_only;
+	enum drm_connector_color_format actual_format;
 	int ret;
 
-	ycbcr_420_only = drm_mode_is_420_only(info, adjusted_mode);
-
-	if (ycbcr_420_only && !connector->base.ycbcr_420_allowed) {
-		drm_dbg_kms(display->drm,
-			    "YCbCr 4:2:0 mode but YCbCr 4:2:0 output not possible. Falling back to RGB.\n");
+	if ((conn_state->color_format == DRM_CONNECTOR_COLOR_FORMAT_YCBCR420 &&
+	     drm_mode_is_420(info, adjusted_mode)) ||
+	    (conn_state->color_format == DRM_CONNECTOR_COLOR_FORMAT_AUTO &&
+	     drm_mode_is_420_only(info, adjusted_mode)))
+		crtc_state->sink_format = INTEL_OUTPUT_FORMAT_YCBCR420;
+	else if (conn_state->color_format == DRM_CONNECTOR_COLOR_FORMAT_YCBCR444)
+		crtc_state->sink_format = INTEL_OUTPUT_FORMAT_YCBCR444;
+	else
 		crtc_state->sink_format = INTEL_OUTPUT_FORMAT_RGB;
-	} else {
-		crtc_state->sink_format = intel_dp_sink_format(connector, adjusted_mode);
+
+	if (crtc_state->sink_format == INTEL_OUTPUT_FORMAT_YCBCR420 &&
+	    !connector->base.ycbcr_420_allowed) {
+		drm_dbg_kms(display->drm,
+			"YCbCr 4:2:0 mode requested but unsupported by connector.\n");
+		return -EINVAL;
 	}
 
 	crtc_state->output_format = intel_dp_output_format(connector, crtc_state->sink_format);
@@ -3355,9 +3362,20 @@ intel_dp_compute_output_format(struct intel_encoder *encoder,
 	ret = intel_dp_compute_link_config(encoder, crtc_state, conn_state,
 					   respect_downstream_limits);
 	if (ret) {
-		if (crtc_state->sink_format == INTEL_OUTPUT_FORMAT_YCBCR420 ||
-		    !connector->base.ycbcr_420_allowed ||
-		    !drm_mode_is_420_also(info, adjusted_mode))
+		/*
+		 * If no valid link config can be found due to bandwidth constraints,
+		 * degrade from RGB/YCbCr 4:4:4 to YCbCr 4:2:0 if permitted by
+		 * the source and sink.
+		 */
+		if (!connector->base.ycbcr_420_allowed)
+			return ret;
+		/* No point in trying YCbCr420 a second time. */
+		if (crtc_state->sink_format == INTEL_OUTPUT_FORMAT_YCBCR420)
+			return ret;
+		if (!drm_mode_is_420(info, adjusted_mode))
+			return ret;
+		/* If a non-AUTO color format is chosen, don't fall back. */
+		if (conn_state->color_format)
 			return ret;
 
 		crtc_state->sink_format = INTEL_OUTPUT_FORMAT_YCBCR420;
@@ -3365,9 +3383,36 @@ intel_dp_compute_output_format(struct intel_encoder *encoder,
 								   crtc_state->sink_format);
 		ret = intel_dp_compute_link_config(encoder, crtc_state, conn_state,
 						   respect_downstream_limits);
+		if (ret)
+			return ret;
 	}
 
-	return ret;
+	if (conn_state->color_format == DRM_CONNECTOR_COLOR_FORMAT_AUTO)
+		return 0;
+
+	switch (crtc_state->sink_format) {
+	case INTEL_OUTPUT_FORMAT_RGB:
+		actual_format = DRM_CONNECTOR_COLOR_FORMAT_RGB444;
+		break;
+	case INTEL_OUTPUT_FORMAT_YCBCR444:
+		actual_format = DRM_CONNECTOR_COLOR_FORMAT_YCBCR444;
+		break;
+	case INTEL_OUTPUT_FORMAT_YCBCR420:
+		actual_format = DRM_CONNECTOR_COLOR_FORMAT_YCBCR420;
+		break;
+	default:
+		drm_dbg_kms(display->drm, "Intel format %d has no connector equivalent\n",
+			    crtc_state->sink_format);
+		return -EINVAL;
+	}
+
+	if (actual_format != conn_state->color_format) {
+		drm_dbg_kms(display->drm, "Requested connector color format %d, got %d\n",
+			    conn_state->color_format, actual_format);
+		return -EINVAL;
+	}
+
+	return 0;
 }
 
 void
@@ -6955,6 +7000,8 @@ intel_dp_add_properties(struct intel_dp *intel_dp, struct drm_connector *_connec
 	} else {
 		intel_attach_dp_colorspace_property(&connector->base);
 	}
+
+	intel_attach_colorformat_property(&connector->base);
 
 	if (intel_dp_has_gamut_metadata_dip(&dp_to_dig_port(intel_dp)->base))
 		drm_connector_attach_hdr_output_metadata_property(&connector->base);

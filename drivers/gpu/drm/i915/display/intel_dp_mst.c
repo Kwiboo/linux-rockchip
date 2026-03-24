@@ -705,10 +705,13 @@ static int mst_stream_compute_config(struct intel_encoder *encoder,
 	struct intel_atomic_state *state = to_intel_atomic_state(conn_state->state);
 	struct intel_crtc *crtc = to_intel_crtc(pipe_config->uapi.crtc);
 	struct intel_dp *intel_dp = to_primary_dp(encoder);
+	enum drm_connector_color_format actual_format;
 	struct intel_connector *connector =
 		to_intel_connector(conn_state->connector);
 	const struct drm_display_mode *adjusted_mode =
 		&pipe_config->hw.adjusted_mode;
+	const struct drm_display_info *info =
+		&connector->base.display_info;
 	int num_joined_pipes;
 	int ret = -EINVAL;
 
@@ -719,9 +722,52 @@ static int mst_stream_compute_config(struct intel_encoder *encoder,
 	if (adjusted_mode->flags & DRM_MODE_FLAG_DBLSCAN)
 		return -EINVAL;
 
-	pipe_config->sink_format = INTEL_OUTPUT_FORMAT_RGB;
-	pipe_config->output_format = INTEL_OUTPUT_FORMAT_RGB;
+	if ((conn_state->color_format == DRM_CONNECTOR_COLOR_FORMAT_YCBCR420 &&
+	     drm_mode_is_420(info, adjusted_mode)) ||
+	    (conn_state->color_format == DRM_CONNECTOR_COLOR_FORMAT_AUTO &&
+	     drm_mode_is_420_only(info, adjusted_mode))) {
+		pipe_config->sink_format = INTEL_OUTPUT_FORMAT_YCBCR420;
+	} else if (conn_state->color_format == DRM_CONNECTOR_COLOR_FORMAT_YCBCR444) {
+		pipe_config->sink_format = INTEL_OUTPUT_FORMAT_YCBCR444;
+	} else if (conn_state->color_format == DRM_CONNECTOR_COLOR_FORMAT_AUTO ||
+		   conn_state->color_format == DRM_CONNECTOR_COLOR_FORMAT_RGB444) {
+		pipe_config->sink_format = INTEL_OUTPUT_FORMAT_RGB;
+	} else {
+		drm_dbg_kms(display->drm, "Requested format %d unsupported.\n",
+			    conn_state->color_format);
+		return -EINVAL;
+	}
+
+	if (pipe_config->sink_format == INTEL_OUTPUT_FORMAT_YCBCR420 &&
+	    !connector->base.ycbcr_420_allowed) {
+		drm_dbg_kms(display->drm,
+			    "YCbCr 4:2:0 mode requested but unsupported by connector.\n");
+		return -EINVAL;
+	}
+
+	pipe_config->output_format = intel_dp_output_format(connector, pipe_config->sink_format);
 	pipe_config->has_pch_encoder = false;
+
+	/* Validate that the right format was picked if explicitly requested */
+	if (conn_state->color_format != DRM_CONNECTOR_COLOR_FORMAT_AUTO) {
+		switch (pipe_config->output_format) {
+		case INTEL_OUTPUT_FORMAT_RGB:
+			actual_format = DRM_CONNECTOR_COLOR_FORMAT_RGB444;
+			break;
+		case INTEL_OUTPUT_FORMAT_YCBCR444:
+			actual_format = DRM_CONNECTOR_COLOR_FORMAT_YCBCR444;
+			break;
+		case INTEL_OUTPUT_FORMAT_YCBCR420:
+			actual_format = DRM_CONNECTOR_COLOR_FORMAT_YCBCR420;
+			break;
+		}
+
+		if (actual_format != conn_state->color_format) {
+			drm_dbg_kms(display->drm, "Requested connector color format %d, got %d\n",
+				    conn_state->color_format, actual_format);
+			return -EINVAL;
+		}
+	}
 
 	for_each_joiner_candidate(connector, adjusted_mode, num_joined_pipes) {
 		if (num_joined_pipes > 1)
@@ -1692,6 +1738,8 @@ static int mst_topology_add_connector_properties(struct intel_dp *intel_dp,
 		intel_dp->attached_connector->base.max_bpc_property;
 	if (connector->base.max_bpc_property)
 		drm_connector_attach_max_bpc_property(&connector->base, 6, 12);
+
+	intel_attach_colorformat_property(&connector->base);
 
 	return drm_connector_set_path_property(&connector->base, pathprop);
 }

@@ -2270,33 +2270,73 @@ static int intel_hdmi_compute_output_format(struct intel_encoder *encoder,
 	struct intel_connector *connector = to_intel_connector(conn_state->connector);
 	const struct drm_display_mode *adjusted_mode = &crtc_state->hw.adjusted_mode;
 	const struct drm_display_info *info = &connector->base.display_info;
-	bool ycbcr_420_only = drm_mode_is_420_only(info, adjusted_mode);
+	enum drm_connector_color_format req_fmt = conn_state->color_format;
+	enum drm_connector_color_format actual_fmt;
 	int ret;
 
-	crtc_state->sink_format =
-		intel_hdmi_sink_format(crtc_state, connector, ycbcr_420_only);
-
-	if (ycbcr_420_only && crtc_state->sink_format != INTEL_OUTPUT_FORMAT_YCBCR420) {
-		drm_dbg_kms(display->drm,
-			    "YCbCr 4:2:0 mode but YCbCr 4:2:0 output not possible. Falling back to RGB.\n");
-		crtc_state->sink_format = INTEL_OUTPUT_FORMAT_RGB;
-	}
+	if (!req_fmt)
+		crtc_state->sink_format =
+			intel_hdmi_sink_format(crtc_state, connector,
+					       drm_mode_is_420_only(info, adjusted_mode));
+	else if (req_fmt == DRM_CONNECTOR_COLOR_FORMAT_YCBCR444)
+		crtc_state->sink_format = INTEL_OUTPUT_FORMAT_YCBCR444;
+	else
+		crtc_state->sink_format =
+			intel_hdmi_sink_format(crtc_state, connector,
+					       req_fmt == DRM_CONNECTOR_COLOR_FORMAT_YCBCR420);
 
 	crtc_state->output_format = intel_hdmi_output_format(crtc_state);
 	ret = intel_hdmi_compute_clock(encoder, crtc_state, respect_downstream_limits);
 	if (ret) {
-		if (crtc_state->sink_format == INTEL_OUTPUT_FORMAT_YCBCR420 ||
-		    !crtc_state->has_hdmi_sink ||
-		    !connector->base.ycbcr_420_allowed ||
-		    !drm_mode_is_420_also(info, adjusted_mode))
+		/*
+		 * If no valid link config can be found due to bandwidth constraints,
+		 * degrade from RGB/YCbCr 4:4:4 to YCbCr 4:2:0 if permitted by
+		 * the source and sink.
+		 */
+		if (!connector->base.ycbcr_420_allowed)
+			return ret;
+		/* No point in trying YCbCr420 a second time. */
+		if (crtc_state->sink_format == INTEL_OUTPUT_FORMAT_YCBCR420)
+			return ret;
+		if (!drm_mode_is_420(info, adjusted_mode))
+			return ret;
+		/* If a non-AUTO color format is chosen, don't fall back. */
+		if (req_fmt)
 			return ret;
 
 		crtc_state->sink_format = INTEL_OUTPUT_FORMAT_YCBCR420;
 		crtc_state->output_format = intel_hdmi_output_format(crtc_state);
 		ret = intel_hdmi_compute_clock(encoder, crtc_state, respect_downstream_limits);
+		if (ret)
+			return ret;
 	}
 
-	return ret;
+	if (req_fmt == DRM_CONNECTOR_COLOR_FORMAT_AUTO)
+		return 0;
+
+	switch (crtc_state->sink_format) {
+	case INTEL_OUTPUT_FORMAT_RGB:
+		actual_fmt = DRM_CONNECTOR_COLOR_FORMAT_RGB444;
+		break;
+	case INTEL_OUTPUT_FORMAT_YCBCR444:
+		actual_fmt = DRM_CONNECTOR_COLOR_FORMAT_YCBCR444;
+		break;
+	case INTEL_OUTPUT_FORMAT_YCBCR420:
+		actual_fmt = DRM_CONNECTOR_COLOR_FORMAT_YCBCR420;
+		break;
+	default:
+		drm_dbg_kms(display->drm, "Intel format %d has no connector equivalent\n",
+			    crtc_state->sink_format);
+		return -EINVAL;
+	}
+
+	if (req_fmt != actual_fmt) {
+		drm_dbg_kms(display->drm, "Requested connector color format %d, got %d\n",
+			    req_fmt, actual_fmt);
+		return -EINVAL;
+	}
+
+	return 0;
 }
 
 static bool intel_hdmi_is_cloned(const struct intel_crtc_state *crtc_state)
@@ -2689,8 +2729,10 @@ intel_hdmi_add_properties(struct intel_hdmi *intel_hdmi, struct drm_connector *_
 	if (DISPLAY_VER(display) >= 10)
 		drm_connector_attach_hdr_output_metadata_property(&connector->base);
 
-	if (!HAS_GMCH(display))
+	if (!HAS_GMCH(display)) {
 		drm_connector_attach_max_bpc_property(&connector->base, 8, 12);
+		intel_attach_colorformat_property(&connector->base);
+	}
 }
 
 /*
