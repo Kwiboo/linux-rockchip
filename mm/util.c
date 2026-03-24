@@ -1215,7 +1215,7 @@ int compat_vma_mmap(struct file *file, struct vm_area_struct *vma)
 	if (err)
 		return err;
 
-	/* being invoked from .mmmap means we don't have to enforce this. */
+	/* being invoked from .mmap means we don't have to enforce this. */
 	action->hide_from_rmap_until_complete = false;
 
 	set_vma_from_desc(vma, &desc);
