@@ -178,11 +178,10 @@ static pmd_t *mm_alloc_pmd(struct mm_struct *mm, unsigned long address)
 	return pmd_alloc(mm, pud, address);
 }
 
-static int mfill_get_pmd(struct mfill_state *state)
+static int mfill_establish_pmd(struct mfill_state *state)
 {
 	struct mm_struct *dst_mm = state->ctx->mm;
-	pmd_t *dst_pmd;
-	pmd_t dst_pmdval;
+	pmd_t *dst_pmd, dst_pmdval;
 
 	dst_pmd = mm_alloc_pmd(dst_mm, state->dst_addr);
 	if (unlikely(!dst_pmd))
@@ -199,7 +198,7 @@ static int mfill_get_pmd(struct mfill_state *state)
 	 * (This includes the case where the PMD used to be THP and
 	 * changed back to none after __pte_alloc().)
 	 */
-	if (unlikely(!pmd_present(dst_pmdval) || pmd_trans_huge(dst_pmdval)))
+	if (unlikely(!pmd_present(dst_pmdval) || pmd_leaf(dst_pmdval)))
 		return -EEXIST;
 	if (unlikely(pmd_bad(dst_pmdval)))
 		return -EFAULT;
@@ -838,7 +837,7 @@ retry:
 	while (state.src_addr < src_start + len) {
 		VM_WARN_ON_ONCE(state.dst_addr >= dst_start + len);
 
-		err = mfill_get_pmd(&state);
+		err = mfill_establish_pmd(&state);
 		if (err)
 			break;
 
