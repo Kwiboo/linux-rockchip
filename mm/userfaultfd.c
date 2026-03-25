@@ -427,7 +427,7 @@ static int mfill_copy_folio_retry(struct mfill_state *state, struct folio *folio
 	if (err)
 		return err;
 
-	err = mfill_get_pmd(state);
+	err = mfill_establish_pmd(state);
 	if (err)
 		return err;
 
