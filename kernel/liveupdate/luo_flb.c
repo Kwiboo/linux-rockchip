@@ -192,10 +192,27 @@ static int luo_flb_retrieve_one(struct liveupdate_flb *flb)
 static void luo_flb_file_finish_one(struct liveupdate_flb *flb)
 {
 	struct luo_flb_private *private = luo_flb_get_private(flb);
+	bool needs_retrieve = false;
 	u64 count;
 
-	scoped_guard(mutex, &private->incoming.lock)
+	scoped_guard(mutex, &private->incoming.lock) {
+		if (!private->incoming.count && !private->incoming.finished)
+			needs_retrieve = true;
+	}
+
+	if (needs_retrieve) {
+		int err = luo_flb_retrieve_one(flb);
+
+		if (err) {
+			pr_warn("Failed to retrieve FLB '%s' during finish: %pe\n",
+				flb->compatible, ERR_PTR(err));
+			return;
+		}
+	}
+
+	scoped_guard(mutex, &private->incoming.lock) {
 		count = --private->incoming.count;
+	}
 
 	if (!count) {
 		struct liveupdate_flb_op_args args = {0};
