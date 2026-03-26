@@ -6517,13 +6517,6 @@ struct btf *bpf_prog_get_target_btf(const struct bpf_prog *prog)
 		return prog->aux->attach_btf;
 }
 
-static bool is_void_or_int_ptr(struct btf *btf, const struct btf_type *t)
-{
-	/* skip modifiers */
-	t = btf_type_skip_modifiers(btf, t->type, NULL);
-	return btf_type_is_void(t) || btf_type_is_int(t);
-}
-
 u32 btf_ctx_arg_idx(struct btf *btf, const struct btf_type *func_proto,
 		    int off)
 {
@@ -6912,10 +6905,14 @@ bool btf_ctx_access(int off, int size, enum bpf_access_type type,
 	}
 
 	/*
-	 * If it's a pointer to void, it's the same as scalar from the verifier
-	 * safety POV. Either way, no futher pointer walking is allowed.
+	 * If it's a single or multilevel pointer, except a pointer
+	 * to a structure, it's the same as scalar from the verifier
+	 * safety POV. Multilevel pointers to structures are treated as
+	 * scalars. The verifier lacks the context to infer the size of
+	 * their target memory regions. Either way, no further pointer
+	 * walking is allowed.
 	 */
-	if (is_void_or_int_ptr(btf, t))
+	if (!btf_type_is_struct_ptr(btf, t))
 		return true;
 
 	/* this is a pointer to another type */
@@ -7845,15 +7842,16 @@ int btf_prepare_func_args(struct bpf_verifier_env *env, int subprog)
 			tname, nargs, MAX_BPF_FUNC_REG_ARGS);
 		return -EINVAL;
 	}
-	/* check that function returns int, exception cb also requires this */
+	/* check that function is void or returns int, exception cb also requires this */
 	t = btf_type_by_id(btf, t->type);
 	while (btf_type_is_modifier(t))
 		t = btf_type_by_id(btf, t->type);
-	if (!btf_type_is_int(t) && !btf_is_any_enum(t)) {
+	if (!btf_type_is_void(t) && !btf_type_is_int(t) && !btf_is_any_enum(t)) {
 		if (!is_global)
 			return -EINVAL;
 		bpf_log(log,
-			"Global function %s() doesn't return scalar. Only those are supported.\n",
+			"Global function %s() return value not void or scalar. "
+			"Only those are supported.\n",
 			tname);
 		return -EINVAL;
 	}
@@ -9019,7 +9017,7 @@ static int btf_check_dtor_kfuncs(struct btf *btf, const struct btf_id_dtor_kfunc
 		if (!t || !btf_type_is_ptr(t))
 			return -EINVAL;
 
-		if (IS_ENABLED(CONFIG_CFI_CLANG)) {
+		if (IS_ENABLED(CONFIG_CFI)) {
 			/* Ensure the destructor kfunc type matches btf_dtor_kfunc_t */
 			t = btf_type_by_id(btf, t->type);
 			if (!btf_type_is_void(t))
