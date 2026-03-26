@@ -24,6 +24,7 @@
 
 #define CREATE_TRACE_POINTS
 #include "trace_arm.h"
+#include "hyp_trace.h"
 
 #include <linux/uaccess.h>
 #include <asm/ptrace.h>
@@ -35,6 +36,7 @@
 #include <asm/kvm_arm.h>
 #include <asm/kvm_asm.h>
 #include <asm/kvm_emulate.h>
+#include <asm/kvm_hyp.h>
 #include <asm/kvm_mmu.h>
 #include <asm/kvm_nested.h>
 #include <asm/kvm_pkvm.h>
@@ -45,6 +47,9 @@
 #include <kvm/arm_hypercalls.h>
 #include <kvm/arm_pmu.h>
 #include <kvm/arm_psci.h>
+#include <kvm/arm_vgic.h>
+
+#include <linux/irqchip/arm-gic-v5.h>
 
 #include "sys_regs.h"
 
@@ -613,6 +618,9 @@ static bool kvm_vcpu_should_clear_twi(struct kvm_vcpu *vcpu)
 	if (unlikely(kvm_wfi_trap_policy != KVM_WFX_NOTRAP_SINGLE_TASK))
 		return kvm_wfi_trap_policy == KVM_WFX_NOTRAP;
 
+	if (vgic_is_v5(vcpu->kvm))
+		return single_task_running();
+
 	return single_task_running() &&
 	       vcpu->kvm->arch.vgic.vgic_model == KVM_DEV_TYPE_ARM_VGIC_V3 &&
 	       (atomic_read(&vcpu->arch.vgic_cpu.vgic_v3.its_vpe.vlpi_count) ||
@@ -705,6 +713,8 @@ nommu:
 
 	if (!cpumask_test_cpu(cpu, vcpu->kvm->arch.supported_cpus))
 		vcpu_set_on_unsupported_cpu(vcpu);
+
+	vcpu->arch.pid = pid_nr(vcpu->pid);
 }
 
 void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu)
@@ -933,6 +943,10 @@ int kvm_arch_vcpu_run_pid_change(struct kvm_vcpu *vcpu)
 		if (ret)
 			return ret;
 	}
+
+	ret = vgic_v5_finalize_ppi_state(kvm);
+	if (ret)
+		return ret;
 
 	if (is_protected_kvm_enabled()) {
 		ret = pkvm_create_hyp_vm(kvm);
@@ -1439,10 +1453,11 @@ static int vcpu_interrupt_line(struct kvm_vcpu *vcpu, int number, bool level)
 int kvm_vm_ioctl_irq_line(struct kvm *kvm, struct kvm_irq_level *irq_level,
 			  bool line_status)
 {
-	u32 irq = irq_level->irq;
 	unsigned int irq_type, vcpu_id, irq_num;
 	struct kvm_vcpu *vcpu = NULL;
 	bool level = irq_level->level;
+	u32 irq = irq_level->irq;
+	unsigned long *mask;
 
 	irq_type = (irq >> KVM_ARM_IRQ_TYPE_SHIFT) & KVM_ARM_IRQ_TYPE_MASK;
 	vcpu_id = (irq >> KVM_ARM_IRQ_VCPU_SHIFT) & KVM_ARM_IRQ_VCPU_MASK;
@@ -1472,16 +1487,37 @@ int kvm_vm_ioctl_irq_line(struct kvm *kvm, struct kvm_irq_level *irq_level,
 		if (!vcpu)
 			return -EINVAL;
 
-		if (irq_num < VGIC_NR_SGIS || irq_num >= VGIC_NR_PRIVATE_IRQS)
+		if (vgic_is_v5(kvm)) {
+			if (irq_num >= VGIC_V5_NR_PRIVATE_IRQS)
+				return -EINVAL;
+
+			/*
+			 * Only allow PPIs that are explicitly exposed to
+			 * usespace to be driven via KVM_IRQ_LINE
+			 */
+			mask = kvm->arch.vgic.gicv5_vm.userspace_ppis;
+			if (!test_bit(irq_num, mask))
+				return -EINVAL;
+
+			/* Build a GICv5-style IntID here */
+			irq_num = vgic_v5_make_ppi(irq_num);
+		} else if (irq_num < VGIC_NR_SGIS ||
+			   irq_num >= VGIC_NR_PRIVATE_IRQS) {
 			return -EINVAL;
+		}
 
 		return kvm_vgic_inject_irq(kvm, vcpu, irq_num, level, NULL);
 	case KVM_ARM_IRQ_TYPE_SPI:
 		if (!irqchip_in_kernel(kvm))
 			return -ENXIO;
 
-		if (irq_num < VGIC_NR_PRIVATE_IRQS)
-			return -EINVAL;
+		if (vgic_is_v5(kvm)) {
+			/* Build a GICv5-style IntID here */
+			irq_num = vgic_v5_make_spi(irq_num);
+		} else {
+			if (irq_num < VGIC_NR_PRIVATE_IRQS)
+				return -EINVAL;
+		}
 
 		return kvm_vgic_inject_irq(kvm, NULL, irq_num, level, NULL);
 	}
@@ -2414,6 +2450,10 @@ static int __init init_subsystems(void)
 
 	kvm_register_perf_callbacks();
 
+	err = kvm_hyp_trace_init();
+	if (err)
+		kvm_err("Failed to initialize Hyp tracing\n");
+
 out:
 	if (err)
 		hyp_cpu_pm_exit();
@@ -2465,7 +2505,7 @@ static int __init do_pkvm_init(u32 hyp_va_bits)
 	preempt_disable();
 	cpu_hyp_init_context();
 	ret = kvm_call_hyp_nvhe(__pkvm_init, hyp_mem_base, hyp_mem_size,
-				num_possible_cpus(), kern_hyp_va(per_cpu_base),
+				kern_hyp_va(per_cpu_base),
 				hyp_va_bits);
 	cpu_hyp_init_features();
 
@@ -2507,6 +2547,7 @@ static void kvm_hyp_init_symbols(void)
 {
 	kvm_nvhe_sym(id_aa64pfr0_el1_sys_val) = get_hyp_id_aa64pfr0_el1();
 	kvm_nvhe_sym(id_aa64pfr1_el1_sys_val) = read_sanitised_ftr_reg(SYS_ID_AA64PFR1_EL1);
+	kvm_nvhe_sym(id_aa64pfr2_el1_sys_val) = read_sanitised_ftr_reg(SYS_ID_AA64PFR2_EL1);
 	kvm_nvhe_sym(id_aa64isar0_el1_sys_val) = read_sanitised_ftr_reg(SYS_ID_AA64ISAR0_EL1);
 	kvm_nvhe_sym(id_aa64isar1_el1_sys_val) = read_sanitised_ftr_reg(SYS_ID_AA64ISAR1_EL1);
 	kvm_nvhe_sym(id_aa64isar2_el1_sys_val) = read_sanitised_ftr_reg(SYS_ID_AA64ISAR2_EL1);
@@ -2529,6 +2570,9 @@ static void kvm_hyp_init_symbols(void)
 	kvm_nvhe_sym(hfgitr2_masks) = hfgitr2_masks;
 	kvm_nvhe_sym(hdfgrtr2_masks)= hdfgrtr2_masks;
 	kvm_nvhe_sym(hdfgwtr2_masks)= hdfgwtr2_masks;
+	kvm_nvhe_sym(ich_hfgrtr_masks) = ich_hfgrtr_masks;
+	kvm_nvhe_sym(ich_hfgwtr_masks) = ich_hfgwtr_masks;
+	kvm_nvhe_sym(ich_hfgitr_masks) = ich_hfgitr_masks;
 
 	/*
 	 * Flush entire BSS since part of its data containing init symbols is read
@@ -2673,6 +2717,8 @@ static int __init init_hyp_mode(void)
 		memcpy(page_addr, CHOOSE_NVHE_SYM(__per_cpu_start), nvhe_percpu_size());
 		kvm_nvhe_sym(kvm_arm_hyp_percpu_base)[cpu] = (unsigned long)page_addr;
 	}
+
+	kvm_nvhe_sym(hyp_nr_cpus) = num_possible_cpus();
 
 	/*
 	 * Map the Hyp-code called directly from the host
