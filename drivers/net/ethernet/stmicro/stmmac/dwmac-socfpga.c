@@ -72,7 +72,8 @@ struct socfpga_dwmac {
 	const struct socfpga_dwmac_ops *ops;
 };
 
-static void socfpga_dwmac_fix_mac_speed(void *bsp_priv, int speed,
+static void socfpga_dwmac_fix_mac_speed(void *bsp_priv,
+					phy_interface_t interface, int speed,
 					unsigned int mode)
 {
 	struct socfpga_dwmac *dwmac = (struct socfpga_dwmac *)bsp_priv;
@@ -564,7 +565,7 @@ static void socfpga_gen5_setup_plat_dat(struct socfpga_dwmac *dwmac)
 	plat_dat->core_type = DWMAC_CORE_GMAC;
 
 	/* Rx watchdog timer in dwmac is buggy in this hw */
-	plat_dat->riwt_off = 1;
+	plat_dat->riwt_off = true;
 }
 
 static void socfpga_agilex5_setup_plat_dat(struct socfpga_dwmac *dwmac)

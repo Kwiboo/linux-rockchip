@@ -44,13 +44,13 @@ static enum dsa_tag_protocol mxl862xx_get_tag_protocol(struct dsa_switch *ds,
 }
 
 /* PHY access via firmware relay */
-static int mxl862xx_phy_read_mmd(struct mxl862xx_priv *priv, int port,
-				 int devadd, int reg)
+static int mxl862xx_phy_read_mmd(struct mxl862xx_priv *priv, int addr,
+				 int devadd, int regnum)
 {
 	struct mdio_relay_data param = {
-		.phy = port,
+		.phy = addr,
 		.mmd = devadd,
-		.reg = cpu_to_le16(reg),
+		.reg = cpu_to_le16(regnum),
 	};
 	int ret;
 
@@ -61,40 +61,40 @@ static int mxl862xx_phy_read_mmd(struct mxl862xx_priv *priv, int port,
 	return le16_to_cpu(param.data);
 }
 
-static int mxl862xx_phy_write_mmd(struct mxl862xx_priv *priv, int port,
-				  int devadd, int reg, u16 data)
+static int mxl862xx_phy_write_mmd(struct mxl862xx_priv *priv, int addr,
+				  int devadd, int regnum, u16 data)
 {
 	struct mdio_relay_data param = {
-		.phy = port,
+		.phy = addr,
 		.mmd = devadd,
-		.reg = cpu_to_le16(reg),
+		.reg = cpu_to_le16(regnum),
 		.data = cpu_to_le16(data),
 	};
 
 	return MXL862XX_API_WRITE(priv, INT_GPHY_WRITE, param);
 }
 
-static int mxl862xx_phy_read_mii_bus(struct mii_bus *bus, int port, int regnum)
+static int mxl862xx_phy_read_mii_bus(struct mii_bus *bus, int addr, int regnum)
 {
-	return mxl862xx_phy_read_mmd(bus->priv, port, 0, regnum);
+	return mxl862xx_phy_read_mmd(bus->priv, addr, 0, regnum);
 }
 
-static int mxl862xx_phy_write_mii_bus(struct mii_bus *bus, int port,
+static int mxl862xx_phy_write_mii_bus(struct mii_bus *bus, int addr,
 				      int regnum, u16 val)
 {
-	return mxl862xx_phy_write_mmd(bus->priv, port, 0, regnum, val);
+	return mxl862xx_phy_write_mmd(bus->priv, addr, 0, regnum, val);
 }
 
-static int mxl862xx_phy_read_c45_mii_bus(struct mii_bus *bus, int port,
+static int mxl862xx_phy_read_c45_mii_bus(struct mii_bus *bus, int addr,
 					 int devadd, int regnum)
 {
-	return mxl862xx_phy_read_mmd(bus->priv, port, devadd, regnum);
+	return mxl862xx_phy_read_mmd(bus->priv, addr, devadd, regnum);
 }
 
-static int mxl862xx_phy_write_c45_mii_bus(struct mii_bus *bus, int port,
+static int mxl862xx_phy_write_c45_mii_bus(struct mii_bus *bus, int addr,
 					  int devadd, int regnum, u16 val)
 {
-	return mxl862xx_phy_write_mmd(bus->priv, port, devadd, regnum, val);
+	return mxl862xx_phy_write_mmd(bus->priv, addr, devadd, regnum, val);
 }
 
 static int mxl862xx_wait_ready(struct dsa_switch *ds)
@@ -424,6 +424,7 @@ static int mxl862xx_probe(struct mdio_device *mdiodev)
 	ds->ops = &mxl862xx_switch_ops;
 	ds->phylink_mac_ops = &mxl862xx_phylink_mac_ops;
 	ds->num_ports = MXL862XX_MAX_PORTS;
+	mxl862xx_host_init(priv);
 
 	dev_set_drvdata(dev, ds);
 
@@ -433,21 +434,31 @@ static int mxl862xx_probe(struct mdio_device *mdiodev)
 static void mxl862xx_remove(struct mdio_device *mdiodev)
 {
 	struct dsa_switch *ds = dev_get_drvdata(&mdiodev->dev);
+	struct mxl862xx_priv *priv;
 
 	if (!ds)
 		return;
 
+	priv = ds->priv;
+
 	dsa_unregister_switch(ds);
+
+	mxl862xx_host_shutdown(priv);
 }
 
 static void mxl862xx_shutdown(struct mdio_device *mdiodev)
 {
 	struct dsa_switch *ds = dev_get_drvdata(&mdiodev->dev);
+	struct mxl862xx_priv *priv;
 
 	if (!ds)
 		return;
 
+	priv = ds->priv;
+
 	dsa_switch_shutdown(ds);
+
+	mxl862xx_host_shutdown(priv);
 
 	dev_set_drvdata(&mdiodev->dev, NULL);
 }
