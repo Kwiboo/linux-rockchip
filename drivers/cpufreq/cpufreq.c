@@ -1427,12 +1427,9 @@ static int cpufreq_policy_online(struct cpufreq_policy *policy,
 		 * If there is a problem with its frequency table, take it
 		 * offline and drop it.
 		 */
-		if (policy->freq_table_sorted != CPUFREQ_TABLE_SORTED_ASCENDING &&
-		    policy->freq_table_sorted != CPUFREQ_TABLE_SORTED_DESCENDING) {
-			ret = cpufreq_table_validate_and_sort(policy);
-			if (ret)
-				goto out_offline_policy;
-		}
+		ret = cpufreq_table_validate_and_sort(policy);
+		if (ret)
+			goto out_offline_policy;
 
 		/* related_cpus should at least include policy->cpus. */
 		cpumask_copy(policy->related_cpus, policy->cpus);
@@ -2367,8 +2364,8 @@ int __cpufreq_driver_target(struct cpufreq_policy *policy,
 	target_freq = __resolve_freq(policy, target_freq, policy->min,
 				     policy->max, relation);
 
-	pr_debug("target for CPU %u: %u kHz, relation %u, requested %u kHz\n",
-		 policy->cpu, target_freq, relation, old_target_freq);
+	pr_debug("CPU %u: cur %u kHz -> target %u kHz (req %u kHz, rel %u)\n",
+		policy->cpu, policy->cur, target_freq, old_target_freq, relation);
 
 	/*
 	 * This might look like a redundant call as we are checking it again
