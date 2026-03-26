@@ -5,6 +5,7 @@
 #define FIRMWARE_MT7663		"mediatek/mt7663pr2h.bin"
 #define FIRMWARE_MT7668		"mediatek/mt7668pr2h.bin"
 #define FIRMWARE_MT7922		"mediatek/BT_RAM_CODE_MT7922_1_1_hdr.bin"
+#define FIRMWARE_MT7902		"mediatek/BT_RAM_CODE_MT7902_1_1_hdr.bin"
 #define FIRMWARE_MT7961		"mediatek/BT_RAM_CODE_MT7961_1_2_hdr.bin"
 #define FIRMWARE_MT7925		"mediatek/mt7925/BT_RAM_CODE_MT7925_1_1_hdr.bin"
 
@@ -147,6 +148,7 @@ enum {
 	BTMTK_HW_RESET_ACTIVE,
 	BTMTK_ISOPKT_OVER_INTR,
 	BTMTK_ISOPKT_RUNNING,
+	BTMTK_FIRMWARE_DL_RETRY,
 };
 
 typedef int (*btmtk_reset_sync_func_t)(struct hci_dev *, void *);
