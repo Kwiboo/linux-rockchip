@@ -1273,7 +1273,7 @@ static int get_ts_format(struct mlx5_ib_dev *dev, struct mlx5_ib_cq *cq,
 		}
 		return MLX5_TIMESTAMP_FORMAT_REAL_TIME;
 	}
-	if (cq->create_flags & IB_UVERBS_CQ_FLAGS_TIMESTAMP_COMPLETION) {
+	if (cq->private_flags & MLX5_IB_CQ_PR_TIMESTAMP_COMPLETION) {
 		if (!fr_sup) {
 			mlx5_ib_dbg(dev,
 				    "Free running TS format is not supported\n");

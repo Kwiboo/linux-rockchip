@@ -284,7 +284,7 @@ EXPORT_SYMBOL(ib_umem_get);
  */
 void ib_umem_release(struct ib_umem *umem)
 {
-	if (!umem)
+	if (IS_ERR_OR_NULL(umem))
 		return;
 	if (umem->is_dmabuf)
 		return ib_umem_dmabuf_release(to_ib_umem_dmabuf(umem));

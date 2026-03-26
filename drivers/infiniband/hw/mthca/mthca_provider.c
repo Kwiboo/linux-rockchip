@@ -35,8 +35,8 @@
  */
 
 #include <rdma/ib_smi.h>
-#include <rdma/ib_umem.h>
 #include <rdma/ib_user_verbs.h>
+#include <rdma/iter.h>
 #include <rdma/uverbs_ioctl.h>
 
 #include <linux/sched.h>
@@ -695,7 +695,8 @@ unlock:
 	return 0;
 }
 
-static int mthca_resize_cq(struct ib_cq *ibcq, int entries, struct ib_udata *udata)
+static int mthca_resize_cq(struct ib_cq *ibcq, unsigned int entries,
+			   struct ib_udata *udata)
 {
 	struct mthca_dev *dev = to_mdev(ibcq->device);
 	struct mthca_cq *cq = to_mcq(ibcq);
@@ -703,7 +704,7 @@ static int mthca_resize_cq(struct ib_cq *ibcq, int entries, struct ib_udata *uda
 	u32 lkey;
 	int ret;
 
-	if (entries < 1 || entries > dev->limits.max_cqes)
+	if (entries > dev->limits.max_cqes)
 		return -EINVAL;
 
 	mutex_lock(&cq->mutex);
@@ -1096,7 +1097,7 @@ static const struct ib_device_ops mthca_dev_ops = {
 	.query_port = mthca_query_port,
 	.query_qp = mthca_query_qp,
 	.reg_user_mr = mthca_reg_user_mr,
-	.resize_cq = mthca_resize_cq,
+	.resize_user_cq = mthca_resize_cq,
 
 	INIT_RDMA_OBJ_SIZE(ib_ah, mthca_ah, ibah),
 	INIT_RDMA_OBJ_SIZE(ib_cq, mthca_cq, ibcq),

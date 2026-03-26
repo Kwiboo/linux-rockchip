@@ -1097,11 +1097,8 @@ static int rxe_create_cq(struct ib_cq *ibcq, const struct ib_cq_init_attr *attr,
 		goto err_out;
 	}
 
-	err = rxe_cq_chk_attr(rxe, NULL, attr->cqe, attr->comp_vector);
-	if (err) {
-		rxe_dbg_dev(rxe, "bad init attributes, err = %d\n", err);
-		goto err_out;
-	}
+	if (attr->cqe > rxe->attr.max_cqe)
+		return -EINVAL;
 
 	err = rxe_add_to_pool(&rxe->cq_pool, cq);
 	if (err) {
@@ -1127,7 +1124,8 @@ err_out:
 	return err;
 }
 
-static int rxe_resize_cq(struct ib_cq *ibcq, int cqe, struct ib_udata *udata)
+static int rxe_resize_cq(struct ib_cq *ibcq, unsigned int cqe,
+			 struct ib_udata *udata)
 {
 	struct rxe_cq *cq = to_rcq(ibcq);
 	struct rxe_dev *rxe = to_rdev(ibcq->device);
@@ -1143,11 +1141,9 @@ static int rxe_resize_cq(struct ib_cq *ibcq, int cqe, struct ib_udata *udata)
 		uresp = udata->outbuf;
 	}
 
-	err = rxe_cq_chk_attr(rxe, cq, cqe, 0);
-	if (err) {
-		rxe_dbg_cq(cq, "bad attr, err = %d\n", err);
-		goto err_out;
-	}
+	if (cqe > rxe->attr.max_cqe ||
+	    cqe < queue_count(cq->queue, QUEUE_TYPE_TO_CLIENT))
+		return -EINVAL;
 
 	err = rxe_cq_resize_queue(cq, cqe, uresp, udata);
 	if (err) {
@@ -1519,7 +1515,7 @@ static const struct ib_device_ops rxe_dev_ops = {
 	.reg_user_mr = rxe_reg_user_mr,
 	.req_notify_cq = rxe_req_notify_cq,
 	.rereg_user_mr = rxe_rereg_user_mr,
-	.resize_cq = rxe_resize_cq,
+	.resize_user_cq = rxe_resize_cq,
 
 	INIT_RDMA_OBJ_SIZE(ib_ah, rxe_ah, ibah),
 	INIT_RDMA_OBJ_SIZE(ib_cq, rxe_cq, ibcq),
