@@ -42,6 +42,7 @@
 #include <unistd.h>
 #include <limits.h>
 #include <ctype.h>
+#include <stdbool.h>
 
 #pragma GCC diagnostic ignored "-Wmissing-prototypes"
 
@@ -73,6 +74,28 @@ static const int is_nolibc =
 	0
 #endif
 ;
+
+static const int is_glibc =
+#ifdef __GLIBC__
+	1
+#else
+	0
+#endif
+;
+
+#if !defined(NOLIBC)
+/* Some disabled tests may not compile. */
+
+/* strlcat() and strlcpy() may not be in the system headers. */
+#undef strlcat
+#undef strlcpy
+#define strlcat(d, s, l) 0
+#define strlcpy(d, s, l) 0
+
+/* readdir_r() is likely to be marked deprecated */
+#undef readdir_r
+#define readdir_r(dir, dirent, result) ((errno = EINVAL), -1)
+#endif
 
 /* definition of a series of tests */
 struct test {
@@ -142,21 +165,6 @@ static const char *errorname(int err)
 	}
 }
 
-static void align_result(size_t llen)
-{
-	const size_t align = 64;
-	char buf[align];
-	size_t n;
-
-	if (llen >= align)
-		return;
-
-	n = align - llen;
-	memset(buf, ' ', n);
-	buf[n] = '\0';
-	fputs(buf, stdout);
-}
-
 enum RESULT {
 	OK,
 	FAIL,
@@ -174,8 +182,10 @@ static void result(int llen, enum RESULT r)
 	else
 		msg = " [FAIL]";
 
-	align_result(llen);
-	puts(msg);
+	llen = 64 - llen;
+	if (llen < 0)
+		llen = 0;
+	printf("%*s%s\n", llen, "", msg);
 }
 
 /* The tests below are intended to be used by the macroes, which evaluate
@@ -701,6 +711,37 @@ static void constructor2(int argc, char **argv, char **envp)
 		constructor_test_value |= 1 << 1;
 }
 
+int test_program_invocation_name(void)
+{
+	char buf[100];
+	char *dirsep;
+	ssize_t r;
+	int fd;
+
+	fd = open("/proc/self/cmdline", O_RDONLY);
+	if (fd == -1)
+		return 1;
+
+	r = read(fd, buf, sizeof(buf));
+	close(fd);
+	if (r < 1 || r == sizeof(buf))
+		return 1;
+
+	buf[r - 1] = '\0';
+
+	if (strcmp(program_invocation_name, buf) != 0)
+		return 1;
+
+	dirsep = strrchr(buf, '/');
+	if (!dirsep || dirsep[1] == '\0')
+		return 1;
+
+	if (strcmp(program_invocation_short_name, dirsep + 1) != 0)
+		return 1;
+
+	return 0;
+}
+
 int run_startup(int min, int max)
 {
 	int test;
@@ -715,6 +756,7 @@ int run_startup(int min, int max)
 #ifdef NOLIBC
 	test_auxv = _auxv;
 #endif
+	bool proc = access("/proc", R_OK) == 0;
 
 	for (test = min; test >= 0 && test <= max; test++) {
 		int llen = 0; /* line length */
@@ -740,6 +782,7 @@ int run_startup(int min, int max)
 		CASE_TEST(constructor);      EXPECT_EQ(is_nolibc, constructor_test_value, 0x3); break;
 		CASE_TEST(linkage_errno);    EXPECT_PTREQ(1, linkage_test_errno_addr(), &errno); break;
 		CASE_TEST(linkage_constr);   EXPECT_EQ(1, linkage_test_constructor_test_value, 0x3); break;
+		CASE_TEST(prog_name);        EXPECT_ZR(proc, test_program_invocation_name()); break;
 		case __LINE__:
 			return ret; /* must be last */
 		/* note: do not set any defaults so as to permit holes above */
@@ -866,7 +909,7 @@ int test_file_stream(void)
 
 	errno = 0;
 	r = fwrite("foo", 1, 3, f);
-	if (r != 0 || errno != EBADF) {
+	if (r != 0 || ((is_nolibc || is_glibc) && errno != EBADF)) {
 		fclose(f);
 		return -1;
 	}
@@ -1408,7 +1451,7 @@ int run_syscall(int min, int max)
 		CASE_TEST(fork);              EXPECT_SYSZR(1, test_fork(FORK_STANDARD)); break;
 		CASE_TEST(getdents64_root);   EXPECT_SYSNE(1, test_getdents64("/"), -1); break;
 		CASE_TEST(getdents64_null);   EXPECT_SYSER(1, test_getdents64("/dev/null"), -1, ENOTDIR); break;
-		CASE_TEST(directories);       EXPECT_SYSZR(proc, test_dirent()); break;
+		CASE_TEST(directories);       EXPECT_SYSZR(is_nolibc && proc, test_dirent()); break;
 		CASE_TEST(getrandom);         EXPECT_SYSZR(1, test_getrandom()); break;
 		CASE_TEST(gettimeofday_tv);   EXPECT_SYSZR(1, gettimeofday(&tv, NULL)); break;
 		CASE_TEST(gettimeofday_tv_tz);EXPECT_SYSZR(1, gettimeofday(&tv, &tz)); break;
@@ -1646,33 +1689,60 @@ int run_stdlib(int min, int max)
 	return ret;
 }
 
-#define EXPECT_VFPRINTF(c, expected, fmt, ...)				\
-	ret += expect_vfprintf(llen, c, expected, fmt, ##__VA_ARGS__)
+#define EXPECT_VFPRINTF(cond, expected, fmt, ...)				\
+	do { if (!(cond)) result(llen, SKIPPED); else ret += expect_vfprintf(llen, expected, fmt, ##__VA_ARGS__); } while (0)
 
-static int expect_vfprintf(int llen, int c, const char *expected, const char *fmt, ...)
+#define VFPRINTF_LEN 25
+static int expect_vfprintf(int llen, const char *expected, const char *fmt, ...)
 {
-	char buf[100];
+	char buf[VFPRINTF_LEN + 80];
+	unsigned int cmp_len;
 	va_list args;
-	ssize_t w;
-	int ret;
+	ssize_t written, expected_len;
 
+	/* Fill and terminate buf[] to check for overlong/absent writes */
+	memset(buf, 0xa5, sizeof(buf) - 1);
+	buf[sizeof(buf) - 1] = 0;
 
 	va_start(args, fmt);
-	/* Only allow writing 21 bytes, to test truncation */
-	w = vsnprintf(buf, 21, fmt, args);
+	/* Limit buffer length to test truncation */
+	written = vsnprintf(buf, VFPRINTF_LEN + 1, fmt, args);
 	va_end(args);
 
-	if (w != c) {
-		llen += printf(" written(%d) != %d", (int)w, c);
+	llen += printf(" \"%s\"", buf);
+
+	expected_len = strlen(expected);
+	if (expected_len > VFPRINTF_LEN) {
+		/* Indicate truncated in test output */
+		llen += printf("+");
+		cmp_len = VFPRINTF_LEN;
+	} else {
+		cmp_len = expected_len;
+	}
+
+	if (memcmp(expected, buf, cmp_len) || buf[cmp_len]) {
+		llen += printf(" should be \"%.*s\"", VFPRINTF_LEN, expected);
 		result(llen, FAIL);
 		return 1;
 	}
 
-	llen += printf(" \"%s\" = \"%s\"", expected, buf);
-	ret = strncmp(expected, buf, c);
+	if (written != expected_len) {
+		llen += printf(" written(%d) != %d", (int)written, (int)expected_len);
+		result(llen, FAIL);
+		return 1;
+	}
 
-	result(llen, ret ? FAIL : OK);
-	return ret;
+	/* Check for any overwrites after the actual data. */
+	while (++cmp_len < sizeof(buf) - 1) {
+		if ((unsigned char)buf[cmp_len] != 0xa5) {
+			llen += printf(" overwrote buf[%d] with 0x%x", cmp_len, buf[cmp_len]);
+			result(llen, FAIL);
+			return 1;
+		}
+	}
+
+	result(llen, OK);
+	return 0;
 }
 
 static int test_scanf(void)
@@ -1742,23 +1812,6 @@ static int test_scanf(void)
 	return 0;
 }
 
-int test_strerror(void)
-{
-	char buf[100];
-	ssize_t ret;
-
-	memset(buf, 'A', sizeof(buf));
-
-	errno = EINVAL;
-	ret = snprintf(buf, sizeof(buf), "%m");
-	if (is_nolibc) {
-		if (ret < 6 || memcmp(buf, "errno=", 6))
-			return 1;
-	}
-
-	return 0;
-}
-
 static int test_printf_error(void)
 {
 	int fd, ret, saved_errno;
@@ -1793,23 +1846,55 @@ static int run_printf(int min, int max)
 		 * test numbers.
 		 */
 		switch (test + __LINE__ + 1) {
-		CASE_TEST(empty);        EXPECT_VFPRINTF(0, "", ""); break;
-		CASE_TEST(simple);       EXPECT_VFPRINTF(3, "foo", "foo"); break;
-		CASE_TEST(string);       EXPECT_VFPRINTF(3, "foo", "%s", "foo"); break;
-		CASE_TEST(number);       EXPECT_VFPRINTF(4, "1234", "%d", 1234); break;
-		CASE_TEST(negnumber);    EXPECT_VFPRINTF(5, "-1234", "%d", -1234); break;
-		CASE_TEST(unsigned);     EXPECT_VFPRINTF(5, "12345", "%u", 12345); break;
-		CASE_TEST(char);         EXPECT_VFPRINTF(1, "c", "%c", 'c'); break;
-		CASE_TEST(hex);          EXPECT_VFPRINTF(1, "f", "%x", 0xf); break;
-		CASE_TEST(pointer);      EXPECT_VFPRINTF(3, "0x1", "%p", (void *) 0x1); break;
-		CASE_TEST(uintmax_t);    EXPECT_VFPRINTF(20, "18446744073709551615", "%ju", 0xffffffffffffffffULL); break;
-		CASE_TEST(intmax_t);     EXPECT_VFPRINTF(20, "-9223372036854775807", "%jd", 0x8000000000000001LL); break;
-		CASE_TEST(truncation);   EXPECT_VFPRINTF(25, "01234567890123456789", "%s", "0123456789012345678901234"); break;
-		CASE_TEST(string_width); EXPECT_VFPRINTF(10, "         1", "%10s", "1"); break;
-		CASE_TEST(number_width); EXPECT_VFPRINTF(10, "         1", "%10d", 1); break;
-		CASE_TEST(width_trunc);  EXPECT_VFPRINTF(25, "                    ", "%25d", 1); break;
+		CASE_TEST(empty);        EXPECT_VFPRINTF(1, "", ""); break;
+		CASE_TEST(simple);       EXPECT_VFPRINTF(1, "foo", "foo"); break;
+		CASE_TEST(string);       EXPECT_VFPRINTF(1, "foo", "%s", "foo"); break;
+		CASE_TEST(number);       EXPECT_VFPRINTF(1, "1234", "%d", 1234); break;
+		CASE_TEST(negnumber);    EXPECT_VFPRINTF(1, "-1234", "%d", -1234); break;
+		CASE_TEST(num_sign);     EXPECT_VFPRINTF(1, "| 1|+2|+3|+4|5|", "|% d|%+d|% +d|%+ d|%#d|", 1, 2, 3, 4, 5); break;
+		CASE_TEST(unsigned);     EXPECT_VFPRINTF(1, "12345", "%u", 12345); break;
+		CASE_TEST(signed_max);   EXPECT_VFPRINTF(1, "2147483647", "%i", ~0u >> 1); break;
+		CASE_TEST(signed_min);   EXPECT_VFPRINTF(1, "-2147483648", "%i", (~0u >> 1) + 1); break;
+		CASE_TEST(unsigned_max); EXPECT_VFPRINTF(1, "4294967295", "%u", ~0u); break;
+		CASE_TEST(char);         EXPECT_VFPRINTF(1, "|c|d|   e|", "|%c|%.0c|%4c|", 'c', 'd', 'e'); break;
+		CASE_TEST(octal);        EXPECT_VFPRINTF(1, "|17|  0033||", "|%o|%6.4o|%.0o|", 017, 033, 0); break;
+		CASE_TEST(octal_max);    EXPECT_VFPRINTF(1, "1777777777777777777777", "%llo", ~0ULL); break;
+		CASE_TEST(octal_alt);    EXPECT_VFPRINTF(1, "|0|01|02|034|0|", "|%#o|%#o|%#02o|%#02o|%#.0o|", 0, 1, 2, 034, 0); break;
+		CASE_TEST(hex_nolibc);   EXPECT_VFPRINTF(is_nolibc, "|f|d|", "|%x|%X|", 0xf, 0xd); break;
+		CASE_TEST(hex_libc);     EXPECT_VFPRINTF(!is_nolibc, "|f|D|", "|%x|%X|", 0xf, 0xd); break;
+		CASE_TEST(hex_alt);      EXPECT_VFPRINTF(1, "|0x1|  0x2|    0|", "|%#x|%#5x|%#5x|", 1, 2, 0); break;
+		CASE_TEST(hex_alt_prec); EXPECT_VFPRINTF(1, "| 0x02|0x03| 0x123|", "|%#5.2x|%#04x|%#6.2x|", 2, 3, 0x123); break;
+		CASE_TEST(hex_0_alt);    EXPECT_VFPRINTF(1, "|0|0000|   00|", "|%#x|%#04x|%#5.2x|", 0, 0, 0); break;
+		CASE_TEST(pointer);      EXPECT_VFPRINTF(1, "0x1", "%p", (void *) 0x1); break;
+		CASE_TEST(pointer_NULL); EXPECT_VFPRINTF(is_nolibc || is_glibc, "|(nil)|(nil)|", "|%p|%.4p|", (void *)0, (void *)0); break;
+		CASE_TEST(string_NULL);  EXPECT_VFPRINTF(is_nolibc || is_glibc, "|(null)||(null)|", "|%s|%.5s|%.6s|", (void *)0, (void *)0, (void *)0); break;
+		CASE_TEST(percent);      EXPECT_VFPRINTF(1, "a%d42%69%", "a%%d%d%%%d%%", 42, 69); break;
+		CASE_TEST(perc_qual);    EXPECT_VFPRINTF(is_nolibc || is_glibc, "a%d2", "a%-14l%d%d", 2); break;
+		CASE_TEST(invalid);      EXPECT_VFPRINTF(is_nolibc || is_glibc, "a%12yx3%y42%P", "a%12yx%d%y%d%P", 3, 42); break;
+		CASE_TEST(intmax_max);   EXPECT_VFPRINTF(1, "9223372036854775807", "%lld", ~0ULL >> 1); break;
+		CASE_TEST(intmax_min);   EXPECT_VFPRINTF(is_nolibc || is_glibc, "-9223372036854775808", "%Li", (~0ULL >> 1) + 1); break;
+		CASE_TEST(uintmax_max);  EXPECT_VFPRINTF(1, "18446744073709551615", "%ju", ~0ULL); break;
+		CASE_TEST(truncation);   EXPECT_VFPRINTF(1, "012345678901234567890123456789", "%s", "012345678901234567890123456789"); break;
+		CASE_TEST(string_width); EXPECT_VFPRINTF(1, "         1", "%10s", "1"); break;
+		CASE_TEST(string_trunc); EXPECT_VFPRINTF(1, "     12345", "%10.5s", "1234567890"); break;
+		CASE_TEST(number_width); EXPECT_VFPRINTF(1, "         1", "%10d", 1); break;
+		CASE_TEST(number_left);  EXPECT_VFPRINTF(1, "|-5      |", "|%-8d|", -5); break;
+		CASE_TEST(string_align); EXPECT_VFPRINTF(1, "|foo     |", "|%-8s|", "foo"); break;
+		CASE_TEST(width_trunc);  EXPECT_VFPRINTF(1, "                             1", "%30d", 1); break;
+		CASE_TEST(width_tr_lft); EXPECT_VFPRINTF(1, "1                             ", "%-30d", 1); break;
+		CASE_TEST(number_pad);   EXPECT_VFPRINTF(1, "0000000005", "%010d", 5); break;
+		CASE_TEST(number_pad);   EXPECT_VFPRINTF(1, "|0000000005|0x1234|", "|%010d|%#01x|", 5, 0x1234); break;
+		CASE_TEST(num_pad_neg);  EXPECT_VFPRINTF(1, "-000000005", "%010d", -5); break;
+		CASE_TEST(num_pad_hex);  EXPECT_VFPRINTF(1, "00fffffffb", "%010x", -5); break;
+		CASE_TEST(num_pad_trunc);EXPECT_VFPRINTF(is_nolibc, "    0000000000000000000000000000005", "%035d", 5); break;  /* max 31 '0' can be added */
+		CASE_TEST(num_p_tr_libc);EXPECT_VFPRINTF(!is_nolibc, "00000000000000000000000000000000005", "%035d", 5); break;
+		CASE_TEST(number_prec);  EXPECT_VFPRINTF(1, "     00005", "%10.5d", 5); break;
+		CASE_TEST(num_prec_neg); EXPECT_VFPRINTF(1, "    -00005", "%10.5d", -5); break;
+		CASE_TEST(num_prec_var); EXPECT_VFPRINTF(1, "    -00005", "%*.*d", 10, 5, -5); break;
+		CASE_TEST(num_0_prec_0); EXPECT_VFPRINTF(1, "|| |+||||", "|%.0d|% .0d|%+.0d|%.0u|%.0x|%#.0x|", 0, 0, 0, 0, 0, 0); break;
+		CASE_TEST(errno);        errno = 22; EXPECT_VFPRINTF(is_nolibc, "errno=22", "%m"); break;
+		CASE_TEST(errno-neg);    errno = -22; EXPECT_VFPRINTF(is_nolibc, "errno=-22   ", "%-12m"); break;
 		CASE_TEST(scanf);        EXPECT_ZR(1, test_scanf()); break;
-		CASE_TEST(strerror);     EXPECT_ZR(1, test_strerror()); break;
 		CASE_TEST(printf_error); EXPECT_ZR(1, test_printf_error()); break;
 		case __LINE__:
 			return ret; /* must be last */
