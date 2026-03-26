@@ -516,6 +516,25 @@ void free_pgtables(struct mmu_gather *tlb, struct unmap_desc *desc);
 
 void pmd_install(struct mm_struct *mm, pmd_t *pmd, pgtable_t *pte);
 
+/**
+ * sync_with_folio_pmd_zap - sync with concurrent zapping of a folio PMD
+ * @mm: The mm_struct.
+ * @pmdp: Pointer to the pmd that was found to be pmd_none().
+ *
+ * When we find a pmd_none() while unmapping a folio without holding the PTL,
+ * zap_huge_pmd() may have cleared the PMD but not yet modified the folio to
+ * indicate that it's unmapped. Skipping the PMD without synchronization could
+ * make folio unmapping code assume that unmapping failed.
+ *
+ * Wait for concurrent zapping to complete by grabbing the PTL.
+ */
+static inline void sync_with_folio_pmd_zap(struct mm_struct *mm, pmd_t *pmdp)
+{
+	spinlock_t *ptl = pmd_lock(mm, pmdp);
+
+	spin_unlock(ptl);
+}
+
 struct zap_details;
 void unmap_page_range(struct mmu_gather *tlb,
 			     struct vm_area_struct *vma,
@@ -878,13 +897,21 @@ static inline void prep_compound_head(struct page *page, unsigned int order)
 		INIT_LIST_HEAD(&folio->_deferred_list);
 }
 
-static inline void prep_compound_tail(struct page *head, int tail_idx)
+static inline void prep_compound_tail(struct page *tail,
+		const struct page *head, unsigned int order)
 {
-	struct page *p = head + tail_idx;
+	tail->mapping = TAIL_MAPPING;
+	set_compound_head(tail, head, order);
+	set_page_private(tail, 0);
+}
 
-	p->mapping = TAIL_MAPPING;
-	set_compound_head(p, head);
-	set_page_private(p, 0);
+static inline void init_compound_tail(struct page *tail,
+		const struct page *head, unsigned int order, struct zone *zone)
+{
+	atomic_set(&tail->_mapcount, -1);
+	set_page_node(tail, zone_to_nid(zone));
+	set_page_zone(tail, zone_idx(zone));
+	prep_compound_tail(tail, head, order);
 }
 
 void post_alloc_hook(struct page *page, unsigned int order, gfp_t gfp_flags);
@@ -1449,6 +1476,8 @@ int __must_check vmap_pages_range_noflush(unsigned long addr, unsigned long end,
 	return -EINVAL;
 }
 #endif
+
+void clear_vm_uninitialized_flag(struct vm_struct *vm);
 
 int __must_check __vmap_pages_range_noflush(unsigned long addr,
 			       unsigned long end, pgprot_t prot,
