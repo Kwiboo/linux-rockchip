@@ -9,6 +9,7 @@
 #include <linux/poll.h>
 #include <linux/vmalloc.h>
 #include <linux/io_uring.h>
+#include <linux/io_uring/cmd.h>
 
 #include <uapi/linux/io_uring.h>
 
@@ -105,6 +106,54 @@ void io_kbuf_drop_legacy(struct io_kiocb *req)
 	req->kbuf = NULL;
 }
 
+int io_uring_kmbuf_recycle(struct io_uring_cmd *cmd, unsigned int buf_group,
+			   u64 addr, unsigned int len, unsigned int bid,
+			   unsigned int issue_flags)
+{
+	struct io_kiocb *req = cmd_to_io_kiocb(cmd);
+	struct io_ring_ctx *ctx = req->ctx;
+	struct io_uring_buf_ring *br;
+	struct io_uring_buf *buf;
+	struct io_buffer_list *bl;
+	unsigned int required_flags;
+	int ret = -EINVAL;
+
+	if (WARN_ON_ONCE(req->flags & REQ_F_BUFFERS_COMMIT))
+		return ret;
+
+	io_ring_submit_lock(ctx, issue_flags);
+
+	bl = io_buffer_get_list(ctx, buf_group);
+
+	if (!bl)
+		goto err;
+
+	required_flags = IOBL_BUF_RING | IOBL_KERNEL_MANAGED;
+	if (WARN_ON_ONCE((bl->flags & required_flags) != required_flags))
+		goto err;
+
+	br = bl->buf_ring;
+
+	if (WARN_ON_ONCE((__u16)(br->tail - bl->head) >= bl->nr_entries))
+		goto err;
+
+	buf = &br->bufs[(br->tail) & bl->mask];
+
+	buf->addr = addr;
+	buf->len = len;
+	buf->bid = bid;
+
+	req->flags &= ~REQ_F_BUFFER_RING;
+
+	br->tail++;
+	ret = 0;
+
+err:
+	io_ring_submit_unlock(ctx, issue_flags);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(io_uring_kmbuf_recycle);
+
 bool io_kbuf_recycle_legacy(struct io_kiocb *req, unsigned issue_flags)
 {
 	struct io_ring_ctx *ctx = req->ctx;
@@ -168,7 +217,8 @@ static int io_provided_buffers_select(struct io_kiocb *req, size_t *len,
 	return 1;
 }
 
-static bool io_should_commit(struct io_kiocb *req, unsigned int issue_flags)
+static bool io_should_commit(struct io_kiocb *req, struct io_buffer_list *bl,
+			     unsigned int issue_flags)
 {
 	/*
 	* If we came in unlocked, we have no choice but to consume the
@@ -183,15 +233,19 @@ static bool io_should_commit(struct io_kiocb *req, unsigned int issue_flags)
 	if (issue_flags & IO_URING_F_UNLOCKED)
 		return true;
 
-	/* uring_cmd commits kbuf upfront, no need to auto-commit */
+	/* kernel-managed buffers are auto-committed */
+	if (bl->flags & IOBL_KERNEL_MANAGED)
+		return true;
+
+	/* multishot uring_cmd commits kbuf upfront, no need to auto-commit */
 	if (!io_file_can_poll(req) && !io_is_uring_cmd(req))
 		return true;
 	return false;
 }
 
-static struct io_br_sel io_ring_buffer_select(struct io_kiocb *req, size_t *len,
-					      struct io_buffer_list *bl,
-					      unsigned int issue_flags)
+struct io_br_sel io_ring_buffer_select(struct io_kiocb *req, size_t *len,
+				       struct io_buffer_list *bl,
+				       unsigned int issue_flags)
 {
 	struct io_uring_buf_ring *br = bl->buf_ring;
 	__u16 tail, head = bl->head;
@@ -213,15 +267,20 @@ static struct io_br_sel io_ring_buffer_select(struct io_kiocb *req, size_t *len,
 	req->flags |= REQ_F_BUFFER_RING | REQ_F_BUFFERS_COMMIT;
 	req->buf_index = READ_ONCE(buf->bid);
 	sel.buf_list = bl;
-	sel.addr = u64_to_user_ptr(READ_ONCE(buf->addr));
+	sel.buf_id = req->buf_index;
+	if (bl->flags & IOBL_KERNEL_MANAGED)
+		sel.kaddr = (void *)(uintptr_t)READ_ONCE(buf->addr);
+	else
+		sel.addr = u64_to_user_ptr(READ_ONCE(buf->addr));
 
-	if (io_should_commit(req, issue_flags)) {
+	if (io_should_commit(req, bl, issue_flags)) {
 		if (!io_kbuf_commit(req, sel.buf_list, *len, 1))
 			req->flags |= REQ_F_BUF_MORE;
 		sel.buf_list = NULL;
 	}
 	return sel;
 }
+EXPORT_SYMBOL_GPL(io_ring_buffer_select);
 
 struct io_br_sel io_buffer_select(struct io_kiocb *req, size_t *len,
 				  unsigned buf_group, unsigned int issue_flags)
@@ -230,18 +289,72 @@ struct io_br_sel io_buffer_select(struct io_kiocb *req, size_t *len,
 	struct io_br_sel sel = { };
 	struct io_buffer_list *bl;
 
-	io_ring_submit_lock(req->ctx, issue_flags);
+	io_ring_submit_lock(ctx, issue_flags);
 
 	bl = io_buffer_get_list(ctx, buf_group);
 	if (likely(bl)) {
-		if (bl->flags & IOBL_BUF_RING)
+		if (bl->flags & IOBL_BUF_RING) {
 			sel = io_ring_buffer_select(req, len, bl, issue_flags);
-		else
+		} else {
 			sel.addr = io_provided_buffer_select(req, len, bl);
+			sel.buf_id = req->buf_index;
+		}
 	}
-	io_ring_submit_unlock(req->ctx, issue_flags);
+	io_ring_submit_unlock(ctx, issue_flags);
 	return sel;
 }
+
+int io_uring_buf_ring_pin(struct io_uring_cmd *cmd, unsigned buf_group,
+			  unsigned issue_flags, struct io_buffer_list **out_bl)
+{
+	struct io_ring_ctx *ctx = cmd_to_io_kiocb(cmd)->ctx;
+	struct io_buffer_list *bl;
+	int ret = -EINVAL;
+
+	io_ring_submit_lock(ctx, issue_flags);
+
+	bl = io_buffer_get_list(ctx, buf_group);
+	if (!bl || !(bl->flags & IOBL_BUF_RING))
+		goto err;
+
+	if (unlikely(bl->flags & IOBL_PINNED)) {
+		ret = -EALREADY;
+		goto err;
+	}
+
+	bl->flags |= IOBL_PINNED;
+	ret = 0;
+	*out_bl = bl;
+err:
+	io_ring_submit_unlock(ctx, issue_flags);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(io_uring_buf_ring_pin);
+
+int io_uring_buf_ring_unpin(struct io_uring_cmd *cmd, unsigned buf_group,
+			    unsigned issue_flags)
+{
+	struct io_ring_ctx *ctx = cmd_to_io_kiocb(cmd)->ctx;
+	struct io_buffer_list *bl;
+	unsigned int required_flags;
+	int ret = -EINVAL;
+
+	io_ring_submit_lock(ctx, issue_flags);
+
+	bl = io_buffer_get_list(ctx, buf_group);
+	if (!bl)
+		goto err;
+
+	required_flags = IOBL_BUF_RING | IOBL_PINNED;
+	if ((bl->flags & required_flags) == required_flags) {
+		bl->flags &= ~IOBL_PINNED;
+		ret = 0;
+	}
+err:
+	io_ring_submit_unlock(ctx, issue_flags);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(io_uring_buf_ring_unpin);
 
 /* cap it at a reasonable 256, will be one page even for 4K */
 #define PEEK_MAX_IMPORT		256
@@ -444,10 +557,13 @@ static int io_remove_buffers_legacy(struct io_ring_ctx *ctx,
 
 static void io_put_bl(struct io_ring_ctx *ctx, struct io_buffer_list *bl)
 {
-	if (bl->flags & IOBL_BUF_RING)
+	if (bl->flags & IOBL_BUF_RING) {
 		io_free_region(ctx->user, &bl->region);
-	else
+		if (bl->flags & IOBL_KERNEL_MANAGED)
+			kfree(bl->buf_ring);
+	} else {
 		io_remove_buffers_legacy(ctx, bl, -1U);
+	}
 
 	kfree(bl);
 }
@@ -613,14 +729,53 @@ int io_manage_buffers_legacy(struct io_kiocb *req, unsigned int issue_flags)
 	return IOU_COMPLETE;
 }
 
+static int io_setup_kmbuf_ring(struct io_ring_ctx *ctx,
+			       struct io_buffer_list *bl,
+			       const struct io_uring_buf_reg *reg)
+{
+	struct io_uring_buf_ring *ring;
+	unsigned long ring_size;
+	void *buf_region;
+	unsigned int i;
+	int ret;
+
+	/* allocate pages for the ring structure */
+	ring_size = flex_array_size(ring, bufs, reg->ring_entries);
+	ring = kzalloc(ring_size, GFP_KERNEL_ACCOUNT);
+	if (!ring)
+		return -ENOMEM;
+
+	ret = io_create_region_multi_buf(ctx, &bl->region, reg->ring_entries,
+					 reg->buf_size);
+	if (ret) {
+		kfree(ring);
+		return ret;
+	}
+
+	/* initialize ring buf entries to point to the buffers */
+	buf_region = bl->region.ptr;
+	for (i = 0; i < reg->ring_entries; i++) {
+		struct io_uring_buf *buf = &ring->bufs[i];
+
+		buf->addr = (u64)(uintptr_t)buf_region;
+		buf->len = reg->buf_size;
+		buf->bid = i;
+
+		buf_region += reg->buf_size;
+	}
+	ring->tail = reg->ring_entries;
+
+	bl->buf_ring = ring;
+	bl->flags |= IOBL_KERNEL_MANAGED;
+
+	return 0;
+}
+
 int io_register_pbuf_ring(struct io_ring_ctx *ctx, void __user *arg)
 {
 	struct io_uring_buf_reg reg;
 	struct io_buffer_list *bl;
-	struct io_uring_region_desc rd;
 	struct io_uring_buf_ring *br;
-	unsigned long mmap_offset;
-	unsigned long ring_size;
 	int ret;
 
 	lockdep_assert_held(&ctx->uring_lock);
@@ -629,13 +784,24 @@ int io_register_pbuf_ring(struct io_ring_ctx *ctx, void __user *arg)
 		return -EFAULT;
 	if (!mem_is_zero(reg.resv, sizeof(reg.resv)))
 		return -EINVAL;
-	if (reg.flags & ~(IOU_PBUF_RING_MMAP | IOU_PBUF_RING_INC))
+	if (reg.flags & ~(IOU_PBUF_RING_MMAP | IOU_PBUF_RING_INC |
+			  IOU_PBUF_RING_KERNEL_MANAGED))
 		return -EINVAL;
 	if (!is_power_of_2(reg.ring_entries))
 		return -EINVAL;
 	/* cannot disambiguate full vs empty due to head/tail size */
 	if (reg.ring_entries >= 65536)
 		return -EINVAL;
+
+	if (reg.flags & IOU_PBUF_RING_KERNEL_MANAGED) {
+		if (!(reg.flags & IOU_PBUF_RING_MMAP))
+			return -EINVAL;
+		/* not yet supported */
+		if (reg.flags & IOU_PBUF_RING_INC)
+			return -EINVAL;
+		if (!reg.buf_size || !PAGE_ALIGNED(reg.buf_size))
+			return -EINVAL;
+	}
 
 	bl = io_buffer_get_list(ctx, reg.bgid);
 	if (bl) {
@@ -649,19 +815,30 @@ int io_register_pbuf_ring(struct io_ring_ctx *ctx, void __user *arg)
 	if (!bl)
 		return -ENOMEM;
 
-	mmap_offset = (unsigned long)reg.bgid << IORING_OFF_PBUF_SHIFT;
-	ring_size = flex_array_size(br, bufs, reg.ring_entries);
+	if (!(reg.flags & IOU_PBUF_RING_KERNEL_MANAGED)) {
+		struct io_uring_region_desc rd;
+		unsigned long mmap_offset;
+		unsigned long ring_size;
 
-	memset(&rd, 0, sizeof(rd));
-	rd.size = PAGE_ALIGN(ring_size);
-	if (!(reg.flags & IOU_PBUF_RING_MMAP)) {
-		rd.user_addr = reg.ring_addr;
-		rd.flags |= IORING_MEM_REGION_TYPE_USER;
+		mmap_offset = (unsigned long)reg.bgid << IORING_OFF_PBUF_SHIFT;
+		ring_size = flex_array_size(br, bufs, reg.ring_entries);
+
+		memset(&rd, 0, sizeof(rd));
+		rd.size = PAGE_ALIGN(ring_size);
+		if (!(reg.flags & IOU_PBUF_RING_MMAP)) {
+			rd.user_addr = reg.ring_addr;
+			rd.flags |= IORING_MEM_REGION_TYPE_USER;
+		}
+		ret = io_create_region(ctx, &bl->region, &rd, mmap_offset);
+		if (!ret)
+			bl->buf_ring = io_region_get_ptr(&bl->region);
+	} else {
+		ret = io_setup_kmbuf_ring(ctx, bl, &reg);
 	}
-	ret = io_create_region(ctx, &bl->region, &rd, mmap_offset);
 	if (ret)
 		goto fail;
-	br = io_region_get_ptr(&bl->region);
+
+	br = bl->buf_ring;
 
 #ifdef SHM_COLOUR
 	/*
@@ -683,7 +860,6 @@ int io_register_pbuf_ring(struct io_ring_ctx *ctx, void __user *arg)
 	bl->nr_entries = reg.ring_entries;
 	bl->mask = reg.ring_entries - 1;
 	bl->flags |= IOBL_BUF_RING;
-	bl->buf_ring = br;
 	if (reg.flags & IOU_PBUF_RING_INC)
 		bl->flags |= IOBL_INC;
 	ret = io_buffer_add_list(ctx, bl, reg.bgid);
@@ -691,6 +867,8 @@ int io_register_pbuf_ring(struct io_ring_ctx *ctx, void __user *arg)
 		return 0;
 fail:
 	io_free_region(ctx->user, &bl->region);
+	if (bl->flags & IOBL_KERNEL_MANAGED)
+		kfree(bl->buf_ring);
 	kfree(bl);
 	return ret;
 }
@@ -712,6 +890,8 @@ int io_unregister_pbuf_ring(struct io_ring_ctx *ctx, void __user *arg)
 		return -ENOENT;
 	if (!(bl->flags & IOBL_BUF_RING))
 		return -EINVAL;
+	if (bl->flags & IOBL_PINNED)
+		return -EBUSY;
 
 	scoped_guard(mutex, &ctx->mmap_lock)
 		xa_erase(&ctx->io_bl_xa, bl->bgid);
@@ -755,3 +935,23 @@ struct io_mapped_region *io_pbuf_get_region(struct io_ring_ctx *ctx,
 		return NULL;
 	return &bl->region;
 }
+
+bool io_uring_is_kmbuf_ring(struct io_uring_cmd *cmd, unsigned int buf_group,
+			    unsigned int issue_flags)
+{
+	struct io_ring_ctx *ctx = cmd_to_io_kiocb(cmd)->ctx;
+	struct io_buffer_list *bl;
+	bool is_kmbuf_ring = false;
+
+	io_ring_submit_lock(ctx, issue_flags);
+
+	bl = io_buffer_get_list(ctx, buf_group);
+	if (likely(bl) && (bl->flags & IOBL_KERNEL_MANAGED)) {
+		WARN_ON_ONCE(!(bl->flags & IOBL_BUF_RING));
+		is_kmbuf_ring = true;
+	}
+
+	io_ring_submit_unlock(ctx, issue_flags);
+	return is_kmbuf_ring;
+}
+EXPORT_SYMBOL_GPL(io_uring_is_kmbuf_ring);
