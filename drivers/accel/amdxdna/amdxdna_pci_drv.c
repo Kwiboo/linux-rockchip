@@ -35,9 +35,10 @@ MODULE_FIRMWARE("amdnpu/17f0_11/npu_7.sbin");
  * 0.4: Support getting resource information
  * 0.5: Support getting telemetry data
  * 0.6: Support preemption
+ * 0.7: Support getting power and utilization data
  */
 #define AMDXDNA_DRIVER_MAJOR		0
-#define AMDXDNA_DRIVER_MINOR		6
+#define AMDXDNA_DRIVER_MINOR		7
 
 /*
  * Bind the driver base on (vendor_id, device_id) pair and later use the
@@ -72,18 +73,21 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 
 	client->pid = pid_nr(rcu_access_pointer(filp->pid));
 	client->xdna = xdna;
+	client->pasid = IOMMU_PASID_INVALID;
 
-	client->sva = iommu_sva_bind_device(xdna->ddev.dev, current->mm);
-	if (IS_ERR(client->sva)) {
-		ret = PTR_ERR(client->sva);
-		XDNA_ERR(xdna, "SVA bind device failed, ret %d", ret);
-		goto failed;
-	}
-	client->pasid = iommu_sva_get_pasid(client->sva);
-	if (client->pasid == IOMMU_PASID_INVALID) {
-		XDNA_ERR(xdna, "SVA get pasid failed");
-		ret = -ENODEV;
-		goto unbind_sva;
+	if (!amdxdna_iova_on(xdna)) {
+		client->sva = iommu_sva_bind_device(xdna->ddev.dev, current->mm);
+		if (IS_ERR(client->sva)) {
+			ret = PTR_ERR(client->sva);
+			XDNA_ERR(xdna, "SVA bind device failed, ret %d", ret);
+			goto failed;
+		}
+		client->pasid = iommu_sva_get_pasid(client->sva);
+		if (client->pasid == IOMMU_PASID_INVALID) {
+			XDNA_ERR(xdna, "SVA get pasid failed");
+			ret = -ENODEV;
+			goto unbind_sva;
+		}
 	}
 	client->mm = current->mm;
 	mmgrab(client->mm);
@@ -102,7 +106,8 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	return 0;
 
 unbind_sva:
-	iommu_sva_unbind_device(client->sva);
+	if (!IS_ERR_OR_NULL(client->sva))
+		iommu_sva_unbind_device(client->sva);
 failed:
 	kfree(client);
 
@@ -120,7 +125,8 @@ static void amdxdna_client_cleanup(struct amdxdna_client *client)
 	if (client->dev_heap)
 		drm_gem_object_put(to_gobj(client->dev_heap));
 
-	iommu_sva_unbind_device(client->sva);
+	if (!IS_ERR_OR_NULL(client->sva))
+		iommu_sva_unbind_device(client->sva);
 	mmdrop(client->mm);
 
 	kfree(client);
@@ -281,9 +287,15 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		fs_reclaim_release(GFP_KERNEL);
 	}
 
+	ret = amdxdna_iommu_init(xdna);
+	if (ret)
+		return ret;
+
 	xdna->notifier_wq = alloc_ordered_workqueue("notifier_wq", WQ_MEM_RECLAIM);
-	if (!xdna->notifier_wq)
-		return -ENOMEM;
+	if (!xdna->notifier_wq) {
+		ret = -ENOMEM;
+		goto iommu_fini;
+	}
 
 	mutex_lock(&xdna->dev_lock);
 	ret = xdna->dev_info->ops->init(xdna);
@@ -315,6 +327,8 @@ failed_dev_fini:
 	mutex_unlock(&xdna->dev_lock);
 destroy_notifier_wq:
 	destroy_workqueue(xdna->notifier_wq);
+iommu_fini:
+	amdxdna_iommu_fini(xdna);
 	return ret;
 }
 
@@ -340,6 +354,8 @@ static void amdxdna_remove(struct pci_dev *pdev)
 
 	xdna->dev_info->ops->fini(xdna);
 	mutex_unlock(&xdna->dev_lock);
+
+	amdxdna_iommu_fini(xdna);
 }
 
 static const struct dev_pm_ops amdxdna_pm_ops = {
@@ -358,5 +374,6 @@ static struct pci_driver amdxdna_pci_driver = {
 module_pci_driver(amdxdna_pci_driver);
 
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS("AMD_PMF");
 MODULE_AUTHOR("XRT Team <runtimeca39d@amd.com>");
 MODULE_DESCRIPTION("amdxdna driver");

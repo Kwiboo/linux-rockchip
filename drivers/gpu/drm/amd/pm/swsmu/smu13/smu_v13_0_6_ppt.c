@@ -373,6 +373,9 @@ static void smu_v13_0_12_init_caps(struct smu_context *smu)
 	} else {
 		smu_v13_0_12_tables_fini(smu);
 	}
+
+	if (fw_ver >= 0x04561000)
+		smu_v13_0_6_cap_set(smu, SMU_CAP(TEMP_AID_XCD_HBM));
 }
 
 static void smu_v13_0_6_init_caps(struct smu_context *smu)
@@ -478,7 +481,7 @@ static int smu_v13_0_6_check_fw_version(struct smu_context *smu)
 {
 	int r;
 
-	r = smu_v13_0_check_fw_version(smu);
+	r = smu_cmn_check_fw_version(smu);
 	/* Initialize caps flags once fw version is fetched */
 	if (!r)
 		smu_v13_0_x_init_caps(smu);
@@ -3160,7 +3163,11 @@ static int smu_v13_0_6_reset_vcn(struct smu_context *smu, uint32_t inst_mask)
 
 static int smu_v13_0_6_ras_send_msg(struct smu_context *smu, enum smu_message_type msg, uint32_t param, uint32_t *read_arg)
 {
+	struct amdgpu_device *adev = smu->adev;
 	int ret;
+
+	if (amdgpu_sriov_vf(adev))
+		return -EOPNOTSUPP;
 
 	switch (msg) {
 	case SMU_MSG_QueryValidMcaCount:
@@ -3168,6 +3175,13 @@ static int smu_v13_0_6_ras_send_msg(struct smu_context *smu, enum smu_message_ty
 	case SMU_MSG_McaBankDumpDW:
 	case SMU_MSG_McaBankCeDumpDW:
 	case SMU_MSG_ClearMcaOnRead:
+	case SMU_MSG_GetRASTableVersion:
+	case SMU_MSG_GetBadPageCount:
+	case SMU_MSG_GetBadPageMcaAddr:
+	case SMU_MSG_SetTimestamp:
+	case SMU_MSG_GetTimestamp:
+	case SMU_MSG_GetBadPageIpid:
+	case SMU_MSG_EraseRasTable:
 		ret = smu_cmn_send_smc_msg_with_param(smu, msg, param, read_arg);
 		break;
 	default:
