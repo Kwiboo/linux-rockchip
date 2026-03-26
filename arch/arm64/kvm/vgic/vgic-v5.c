@@ -238,7 +238,7 @@ static u32 vgic_v5_get_effective_priority_mask(struct kvm_vcpu *vcpu)
 	 */
 	priority_mask = FIELD_GET(FEAT_GCIE_ICH_VMCR_EL2_VPMR, cpu_if->vgic_vmcr);
 
-	return min(highest_ap, priority_mask + 1);
+	return min(highest_ap, priority_mask);
 }
 
 /*
@@ -367,7 +367,7 @@ bool vgic_v5_has_pending_ppi(struct kvm_vcpu *vcpu)
 
 		scoped_guard(raw_spinlock_irqsave, &irq->irq_lock)
 			has_pending = (irq->enabled && irq_is_pending(irq) &&
-				       irq->priority <= priority_mask);
+				       irq->priority < priority_mask);
 
 		vgic_put_irq(vcpu->kvm, irq);
 
