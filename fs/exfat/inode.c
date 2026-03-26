@@ -204,8 +204,9 @@ static int exfat_map_cluster(struct inode *inode, unsigned int clu_offset,
 				 * so fat-chain should be synced with
 				 * alloc-bitmap
 				 */
-				exfat_chain_cont_cluster(sb, ei->start_clu,
-					num_clusters);
+				if (exfat_chain_cont_cluster(sb, ei->start_clu,
+						num_clusters))
+					return -EIO;
 				ei->flags = ALLOC_FAT_CHAIN;
 			}
 			if (new_clu.flags == ALLOC_FAT_CHAIN)
@@ -213,7 +214,6 @@ static int exfat_map_cluster(struct inode *inode, unsigned int clu_offset,
 					return -EIO;
 		}
 
-		num_clusters += num_to_be_allocated;
 		*clu = new_clu.dir;
 
 		inode->i_blocks += EXFAT_CLU_TO_B(num_to_be_allocated, sbi) >> 9;
@@ -686,7 +686,7 @@ out:
 
 void exfat_evict_inode(struct inode *inode)
 {
-	truncate_inode_pages(&inode->i_data, 0);
+	truncate_inode_pages_final(&inode->i_data);
 
 	if (!inode->i_nlink) {
 		i_size_write(inode, 0);

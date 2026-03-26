@@ -638,7 +638,8 @@ static int ext2_get_blocks(struct inode *inode,
 	int count = 0;
 	ext2_fsblk_t first_block = 0;
 
-	BUG_ON(maxblocks == 0);
+	if (WARN_ON_ONCE(maxblocks == 0))
+		return -EINVAL;
 
 	depth = ext2_block_to_path(inode,iblock,offsets,&blocks_to_boundary);
 
@@ -1152,7 +1153,7 @@ static void ext2_free_branches(struct inode *inode, __le32 *p, __le32 *q, int de
 			 */ 
 			if (!bh) {
 				ext2_error(inode->i_sb, "ext2_free_branches",
-					"Read failure, inode=%ld, block=%ld",
+					"Read failure, inode=%llu, block=%ld",
 					inode->i_ino, nr);
 				continue;
 			}
