@@ -83,7 +83,7 @@ int main(int argc, char **argv)
 	setvbuf(stdout, NULL, _IONBF, 0);
 	self = argv[0];
 
-	while ((c = getopt(argc, argv, "s:p:m:owlrn")) != -1) {
+	while ((c = getopt(argc, argv, "s:p:m:owlrnd")) != -1) {
 		switch (c) {
 		case 's':
 			if (sscanf(optarg, "%zu", &size) != 1) {
@@ -117,6 +117,9 @@ int main(int argc, char **argv)
 			break;
 		case 'n':
 			reserve = 0;
+			break;
+		case 'd':
+			sleep(1);
 			break;
 		default:
 			errno = EINVAL;

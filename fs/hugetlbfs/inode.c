@@ -164,7 +164,7 @@ static int hugetlbfs_file_mmap_prepare(struct vm_area_desc *desc)
 		goto out;
 
 	ret = 0;
-	if (vma_desc_test_flags(desc, VMA_WRITE_BIT) && inode->i_size < len)
+	if (vma_desc_test(desc, VMA_WRITE_BIT) && inode->i_size < len)
 		i_size_write(inode, len);
 out:
 	inode_unlock(inode);
@@ -596,6 +596,11 @@ static void remove_inode_hugepages(struct inode *inode, loff_t lstart,
 			remove_inode_single_folio(h, inode, mapping, folio,
 						  index, truncate_op);
 			freed++;
+
+			if (unlikely(folio_test_hwpoison(folio))) {
+				folio_set_hugetlb_temporary(folio);
+				folio_put(folio);
+			}
 
 			mutex_unlock(&hugetlb_fault_mutex_table[hash]);
 		}

@@ -112,6 +112,7 @@
 #include <linux/string.h>
 #include "luo_internal.h"
 
+static DECLARE_RWSEM(luo_file_handler_lock);
 static LIST_HEAD(luo_file_handler_list);
 
 /* 2 4K pages, give space for 128 files per file_set */
@@ -277,10 +278,12 @@ int luo_preserve_file(struct luo_file_set *file_set, u64 token, int fd)
 		goto  err_fput;
 
 	err = -ENOENT;
-	list_private_for_each_entry(fh, &luo_file_handler_list, list) {
-		if (fh->ops->can_preserve(fh, file)) {
-			err = 0;
-			break;
+	scoped_guard(rwsem_read, &luo_file_handler_lock) {
+		list_private_for_each_entry(fh, &luo_file_handler_list, list) {
+			if (fh->ops->can_preserve(fh, file)) {
+				err = 0;
+				break;
+			}
 		}
 	}
 
@@ -777,10 +780,12 @@ int luo_file_deserialize(struct luo_file_set *file_set,
 		bool handler_found = false;
 		struct luo_file *luo_file;
 
-		list_private_for_each_entry(fh, &luo_file_handler_list, list) {
-			if (!strcmp(fh->compatible, file_ser[i].compatible)) {
-				handler_found = true;
-				break;
+		scoped_guard(rwsem_read, &luo_file_handler_lock) {
+			list_private_for_each_entry(fh, &luo_file_handler_list, list) {
+				if (!strcmp(fh->compatible, file_ser[i].compatible)) {
+					handler_found = true;
+					break;
+				}
 			}
 		}
 
@@ -831,7 +836,6 @@ void luo_file_set_destroy(struct luo_file_set *file_set)
 int liveupdate_register_file_handler(struct liveupdate_file_handler *fh)
 {
 	struct liveupdate_file_handler *fh_iter;
-	int err;
 
 	if (!liveupdate_enabled())
 		return -EOPNOTSUPP;
@@ -842,42 +846,25 @@ int liveupdate_register_file_handler(struct liveupdate_file_handler *fh)
 		return -EINVAL;
 	}
 
-	/*
-	 * Ensure the system is quiescent (no active sessions).
-	 * This prevents registering new handlers while sessions are active or
-	 * while deserialization is in progress.
-	 */
-	if (!luo_session_quiesce())
-		return -EBUSY;
-
-	/* Check for duplicate compatible strings */
-	list_private_for_each_entry(fh_iter, &luo_file_handler_list, list) {
-		if (!strcmp(fh_iter->compatible, fh->compatible)) {
-			pr_err("File handler registration failed: Compatible string '%s' already registered.\n",
-			       fh->compatible);
-			err = -EEXIST;
-			goto err_resume;
+	scoped_guard(rwsem_write, &luo_file_handler_lock) {
+		/* Check for duplicate compatible strings */
+		list_private_for_each_entry(fh_iter, &luo_file_handler_list, list) {
+			if (!strcmp(fh_iter->compatible, fh->compatible)) {
+				pr_err("File handler registration failed: Compatible string '%s' already registered.\n",
+				       fh->compatible);
+				return -EEXIST;
+			}
 		}
-	}
 
-	/* Pin the module implementing the handler */
-	if (!try_module_get(fh->ops->owner)) {
-		err = -EAGAIN;
-		goto err_resume;
+		INIT_LIST_HEAD(&ACCESS_PRIVATE(fh, flb_list));
+		init_rwsem(&ACCESS_PRIVATE(fh, flb_lock));
+		INIT_LIST_HEAD(&ACCESS_PRIVATE(fh, list));
+		list_add_tail(&ACCESS_PRIVATE(fh, list), &luo_file_handler_list);
 	}
-
-	INIT_LIST_HEAD(&ACCESS_PRIVATE(fh, flb_list));
-	INIT_LIST_HEAD(&ACCESS_PRIVATE(fh, list));
-	list_add_tail(&ACCESS_PRIVATE(fh, list), &luo_file_handler_list);
-	luo_session_resume();
 
 	liveupdate_test_register(fh);
 
 	return 0;
-
-err_resume:
-	luo_session_resume();
-	return err;
 }
 
 /**
@@ -886,41 +873,14 @@ err_resume:
  *
  * Unregisters the file handler from the liveupdate core. This function
  * reverses the operations of liveupdate_register_file_handler().
- *
- * It ensures safe removal by checking that:
- * No live update session is currently in progress.
- * No FLB registered with this file handler.
- *
- * If the unregistration fails, the internal test state is reverted.
- *
- * Return: 0 Success. -EOPNOTSUPP when live update is not enabled. -EBUSY A live
- * update is in progress, can't quiesce live update or FLB is registred with
- * this file handler.
  */
-int liveupdate_unregister_file_handler(struct liveupdate_file_handler *fh)
+void liveupdate_unregister_file_handler(struct liveupdate_file_handler *fh)
 {
-	int err = -EBUSY;
-
 	if (!liveupdate_enabled())
-		return -EOPNOTSUPP;
+		return;
 
-	liveupdate_test_unregister(fh);
-
-	if (!luo_session_quiesce())
-		goto err_register;
-
-	if (!list_empty(&ACCESS_PRIVATE(fh, flb_list)))
-		goto err_resume;
-
-	list_del(&ACCESS_PRIVATE(fh, list));
-	module_put(fh->ops->owner);
-	luo_session_resume();
-
-	return 0;
-
-err_resume:
-	luo_session_resume();
-err_register:
-	liveupdate_test_register(fh);
-	return err;
+	scoped_guard(rwsem_write, &luo_file_handler_lock) {
+		luo_flb_unregister_all(fh);
+		list_del(&ACCESS_PRIVATE(fh, list));
+	}
 }
