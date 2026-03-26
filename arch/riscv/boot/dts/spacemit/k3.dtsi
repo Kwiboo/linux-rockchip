@@ -4,6 +4,8 @@
  * Copyright (c) 2026 Guodong Xu <guodong@riscstar.com>
  */
 
+#include <dt-bindings/clock/spacemit,k3-clocks.h>
+#include <dt-bindings/reset/spacemit,k3-resets.h>
 #include <dt-bindings/interrupt-controller/irq.h>
 
 /dts-v1/;
@@ -398,6 +400,36 @@
 		};
 	};
 
+	clocks {
+		vctcxo_1m: clock-1m {
+			compatible = "fixed-clock";
+			clock-frequency = <1000000>;
+			clock-output-names = "vctcxo_1m";
+			#clock-cells = <0>;
+		};
+
+		vctcxo_24m: clock-24m {
+			compatible = "fixed-clock";
+			clock-frequency = <24000000>;
+			clock-output-names = "vctcxo_24m";
+			#clock-cells = <0>;
+		};
+
+		vctcxo_3m: clock-3m {
+			compatible = "fixed-clock";
+			clock-frequency = <3000000>;
+			clock-output-names = "vctcxo_3m";
+			#clock-cells = <0>;
+		};
+
+		osc_32k: clock-32k {
+			compatible = "fixed-clock";
+			clock-frequency = <32000>;
+			clock-output-names = "osc_32k";
+			#clock-cells = <0>;
+		};
+	};
+
 	soc: soc {
 		compatible = "simple-bus";
 		interrupt-parent = <&saplic>;
@@ -406,12 +438,24 @@
 		dma-noncoherent;
 		ranges;
 
+		syscon_apbc: system-controller@d4015000 {
+			compatible = "spacemit,k3-syscon-apbc";
+			reg = <0x0 0xd4015000 0x0 0x1000>;
+			clocks = <&osc_32k>, <&vctcxo_1m>, <&vctcxo_3m>, <&vctcxo_24m>;
+			clock-names = "osc", "vctcxo_1m", "vctcxo_3m", "vctcxo_24m";
+			#clock-cells = <1>;
+			#reset-cells = <1>;
+		};
+
 		uart0: serial@d4017000 {
 			compatible = "spacemit,k3-uart", "intel,xscale-uart";
 			reg = <0x0 0xd4017000 0x0 0x100>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
-			clock-frequency = <14700000>;
+			clocks = <&syscon_apbc CLK_APBC_UART0>,
+				 <&syscon_apbc CLK_APBC_UART0_BUS>;
+			clock-names = "core", "bus";
+			resets = <&syscon_apbc RESET_APBC_UART0>;
 			interrupts = <42 IRQ_TYPE_LEVEL_HIGH>;
 			status = "disabled";
 		};
@@ -421,7 +465,10 @@
 			reg = <0x0 0xd4017100 0x0 0x100>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
-			clock-frequency = <14700000>;
+			clocks = <&syscon_apbc CLK_APBC_UART2>,
+				 <&syscon_apbc CLK_APBC_UART2_BUS>;
+			clock-names = "core", "bus";
+			resets = <&syscon_apbc RESET_APBC_UART2>;
 			interrupts = <44 IRQ_TYPE_LEVEL_HIGH>;
 			status = "disabled";
 		};
@@ -431,7 +478,10 @@
 			reg = <0x0 0xd4017200 0x0 0x100>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
-			clock-frequency = <14700000>;
+			clocks = <&syscon_apbc CLK_APBC_UART3>,
+				 <&syscon_apbc CLK_APBC_UART3_BUS>;
+			clock-names = "core", "bus";
+			resets = <&syscon_apbc RESET_APBC_UART3>;
 			interrupts = <45 IRQ_TYPE_LEVEL_HIGH>;
 			status = "disabled";
 		};
@@ -441,7 +491,10 @@
 			reg = <0x0 0xd4017300 0x0 0x100>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
-			clock-frequency = <14700000>;
+			clocks = <&syscon_apbc CLK_APBC_UART4>,
+				 <&syscon_apbc CLK_APBC_UART4_BUS>;
+			clock-names = "core", "bus";
+			resets = <&syscon_apbc RESET_APBC_UART4>;
 			interrupts = <46 IRQ_TYPE_LEVEL_HIGH>;
 			status = "disabled";
 		};
@@ -451,7 +504,10 @@
 			reg = <0x0 0xd4017400 0x0 0x100>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
-			clock-frequency = <14700000>;
+			clocks = <&syscon_apbc CLK_APBC_UART5>,
+				 <&syscon_apbc CLK_APBC_UART5_BUS>;
+			clock-names = "core", "bus";
+			resets = <&syscon_apbc RESET_APBC_UART5>;
 			interrupts = <47 IRQ_TYPE_LEVEL_HIGH>;
 			status = "disabled";
 		};
@@ -461,7 +517,10 @@
 			reg = <0x0 0xd4017500 0x0 0x100>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
-			clock-frequency = <14700000>;
+			clocks = <&syscon_apbc CLK_APBC_UART6>,
+				 <&syscon_apbc CLK_APBC_UART6_BUS>;
+			clock-names = "core", "bus";
+			resets = <&syscon_apbc RESET_APBC_UART6>;
 			interrupts = <48 IRQ_TYPE_LEVEL_HIGH>;
 			status = "disabled";
 		};
@@ -471,7 +530,10 @@
 			reg = <0x0 0xd4017600 0x0 0x100>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
-			clock-frequency = <14700000>;
+			clocks = <&syscon_apbc CLK_APBC_UART7>,
+				 <&syscon_apbc CLK_APBC_UART7_BUS>;
+			clock-names = "core", "bus";
+			resets = <&syscon_apbc RESET_APBC_UART7>;
 			interrupts = <49 IRQ_TYPE_LEVEL_HIGH>;
 			status = "disabled";
 		};
@@ -481,7 +543,10 @@
 			reg = <0x0 0xd4017700 0x0 0x100>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
-			clock-frequency = <14700000>;
+			clocks = <&syscon_apbc CLK_APBC_UART8>,
+				 <&syscon_apbc CLK_APBC_UART8_BUS>;
+			clock-names = "core", "bus";
+			resets = <&syscon_apbc RESET_APBC_UART8>;
 			interrupts = <50 IRQ_TYPE_LEVEL_HIGH>;
 			status = "disabled";
 		};
@@ -491,9 +556,38 @@
 			reg = <0x0 0xd4017800 0x0 0x100>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
-			clock-frequency = <14700000>;
+			clocks = <&syscon_apbc CLK_APBC_UART9>,
+				 <&syscon_apbc CLK_APBC_UART9_BUS>;
+			clock-names = "core", "bus";
+			resets = <&syscon_apbc RESET_APBC_UART9>;
 			interrupts = <51 IRQ_TYPE_LEVEL_HIGH>;
 			status = "disabled";
+		};
+
+		gpio: gpio@d4019000 {
+			compatible = "spacemit,k3-gpio";
+			reg = <0x0 0xd4019000 0x0 0x100>;
+			clocks = <&syscon_apbc CLK_APBC_GPIO>,
+				 <&syscon_apbc CLK_APBC_GPIO_BUS>;
+			clock-names = "core", "bus";
+			gpio-controller;
+			#gpio-cells = <3>;
+			interrupts = <58 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-parent = <&saplic>;
+			interrupt-controller;
+			#interrupt-cells = <3>;
+			gpio-ranges = <&pinctrl 0 0 0 32>,
+				      <&pinctrl 1 0 32 32>,
+				      <&pinctrl 2 0 64 32>,
+				      <&pinctrl 3 0 96 32>;
+		};
+
+		pinctrl: pinctrl@d401e000 {
+			compatible = "spacemit,k3-pinctrl";
+			reg = <0x0 0xd401e000 0x0 0x1000>;
+			clocks = <&syscon_apbc CLK_APBC_AIB>,
+				 <&syscon_apbc CLK_APBC_AIB_BUS>;
+			clock-names = "func", "bus";
 		};
 
 		uart10: serial@d401f000 {
@@ -501,9 +595,47 @@
 			reg = <0x0 0xd401f000 0x0 0x100>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
-			clock-frequency = <14700000>;
+			clocks = <&syscon_apbc CLK_APBC_UART10>,
+				 <&syscon_apbc CLK_APBC_UART10_BUS>;
+			clock-names = "core", "bus";
+			resets = <&syscon_apbc RESET_APBC_UART10>;
 			interrupts = <281 IRQ_TYPE_LEVEL_HIGH>;
 			status = "disabled";
+		};
+
+		syscon_mpmu: system-controller@d4050000 {
+			compatible = "spacemit,k3-syscon-mpmu";
+			reg = <0x0 0xd4050000 0x0 0x10000>;
+			clocks = <&osc_32k>, <&vctcxo_1m>, <&vctcxo_3m>, <&vctcxo_24m>;
+			clock-names = "osc", "vctcxo_1m", "vctcxo_3m", "vctcxo_24m";
+			#clock-cells = <1>;
+			#power-domain-cells = <1>;
+			#reset-cells = <1>;
+		};
+
+		pll: clock-controller@d4090000 {
+			compatible = "spacemit,k3-pll";
+			reg = <0x0 0xd4090000 0x0 0x10000>;
+			clocks = <&vctcxo_24m>;
+			spacemit,mpmu = <&syscon_mpmu>;
+			#clock-cells = <1>;
+		};
+
+		syscon_apmu: system-controller@d4282800 {
+			compatible = "spacemit,k3-syscon-apmu";
+			reg = <0x0 0xd4282800 0x0 0x400>;
+			clocks = <&osc_32k>, <&vctcxo_1m>, <&vctcxo_3m>, <&vctcxo_24m>;
+			clock-names = "osc", "vctcxo_1m", "vctcxo_3m", "vctcxo_24m";
+			#clock-cells = <1>;
+			#power-domain-cells = <1>;
+			#reset-cells = <1>;
+		};
+
+		syscon_dciu: system-controller@d8440000 {
+			compatible = "spacemit,k3-syscon-dciu";
+			reg = <0x0 0xd8440000 0x0 0xc000>;
+			#clock-cells = <1>;
+			#reset-cells = <1>;
 		};
 
 		simsic: interrupt-controller@e0400000 {
