@@ -231,7 +231,7 @@ bool pci_reset_supported(struct pci_dev *dev);
 void pci_init_reset_methods(struct pci_dev *dev);
 int pci_bridge_secondary_bus_reset(struct pci_dev *dev);
 int pci_bus_error_reset(struct pci_dev *dev);
-int __pci_reset_bus(struct pci_bus *bus);
+int pci_try_reset_bridge(struct pci_dev *bridge);
 
 struct pci_cap_saved_data {
 	u16		cap_nr;
@@ -859,6 +859,7 @@ struct aer_err_info {
 };
 
 int aer_get_device_error_info(struct aer_err_info *info, int i);
+void aer_print_init(struct pci_dev *dev, struct aer_err_info *info, int i);
 void aer_print_error(struct aer_err_info *info, int i);
 
 static inline const char *aer_err_bus(struct aer_err_info *info)
