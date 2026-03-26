@@ -405,7 +405,7 @@ struct work_offq_data {
 	u32			flags;
 };
 
-static const char *wq_affn_names[WQ_AFFN_NR_TYPES] = {
+static const char * const wq_affn_names[WQ_AFFN_NR_TYPES] = {
 	[WQ_AFFN_DFL]		= "default",
 	[WQ_AFFN_CPU]		= "cpu",
 	[WQ_AFFN_SMT]		= "smt",
@@ -531,6 +531,8 @@ struct workqueue_struct *system_bh_wq;
 EXPORT_SYMBOL_GPL(system_bh_wq);
 struct workqueue_struct *system_bh_highpri_wq;
 EXPORT_SYMBOL_GPL(system_bh_highpri_wq);
+struct workqueue_struct *system_dfl_long_wq __ro_after_init;
+EXPORT_SYMBOL_GPL(system_dfl_long_wq);
 
 static int worker_thread(void *__worker);
 static void workqueue_sysfs_unregister(struct workqueue_struct *wq);
@@ -2508,7 +2510,6 @@ static void __queue_delayed_work(int cpu, struct workqueue_struct *wq,
 	struct timer_list *timer = &dwork->timer;
 	struct work_struct *work = &dwork->work;
 
-	WARN_ON_ONCE(!wq);
 	WARN_ON_ONCE(timer->function != delayed_work_timer_fn);
 	WARN_ON_ONCE(timer_pending(timer));
 	WARN_ON_ONCE(!list_empty(&work->entry));
@@ -5624,8 +5625,16 @@ enomem:
 		for_each_possible_cpu(cpu) {
 			struct pool_workqueue *pwq = *per_cpu_ptr(wq->cpu_pwq, cpu);
 
-			if (pwq)
+			if (pwq) {
+				/*
+				 * Unlink pwq from wq->pwqs since link_pwq()
+				 * may have already added it. wq->mutex is not
+				 * needed as the wq has not been published yet.
+				 */
+				if (!list_empty(&pwq->pwqs_node))
+					list_del_rcu(&pwq->pwqs_node);
 				kmem_cache_free(pwq_cache, pwq);
+			}
 		}
 		free_percpu(wq->cpu_pwq);
 		wq->cpu_pwq = NULL;
@@ -7094,13 +7103,7 @@ int workqueue_unbound_housekeeping_update(const struct cpumask *hk)
 
 static int parse_affn_scope(const char *val)
 {
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(wq_affn_names); i++) {
-		if (!strncasecmp(val, wq_affn_names[i], strlen(wq_affn_names[i])))
-			return i;
-	}
-	return -EINVAL;
+	return sysfs_match_string(wq_affn_names, val);
 }
 
 static int wq_affn_dfl_set(const char *val, const struct kernel_param *kp)
@@ -7207,7 +7210,26 @@ static struct attribute *wq_sysfs_attrs[] = {
 	&dev_attr_max_active.attr,
 	NULL,
 };
-ATTRIBUTE_GROUPS(wq_sysfs);
+
+static umode_t wq_sysfs_is_visible(struct kobject *kobj, struct attribute *a, int n)
+{
+	struct device *dev = kobj_to_dev(kobj);
+	struct workqueue_struct *wq = dev_to_wq(dev);
+
+	/*
+	 * Adjusting max_active breaks ordering guarantee. Changing it has no
+	 * effect on BH worker. Limit max_active to RO in such case.
+	 */
+	if (wq->flags & (WQ_BH | __WQ_ORDERED))
+		return 0444;
+	return a->mode;
+}
+
+static const struct attribute_group wq_sysfs_group = {
+	.is_visible = wq_sysfs_is_visible,
+	.attrs = wq_sysfs_attrs,
+};
+__ATTRIBUTE_GROUPS(wq_sysfs);
 
 static ssize_t wq_nice_show(struct device *dev, struct device_attribute *attr,
 			    char *buf)
@@ -7510,13 +7532,6 @@ int workqueue_sysfs_register(struct workqueue_struct *wq)
 	struct wq_device *wq_dev;
 	int ret;
 
-	/*
-	 * Adjusting max_active breaks ordering guarantee.  Disallow exposing
-	 * ordered workqueues.
-	 */
-	if (WARN_ON(wq->flags & __WQ_ORDERED))
-		return -EINVAL;
-
 	wq->wq_dev = wq_dev = kzalloc_obj(*wq_dev);
 	if (!wq_dev)
 		return -ENOMEM;
@@ -7727,8 +7742,29 @@ static void wq_watchdog_timer_fn(struct timer_list *unused)
 		else
 			ts = touched;
 
-		/* did we stall? */
+		/*
+		 * Did we stall?
+		 *
+		 * Do a lockless check first to do not disturb the system.
+		 *
+		 * Prevent false positives by double checking the timestamp
+		 * under pool->lock. The lock makes sure that the check reads
+		 * an updated pool->last_progress_ts when this CPU saw
+		 * an already updated pool->worklist above. It seems better
+		 * than adding another barrier into __queue_work() which
+		 * is a hotter path.
+		 */
 		if (time_after(now, ts + thresh)) {
+			scoped_guard(raw_spinlock_irqsave, &pool->lock) {
+				pool_ts = pool->last_progress_ts;
+				if (time_after(pool_ts, touched))
+					ts = pool_ts;
+				else
+					ts = touched;
+			}
+			if (!time_after(now, ts + thresh))
+				continue;
+
 			lockup_detected = true;
 			stall_time = jiffies_to_msecs(now - pool_ts) / 1000;
 			max_stall_time = max(max_stall_time, stall_time);
@@ -7740,8 +7776,6 @@ static void wq_watchdog_timer_fn(struct timer_list *unused)
 			pr_cont_pool_info(pool);
 			pr_cont(" stuck for %us!\n", stall_time);
 		}
-
-
 	}
 
 	if (lockup_detected)
@@ -7971,11 +8005,12 @@ void __init workqueue_init_early(void)
 	system_bh_wq = alloc_workqueue("events_bh", WQ_BH | WQ_PERCPU, 0);
 	system_bh_highpri_wq = alloc_workqueue("events_bh_highpri",
 					       WQ_BH | WQ_HIGHPRI | WQ_PERCPU, 0);
+	system_dfl_long_wq = alloc_workqueue("events_dfl_long", WQ_UNBOUND, WQ_MAX_ACTIVE);
 	BUG_ON(!system_wq || !system_percpu_wq|| !system_highpri_wq || !system_long_wq ||
 	       !system_unbound_wq || !system_freezable_wq || !system_dfl_wq ||
 	       !system_power_efficient_wq ||
 	       !system_freezable_power_efficient_wq ||
-	       !system_bh_wq || !system_bh_highpri_wq);
+	       !system_bh_wq || !system_bh_highpri_wq || !system_dfl_long_wq);
 }
 
 static void __init wq_cpu_intensive_thresh_init(void)
