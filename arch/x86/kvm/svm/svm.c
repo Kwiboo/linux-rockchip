@@ -44,6 +44,7 @@
 #include <asm/traps.h>
 #include <asm/reboot.h>
 #include <asm/fpu/api.h>
+#include <asm/virt.h>
 
 #include <trace/events/ipi.h>
 
@@ -52,6 +53,7 @@
 #include "svm.h"
 #include "svm_ops.h"
 
+#include "hyperv.h"
 #include "kvm_onhyperv.h"
 #include "svm_onhyperv.h"
 
@@ -77,6 +79,7 @@ static bool erratum_383_found __read_mostly;
  * are published and we know what the new status bits are
  */
 static uint64_t osvw_len = 4, osvw_status;
+static DEFINE_SPINLOCK(osvw_lock);
 
 static DEFINE_PER_CPU(u64, current_tsc_ratio);
 
@@ -110,52 +113,52 @@ static DEFINE_PER_CPU(u64, current_tsc_ratio);
  *	count only mode.
  */
 
-static unsigned short pause_filter_thresh = KVM_DEFAULT_PLE_GAP;
+static unsigned short __ro_after_init pause_filter_thresh = KVM_DEFAULT_PLE_GAP;
 module_param(pause_filter_thresh, ushort, 0444);
 
-static unsigned short pause_filter_count = KVM_SVM_DEFAULT_PLE_WINDOW;
+static unsigned short __ro_after_init pause_filter_count = KVM_SVM_DEFAULT_PLE_WINDOW;
 module_param(pause_filter_count, ushort, 0444);
 
 /* Default doubles per-vcpu window every exit. */
-static unsigned short pause_filter_count_grow = KVM_DEFAULT_PLE_WINDOW_GROW;
+static unsigned short __ro_after_init pause_filter_count_grow = KVM_DEFAULT_PLE_WINDOW_GROW;
 module_param(pause_filter_count_grow, ushort, 0444);
 
 /* Default resets per-vcpu window every exit to pause_filter_count. */
-static unsigned short pause_filter_count_shrink = KVM_DEFAULT_PLE_WINDOW_SHRINK;
+static unsigned short __ro_after_init pause_filter_count_shrink = KVM_DEFAULT_PLE_WINDOW_SHRINK;
 module_param(pause_filter_count_shrink, ushort, 0444);
 
 /* Default is to compute the maximum so we can never overflow. */
-static unsigned short pause_filter_count_max = KVM_SVM_DEFAULT_PLE_WINDOW_MAX;
+static unsigned short __ro_after_init pause_filter_count_max = KVM_SVM_DEFAULT_PLE_WINDOW_MAX;
 module_param(pause_filter_count_max, ushort, 0444);
 
 /*
  * Use nested page tables by default.  Note, NPT may get forced off by
  * svm_hardware_setup() if it's unsupported by hardware or the host kernel.
  */
-bool npt_enabled = true;
+bool __ro_after_init npt_enabled = true;
 module_param_named(npt, npt_enabled, bool, 0444);
 
 /* allow nested virtualization in KVM/SVM */
-static int nested = true;
+static int __ro_after_init nested = true;
 module_param(nested, int, 0444);
 
 /* enable/disable Next RIP Save */
-int nrips = true;
+int __ro_after_init nrips = true;
 module_param(nrips, int, 0444);
 
 /* enable/disable Virtual VMLOAD VMSAVE */
-static int vls = true;
+static int __ro_after_init vls = true;
 module_param(vls, int, 0444);
 
 /* enable/disable Virtual GIF */
-int vgif = true;
+int __ro_after_init vgif = true;
 module_param(vgif, int, 0444);
 
 /* enable/disable LBR virtualization */
-int lbrv = true;
+int __ro_after_init lbrv = true;
 module_param(lbrv, int, 0444);
 
-static int tsc_scaling = true;
+static int __ro_after_init tsc_scaling = true;
 module_param(tsc_scaling, int, 0444);
 
 module_param(enable_device_posted_irqs, bool, 0444);
@@ -164,19 +167,19 @@ bool __read_mostly dump_invalid_vmcb;
 module_param(dump_invalid_vmcb, bool, 0644);
 
 
-bool intercept_smi = true;
+bool __ro_after_init intercept_smi = true;
 module_param(intercept_smi, bool, 0444);
 
-bool vnmi = true;
+bool __ro_after_init vnmi = true;
 module_param(vnmi, bool, 0444);
 
 module_param(enable_mediated_pmu, bool, 0444);
 
-static bool svm_gp_erratum_intercept = true;
+static bool __ro_after_init svm_gp_erratum_intercept = true;
 
 static u8 rsm_ins_bytes[] = "\x0f\xaa";
 
-static unsigned long iopm_base;
+static unsigned long __read_mostly iopm_base;
 
 DEFINE_PER_CPU(struct svm_cpu_data, svm_data);
 
@@ -216,6 +219,19 @@ int svm_set_efer(struct kvm_vcpu *vcpu, u64 efer)
 
 	if ((old_efer & EFER_SVME) != (efer & EFER_SVME)) {
 		if (!(efer & EFER_SVME)) {
+			/*
+			 * Architecturally, clearing EFER.SVME while a guest is
+			 * running yields undefined behavior, i.e. KVM can do
+			 * literally anything.  Force the vCPU back into L1 as
+			 * that is the safest option for KVM, but synthesize a
+			 * triple fault (for L1!) so that KVM at least doesn't
+			 * run random L2 code in the context of L1.  Do so if
+			 * and only if the vCPU is actively running, e.g. to
+			 * avoid positives if userspace is stuffing state.
+			 */
+			if (is_guest_mode(vcpu) && vcpu->wants_to_run)
+				kvm_make_request(KVM_REQ_TRIPLE_FAULT, vcpu);
+
 			svm_leave_nested(vcpu);
 			/* #GP intercept is still needed for vmware backdoor */
 			if (!enable_vmware_backdoor)
@@ -244,6 +260,8 @@ int svm_set_efer(struct kvm_vcpu *vcpu, u64 efer)
 			if (svm_gp_erratum_intercept && !sev_guest(vcpu->kvm))
 				set_exception_intercept(svm, GP_VECTOR);
 		}
+
+		kvm_make_request(KVM_REQ_RECALC_INTERCEPTS, vcpu);
 	}
 
 	svm->vmcb->save.efer = efer | EFER_SVME;
@@ -420,6 +438,48 @@ static void svm_init_osvw(struct kvm_vcpu *vcpu)
 		vcpu->arch.osvw.status |= 1;
 }
 
+static void svm_init_os_visible_workarounds(void)
+{
+	u64 len, status;
+
+	/*
+	 * Get OS-Visible Workarounds (OSVW) bits.
+	 *
+	 * Note that it is possible to have a system with mixed processor
+	 * revisions and therefore different OSVW bits. If bits are not the same
+	 * on different processors then choose the worst case (i.e. if erratum
+	 * is present on one processor and not on another then assume that the
+	 * erratum is present everywhere).
+	 *
+	 * Note #2!  The OSVW MSRs are used to communciate that an erratum is
+	 * NOT present!  Software must assume erratum as present if its bit is
+	 * set in OSVW_STATUS *or* the bit number exceeds OSVW_ID_LENGTH.  If
+	 * either RDMSR fails, simply zero out the length to treat all errata
+	 * as being present.  Similarly, use the *minimum* length across all
+	 * CPUs, not the maximum length.
+	 *
+	 * If the length is zero, then is KVM already treating all errata as
+	 * being present and there's nothing left to do.
+	 */
+	if (!osvw_len)
+		return;
+
+	if (!this_cpu_has(X86_FEATURE_OSVW) ||
+	    native_read_msr_safe(MSR_AMD64_OSVW_ID_LENGTH, &len) ||
+	    native_read_msr_safe(MSR_AMD64_OSVW_STATUS, &status))
+		len = status = 0;
+
+	if (status == READ_ONCE(osvw_status) && len >= READ_ONCE(osvw_len))
+		return;
+
+	guard(spinlock)(&osvw_lock);
+
+	if (len < osvw_len)
+		osvw_len = len;
+	osvw_status |= status;
+	osvw_status &= (1ULL << osvw_len) - 1;
+}
+
 static bool __kvm_is_svm_supported(void)
 {
 	int cpu = smp_processor_id();
@@ -477,27 +537,9 @@ static __always_inline struct sev_es_save_area *sev_es_host_save_area(struct svm
 	return &sd->save_area->host_sev_es_save;
 }
 
-static inline void kvm_cpu_svm_disable(void)
-{
-	uint64_t efer;
-
-	wrmsrq(MSR_VM_HSAVE_PA, 0);
-	rdmsrq(MSR_EFER, efer);
-	if (efer & EFER_SVME) {
-		/*
-		 * Force GIF=1 prior to disabling SVM, e.g. to ensure INIT and
-		 * NMI aren't blocked.
-		 */
-		stgi();
-		wrmsrq(MSR_EFER, efer & ~EFER_SVME);
-	}
-}
-
 static void svm_emergency_disable_virtualization_cpu(void)
 {
-	kvm_rebooting = true;
-
-	kvm_cpu_svm_disable();
+	wrmsrq(MSR_VM_HSAVE_PA, 0);
 }
 
 static void svm_disable_virtualization_cpu(void)
@@ -506,7 +548,8 @@ static void svm_disable_virtualization_cpu(void)
 	if (tsc_scaling)
 		__svm_write_tsc_multiplier(SVM_TSC_RATIO_DEFAULT);
 
-	kvm_cpu_svm_disable();
+	x86_virt_put_ref(X86_FEATURE_SVM);
+	wrmsrq(MSR_VM_HSAVE_PA, 0);
 
 	amd_pmu_disable_virt();
 }
@@ -515,20 +558,18 @@ static int svm_enable_virtualization_cpu(void)
 {
 
 	struct svm_cpu_data *sd;
-	uint64_t efer;
 	int me = raw_smp_processor_id();
+	int r;
 
-	rdmsrq(MSR_EFER, efer);
-	if (efer & EFER_SVME)
-		return -EBUSY;
+	r = x86_virt_get_ref(X86_FEATURE_SVM);
+	if (r)
+		return r;
 
 	sd = per_cpu_ptr(&svm_data, me);
 	sd->asid_generation = 1;
 	sd->max_asid = cpuid_ebx(SVM_CPUID_FUNC) - 1;
 	sd->next_asid = sd->max_asid + 1;
 	sd->min_asid = max_sev_asid + 1;
-
-	wrmsrq(MSR_EFER, efer | EFER_SVME);
 
 	wrmsrq(MSR_VM_HSAVE_PA, sd->save_area_pa);
 
@@ -540,34 +581,7 @@ static int svm_enable_virtualization_cpu(void)
 		__svm_write_tsc_multiplier(SVM_TSC_RATIO_DEFAULT);
 	}
 
-
-	/*
-	 * Get OSVW bits.
-	 *
-	 * Note that it is possible to have a system with mixed processor
-	 * revisions and therefore different OSVW bits. If bits are not the same
-	 * on different processors then choose the worst case (i.e. if erratum
-	 * is present on one processor and not on another then assume that the
-	 * erratum is present everywhere).
-	 */
-	if (cpu_has(&boot_cpu_data, X86_FEATURE_OSVW)) {
-		u64 len, status = 0;
-		int err;
-
-		err = native_read_msr_safe(MSR_AMD64_OSVW_ID_LENGTH, &len);
-		if (!err)
-			err = native_read_msr_safe(MSR_AMD64_OSVW_STATUS, &status);
-
-		if (err)
-			osvw_status = osvw_len = 0;
-		else {
-			if (len < osvw_len)
-				osvw_len = len;
-			osvw_status |= status;
-			osvw_status &= (1ULL << osvw_len) - 1;
-		}
-	} else
-		osvw_status = osvw_len = 0;
+	svm_init_os_visible_workarounds();
 
 	svm_init_erratum_383();
 
@@ -635,7 +649,7 @@ static void set_dr_intercepts(struct vcpu_svm *svm)
 	vmcb_set_intercept(&vmcb->control, INTERCEPT_DR7_READ);
 	vmcb_set_intercept(&vmcb->control, INTERCEPT_DR7_WRITE);
 
-	recalc_intercepts(svm);
+	svm_mark_intercepts_dirty(svm);
 }
 
 static void clr_dr_intercepts(struct vcpu_svm *svm)
@@ -644,7 +658,7 @@ static void clr_dr_intercepts(struct vcpu_svm *svm)
 
 	vmcb->control.intercepts[INTERCEPT_DR] = 0;
 
-	recalc_intercepts(svm);
+	svm_mark_intercepts_dirty(svm);
 }
 
 static bool msr_write_intercepted(struct kvm_vcpu *vcpu, u32 msr)
@@ -710,7 +724,7 @@ void *svm_alloc_permissions_map(unsigned long size, gfp_t gfp_mask)
 static void svm_recalc_lbr_msr_intercepts(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_svm *svm = to_svm(vcpu);
-	bool intercept = !(svm->vmcb->control.virt_ext & LBR_CTL_ENABLE_MASK);
+	bool intercept = !(svm->vmcb->control.misc_ctl2 & SVM_MISC2_ENABLE_V_LBR);
 
 	if (intercept == svm->lbr_msrs_intercepted)
 		return;
@@ -841,20 +855,9 @@ static void svm_recalc_msr_intercepts(struct kvm_vcpu *vcpu)
 	 */
 }
 
-void svm_copy_lbrs(struct vmcb *to_vmcb, struct vmcb *from_vmcb)
-{
-	to_vmcb->save.dbgctl		= from_vmcb->save.dbgctl;
-	to_vmcb->save.br_from		= from_vmcb->save.br_from;
-	to_vmcb->save.br_to		= from_vmcb->save.br_to;
-	to_vmcb->save.last_excp_from	= from_vmcb->save.last_excp_from;
-	to_vmcb->save.last_excp_to	= from_vmcb->save.last_excp_to;
-
-	vmcb_mark_dirty(to_vmcb, VMCB_LBR);
-}
-
 static void __svm_enable_lbrv(struct kvm_vcpu *vcpu)
 {
-	to_svm(vcpu)->vmcb->control.virt_ext |= LBR_CTL_ENABLE_MASK;
+	to_svm(vcpu)->vmcb->control.misc_ctl2 |= SVM_MISC2_ENABLE_V_LBR;
 }
 
 void svm_enable_lbrv(struct kvm_vcpu *vcpu)
@@ -866,16 +869,16 @@ void svm_enable_lbrv(struct kvm_vcpu *vcpu)
 static void __svm_disable_lbrv(struct kvm_vcpu *vcpu)
 {
 	KVM_BUG_ON(sev_es_guest(vcpu->kvm), vcpu->kvm);
-	to_svm(vcpu)->vmcb->control.virt_ext &= ~LBR_CTL_ENABLE_MASK;
+	to_svm(vcpu)->vmcb->control.misc_ctl2 &= ~SVM_MISC2_ENABLE_V_LBR;
 }
 
 void svm_update_lbrv(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_svm *svm = to_svm(vcpu);
-	bool current_enable_lbrv = svm->vmcb->control.virt_ext & LBR_CTL_ENABLE_MASK;
+	bool current_enable_lbrv = svm->vmcb->control.misc_ctl2 & SVM_MISC2_ENABLE_V_LBR;
 	bool enable_lbrv = (svm->vmcb->save.dbgctl & DEBUGCTLMSR_LBR) ||
 			    (is_guest_mode(vcpu) && guest_cpu_cap_has(vcpu, X86_FEATURE_LBRV) &&
-			    (svm->nested.ctl.virt_ext & LBR_CTL_ENABLE_MASK));
+			    (svm->nested.ctl.misc_ctl2 & SVM_MISC2_ENABLE_V_LBR));
 
 	if (enable_lbrv && !current_enable_lbrv)
 		__svm_enable_lbrv(vcpu);
@@ -1009,6 +1012,14 @@ void svm_write_tsc_multiplier(struct kvm_vcpu *vcpu)
 	preempt_enable();
 }
 
+static bool svm_has_pending_gif_event(struct vcpu_svm *svm)
+{
+	return svm->vcpu.arch.smi_pending ||
+	       svm->vcpu.arch.nmi_pending ||
+	       kvm_cpu_has_injectable_intr(&svm->vcpu) ||
+	       kvm_apic_has_pending_init_or_sipi(&svm->vcpu);
+}
+
 /* Evaluate instruction intercepts that depend on guest CPUID features. */
 static void svm_recalc_instruction_intercepts(struct kvm_vcpu *vcpu)
 {
@@ -1034,21 +1045,44 @@ static void svm_recalc_instruction_intercepts(struct kvm_vcpu *vcpu)
 	}
 
 	/*
-	 * No need to toggle VIRTUAL_VMLOAD_VMSAVE_ENABLE_MASK here, it is
-	 * always set if vls is enabled. If the intercepts are set, the bit is
-	 * meaningless anyway.
+	 * Intercept instructions that #UD if EFER.SVME=0, as SVME must be set
+	 * even when running the guest, i.e. hardware will only ever see
+	 * EFER.SVME=1.
+	 *
+	 * No need to toggle any of the vgif/vls/etc. enable bits here, as they
+	 * are set when the VMCB is initialized and never cleared (if the
+	 * relevant intercepts are set, the enablements are meaningless anyway).
 	 */
-	if (guest_cpuid_is_intel_compatible(vcpu)) {
+	if (!(vcpu->arch.efer & EFER_SVME)) {
 		svm_set_intercept(svm, INTERCEPT_VMLOAD);
 		svm_set_intercept(svm, INTERCEPT_VMSAVE);
+		svm_set_intercept(svm, INTERCEPT_CLGI);
+		svm_set_intercept(svm, INTERCEPT_STGI);
 	} else {
 		/*
 		 * If hardware supports Virtual VMLOAD VMSAVE then enable it
 		 * in VMCB and clear intercepts to avoid #VMEXIT.
 		 */
-		if (vls) {
+		if (guest_cpuid_is_intel_compatible(vcpu)) {
+			svm_set_intercept(svm, INTERCEPT_VMLOAD);
+			svm_set_intercept(svm, INTERCEPT_VMSAVE);
+		} else if (vls) {
 			svm_clr_intercept(svm, INTERCEPT_VMLOAD);
 			svm_clr_intercept(svm, INTERCEPT_VMSAVE);
+		}
+
+		/*
+		 * Process pending events when clearing STGI/CLGI intercepts if
+		 * there's at least one pending event that is masked by GIF, so
+		 * that KVM re-evaluates if the intercept needs to be set again
+		 * to track when GIF is re-enabled (e.g. for NMI injection).
+		 */
+		if (vgif) {
+			svm_clr_intercept(svm, INTERCEPT_CLGI);
+			svm_clr_intercept(svm, INTERCEPT_STGI);
+
+			if (svm_has_pending_gif_event(svm))
+				kvm_make_request(KVM_REQ_EVENT, &svm->vcpu);
 		}
 	}
 
@@ -1162,7 +1196,7 @@ static void init_vmcb(struct kvm_vcpu *vcpu, bool init_event)
 
 	if (npt_enabled) {
 		/* Setup VMCB for Nested Paging */
-		control->nested_ctl |= SVM_NESTED_CTL_NP_ENABLE;
+		control->misc_ctl |= SVM_MISC_ENABLE_NP;
 		svm_clr_intercept(svm, INTERCEPT_INVLPG);
 		clr_exception_intercept(svm, PF_VECTOR);
 		svm_clr_intercept(svm, INTERCEPT_CR3_READ);
@@ -1194,14 +1228,11 @@ static void init_vmcb(struct kvm_vcpu *vcpu, bool init_event)
 	if (vnmi)
 		svm->vmcb->control.int_ctl |= V_NMI_ENABLE_MASK;
 
-	if (vgif) {
-		svm_clr_intercept(svm, INTERCEPT_STGI);
-		svm_clr_intercept(svm, INTERCEPT_CLGI);
+	if (vgif)
 		svm->vmcb->control.int_ctl |= V_GIF_ENABLE_MASK;
-	}
 
 	if (vls)
-		svm->vmcb->control.virt_ext |= VIRTUAL_VMLOAD_VMSAVE_ENABLE_MASK;
+		svm->vmcb->control.misc_ctl2 |= SVM_MISC2_ENABLE_V_VMLOAD_VMSAVE;
 
 	if (vcpu->kvm->arch.bus_lock_detection_enabled)
 		svm_set_intercept(svm, INTERCEPT_BUSLOCK);
@@ -2244,13 +2275,9 @@ static int emulate_svm_instr(struct kvm_vcpu *vcpu, int opcode)
 		[SVM_INSTR_VMSAVE] = vmsave_interception,
 	};
 	struct vcpu_svm *svm = to_svm(vcpu);
-	int ret;
 
 	if (is_guest_mode(vcpu)) {
-		/* Returns '1' or -errno on failure, '0' on success. */
-		ret = nested_svm_simple_vmexit(svm, guest_mode_exit_codes[opcode]);
-		if (ret)
-			return ret;
+		nested_svm_simple_vmexit(svm, guest_mode_exit_codes[opcode]);
 		return 1;
 	}
 	return svm_instr_handlers[opcode](vcpu);
@@ -2319,10 +2346,7 @@ void svm_set_gif(struct vcpu_svm *svm, bool value)
 			svm_clear_vintr(svm);
 
 		enable_gif(svm);
-		if (svm->vcpu.arch.smi_pending ||
-		    svm->vcpu.arch.nmi_pending ||
-		    kvm_cpu_has_injectable_intr(&svm->vcpu) ||
-		    kvm_apic_has_pending_init_or_sipi(&svm->vcpu))
+		if (svm_has_pending_gif_event(svm))
 			kvm_make_request(KVM_REQ_EVENT, &svm->vcpu);
 	} else {
 		disable_gif(svm);
@@ -2365,6 +2389,9 @@ static int invlpga_interception(struct kvm_vcpu *vcpu)
 {
 	gva_t gva = kvm_rax_read(vcpu);
 	u32 asid = kvm_rcx_read(vcpu);
+
+	if (nested_svm_check_permissions(vcpu))
+		return 1;
 
 	/* FIXME: Handle an address size prefix. */
 	if (!is_long_mode(vcpu))
@@ -2723,6 +2750,24 @@ static int svm_get_feature_msr(u32 msr, u64 *data)
 	return 0;
 }
 
+static u64 *svm_vmcb_lbr(struct vcpu_svm *svm, u32 msr)
+{
+	switch (msr) {
+	case MSR_IA32_LASTBRANCHFROMIP:
+		return &svm->vmcb->save.br_from;
+	case MSR_IA32_LASTBRANCHTOIP:
+		return &svm->vmcb->save.br_to;
+	case MSR_IA32_LASTINTFROMIP:
+		return &svm->vmcb->save.last_excp_from;
+	case MSR_IA32_LASTINTTOIP:
+		return &svm->vmcb->save.last_excp_to;
+	default:
+		break;
+	}
+	KVM_BUG_ON(1, svm->vcpu.kvm);
+	return &svm->vmcb->save.br_from;
+}
+
 static bool sev_es_prevent_msr_access(struct kvm_vcpu *vcpu,
 				      struct msr_data *msr_info)
 {
@@ -2796,19 +2841,13 @@ static int svm_get_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		msr_info->data = svm->tsc_aux;
 		break;
 	case MSR_IA32_DEBUGCTLMSR:
-		msr_info->data = svm->vmcb->save.dbgctl;
+		msr_info->data = lbrv ? svm->vmcb->save.dbgctl : 0;
 		break;
 	case MSR_IA32_LASTBRANCHFROMIP:
-		msr_info->data = svm->vmcb->save.br_from;
-		break;
 	case MSR_IA32_LASTBRANCHTOIP:
-		msr_info->data = svm->vmcb->save.br_to;
-		break;
 	case MSR_IA32_LASTINTFROMIP:
-		msr_info->data = svm->vmcb->save.last_excp_from;
-		break;
 	case MSR_IA32_LASTINTTOIP:
-		msr_info->data = svm->vmcb->save.last_excp_to;
+		msr_info->data = lbrv ? *svm_vmcb_lbr(svm, msr_info->index) : 0;
 		break;
 	case MSR_VM_HSAVE_PA:
 		msr_info->data = svm->nested.hsave_msr;
@@ -3083,6 +3122,17 @@ static int svm_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr)
 		vmcb_mark_dirty(svm->vmcb, VMCB_LBR);
 		svm_update_lbrv(vcpu);
 		break;
+	case MSR_IA32_LASTBRANCHFROMIP:
+	case MSR_IA32_LASTBRANCHTOIP:
+	case MSR_IA32_LASTINTFROMIP:
+	case MSR_IA32_LASTINTTOIP:
+		if (!lbrv)
+			return KVM_MSR_RET_UNSUPPORTED;
+		if (!msr->host_initiated)
+			return 1;
+		*svm_vmcb_lbr(svm, ecx) = data;
+		vmcb_mark_dirty(svm->vmcb, VMCB_LBR);
+		break;
 	case MSR_VM_HSAVE_PA:
 		/*
 		 * Old kernels did not validate the value written to
@@ -3130,20 +3180,6 @@ static int interrupt_window_interception(struct kvm_vcpu *vcpu)
 {
 	kvm_make_request(KVM_REQ_EVENT, vcpu);
 	svm_clear_vintr(to_svm(vcpu));
-
-	/*
-	 * If not running nested, for AVIC, the only reason to end up here is ExtINTs.
-	 * In this case AVIC was temporarily disabled for
-	 * requesting the IRQ window and we have to re-enable it.
-	 *
-	 * If running nested, still remove the VM wide AVIC inhibit to
-	 * support case in which the interrupt window was requested when the
-	 * vCPU was not running nested.
-
-	 * All vCPUs which run still run nested, will remain to have their
-	 * AVIC still inhibited due to per-cpu AVIC inhibition.
-	 */
-	kvm_clear_apicv_inhibit(vcpu->kvm, APICV_INHIBIT_REASON_IRQWIN);
 
 	++vcpu->stat.irq_window_exits;
 	return 1;
@@ -3224,9 +3260,25 @@ static int bus_lock_exit(struct kvm_vcpu *vcpu)
 	vcpu->arch.complete_userspace_io = complete_userspace_buslock;
 
 	if (is_guest_mode(vcpu))
-		svm->nested.ctl.bus_lock_rip = vcpu->arch.cui_linear_rip;
+		svm->nested.last_bus_lock_rip = vcpu->arch.cui_linear_rip;
 
 	return 0;
+}
+
+static int vmmcall_interception(struct kvm_vcpu *vcpu)
+{
+	/*
+	 * Inject a #UD if L2 is active and the VMMCALL isn't a Hyper-V TLB
+	 * hypercall, as VMMCALL #UDs if it's not intercepted, and this path is
+	 * reachable if and only if L1 doesn't want to intercept VMMCALL or has
+	 * enabled L0 (KVM) handling of Hyper-V L2 TLB flush hypercalls.
+	 */
+	if (is_guest_mode(vcpu) && !nested_svm_is_l2_tlb_flush_hcall(vcpu)) {
+		kvm_queue_exception(vcpu, UD_VECTOR);
+		return 1;
+	}
+
+	return kvm_emulate_hypercall(vcpu);
 }
 
 static int (*const svm_exit_handlers[])(struct kvm_vcpu *vcpu) = {
@@ -3279,7 +3331,7 @@ static int (*const svm_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[SVM_EXIT_TASK_SWITCH]			= task_switch_interception,
 	[SVM_EXIT_SHUTDOWN]			= shutdown_interception,
 	[SVM_EXIT_VMRUN]			= vmrun_interception,
-	[SVM_EXIT_VMMCALL]			= kvm_emulate_hypercall,
+	[SVM_EXIT_VMMCALL]			= vmmcall_interception,
 	[SVM_EXIT_VMLOAD]			= vmload_interception,
 	[SVM_EXIT_VMSAVE]			= vmsave_interception,
 	[SVM_EXIT_STGI]				= stgi_interception,
@@ -3354,13 +3406,13 @@ static void dump_vmcb(struct kvm_vcpu *vcpu)
 	pr_err("%-20s%016llx\n", "exit_info2:", control->exit_info_2);
 	pr_err("%-20s%08x\n", "exit_int_info:", control->exit_int_info);
 	pr_err("%-20s%08x\n", "exit_int_info_err:", control->exit_int_info_err);
-	pr_err("%-20s%lld\n", "nested_ctl:", control->nested_ctl);
+	pr_err("%-20s%lld\n", "misc_ctl:", control->misc_ctl);
 	pr_err("%-20s%016llx\n", "nested_cr3:", control->nested_cr3);
 	pr_err("%-20s%016llx\n", "avic_vapic_bar:", control->avic_vapic_bar);
 	pr_err("%-20s%016llx\n", "ghcb:", control->ghcb_gpa);
 	pr_err("%-20s%08x\n", "event_inj:", control->event_inj);
 	pr_err("%-20s%08x\n", "event_inj_err:", control->event_inj_err);
-	pr_err("%-20s%lld\n", "virt_ext:", control->virt_ext);
+	pr_err("%-20s%lld\n", "misc_ctl2:", control->misc_ctl2);
 	pr_err("%-20s%016llx\n", "next_rip:", control->next_rip);
 	pr_err("%-20s%016llx\n", "avic_backing_page:", control->avic_backing_page);
 	pr_err("%-20s%016llx\n", "avic_logical_id:", control->avic_logical_id);
@@ -3638,6 +3690,16 @@ static int svm_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 	return svm_invoke_exit_handler(vcpu, svm->vmcb->control.exit_code);
 }
 
+static void svm_set_nested_run_soft_int_state(struct kvm_vcpu *vcpu)
+{
+	struct vcpu_svm *svm = to_svm(vcpu);
+
+	svm->soft_int_csbase = svm->vmcb->save.cs.base;
+	svm->soft_int_old_rip = kvm_rip_read(vcpu);
+	if (!guest_cpu_cap_has(vcpu, X86_FEATURE_NRIPS))
+		svm->soft_int_next_rip = kvm_rip_read(vcpu);
+}
+
 static int pre_svm_run(struct kvm_vcpu *vcpu)
 {
 	struct svm_cpu_data *sd = per_cpu_ptr(&svm_data, vcpu->cpu);
@@ -3733,10 +3795,57 @@ static void svm_inject_irq(struct kvm_vcpu *vcpu, bool reinjected)
 		type = SVM_EVTINJ_TYPE_INTR;
 	}
 
+	/*
+	 * If AVIC was inhibited in order to detect an IRQ window, and there's
+	 * no other injectable interrupts pending or L2 is active (see below),
+	 * then drop the inhibit as the window has served its purpose.
+	 *
+	 * If L2 is active, this path is reachable if L1 is not intercepting
+	 * IRQs, i.e. if KVM is injecting L1 IRQs into L2.  AVIC is locally
+	 * inhibited while L2 is active; drop the VM-wide inhibit to optimize
+	 * the case in which the interrupt window was requested while L1 was
+	 * active (the vCPU was not running nested).
+	 */
+	if (svm->avic_irq_window &&
+	    (!kvm_cpu_has_injectable_intr(vcpu) || is_guest_mode(vcpu))) {
+		svm->avic_irq_window = false;
+		kvm_dec_apicv_irq_window_req(svm->vcpu.kvm);
+	}
+
 	trace_kvm_inj_virq(intr->nr, intr->soft, reinjected);
 	++vcpu->stat.irq_injections;
 
 	svm->vmcb->control.event_inj = intr->nr | SVM_EVTINJ_VALID | type;
+}
+
+static void svm_fixup_nested_rips(struct kvm_vcpu *vcpu)
+{
+	struct vcpu_svm *svm = to_svm(vcpu);
+
+	if (!is_guest_mode(vcpu) || !svm->nested.nested_run_pending)
+		return;
+
+	/*
+	 * If nrips is supported in hardware but not exposed to L1, stuff the
+	 * actual L2 RIP to emulate what a nrips=0 CPU would do (L1 is
+	 * responsible for advancing RIP prior to injecting the event). Once L2
+	 * runs after L1 executes VMRUN, NextRIP is updated by the CPU and/or
+	 * KVM, and this is no longer needed.
+	 *
+	 * This is done here (as opposed to when preparing vmcb02) to use the
+	 * most up-to-date value of RIP regardless of the order of restoring
+	 * registers and nested state in the vCPU save+restore path.
+	 */
+	if (boot_cpu_has(X86_FEATURE_NRIPS) &&
+	    !guest_cpu_cap_has(vcpu, X86_FEATURE_NRIPS))
+		svm->vmcb->control.next_rip = kvm_rip_read(vcpu);
+
+	/*
+	 * Simiarly, initialize the soft int metadata here to use the most
+	 * up-to-date values of RIP and CS base, regardless of restore order.
+	 */
+	if (svm->soft_int_injected)
+		svm_set_nested_run_soft_int_state(vcpu);
 }
 
 void svm_complete_interrupt_delivery(struct kvm_vcpu *vcpu, int delivery_mode,
@@ -3933,17 +4042,28 @@ static void svm_enable_irq_window(struct kvm_vcpu *vcpu)
 	 */
 	if (vgif || gif_set(svm)) {
 		/*
-		 * IRQ window is not needed when AVIC is enabled,
-		 * unless we have pending ExtINT since it cannot be injected
-		 * via AVIC. In such case, KVM needs to temporarily disable AVIC,
-		 * and fallback to injecting IRQ via V_IRQ.
+		 * KVM only enables IRQ windows when AVIC is enabled if there's
+		 * pending ExtINT since it cannot be injected via AVIC (ExtINT
+		 * bypasses the local APIC).  V_IRQ is ignored by hardware when
+		 * AVIC is enabled, and so KVM needs to temporarily disable
+		 * AVIC in order to detect when it's ok to inject the ExtINT.
 		 *
-		 * If running nested, AVIC is already locally inhibited
-		 * on this vCPU, therefore there is no need to request
-		 * the VM wide AVIC inhibition.
+		 * If running nested, AVIC is already locally inhibited on this
+		 * vCPU (L2 vCPUs use a different MMU that never maps the AVIC
+		 * backing page), therefore there is no need to increment the
+		 * VM-wide AVIC inhibit.  KVM will re-evaluate events when the
+		 * vCPU exits to L1 and enable an IRQ window if the ExtINT is
+		 * still pending.
+		 *
+		 * Note, the IRQ window inhibit needs to be updated even if
+		 * AVIC is inhibited for a different reason, as KVM needs to
+		 * keep AVIC inhibited if the other reason is cleared and there
+		 * is still an injectable interrupt pending.
 		 */
-		if (!is_guest_mode(vcpu))
-			kvm_set_apicv_inhibit(vcpu->kvm, APICV_INHIBIT_REASON_IRQWIN);
+		if (enable_apicv && !svm->avic_irq_window && !is_guest_mode(vcpu)) {
+			svm->avic_irq_window = true;
+			kvm_inc_apicv_irq_window_req(vcpu->kvm);
+		}
 
 		svm_set_vintr(svm);
 	}
@@ -4105,6 +4225,18 @@ static void svm_complete_soft_interrupt(struct kvm_vcpu *vcpu, u8 vector,
 	bool is_exception = (type == SVM_EXITINTINFO_TYPE_EXEPT);
 	bool is_soft = (type == SVM_EXITINTINFO_TYPE_SOFT);
 	struct vcpu_svm *svm = to_svm(vcpu);
+
+	/*
+	 * Initialize the soft int fields *before* reading them below if KVM
+	 * aborted entry to the guest with a nested VMRUN pending.  To ensure
+	 * KVM uses up-to-date values for RIP and CS base across save/restore,
+	 * regardless of restore order, KVM waits to set the soft int fields
+	 * until VMRUN is imminent.  But when canceling injection, KVM requeues
+	 * the soft int and will reinject it via the standard injection flow,
+	 * and so KVM needs to grab the state from the pending nested VMRUN.
+	 */
+	if (is_guest_mode(vcpu) && svm->nested.nested_run_pending)
+		svm_set_nested_run_soft_int_state(vcpu);
 
 	/*
 	 * If NRIPS is enabled, KVM must snapshot the pre-VMRUN next_rip that's
@@ -4335,6 +4467,8 @@ static __no_kcsan fastpath_t svm_vcpu_run(struct kvm_vcpu *vcpu, u64 run_flags)
 	    kvm_register_is_dirty(vcpu, VCPU_EXREG_ERAPS))
 		svm->vmcb->control.erap_ctl |= ERAP_CONTROL_CLEAR_RAP;
 
+	svm_fixup_nested_rips(vcpu);
+
 	svm_hv_update_vp_id(svm->vmcb, vcpu);
 
 	/*
@@ -4355,7 +4489,7 @@ static __no_kcsan fastpath_t svm_vcpu_run(struct kvm_vcpu *vcpu, u64 run_flags)
 	 * VM-Exit), as running with the host's DEBUGCTL can negatively affect
 	 * guest state and can even be fatal, e.g. due to Bus Lock Detect.
 	 */
-	if (!(svm->vmcb->control.virt_ext & LBR_CTL_ENABLE_MASK) &&
+	if (!(svm->vmcb->control.misc_ctl2 & SVM_MISC2_ENABLE_V_LBR) &&
 	    vcpu->arch.host_debugctl != svm->vmcb->save.dbgctl)
 		update_debugctlmsr(svm->vmcb->save.dbgctl);
 
@@ -4386,7 +4520,7 @@ static __no_kcsan fastpath_t svm_vcpu_run(struct kvm_vcpu *vcpu, u64 run_flags)
 	if (unlikely(svm->vmcb->control.exit_code == SVM_EXIT_NMI))
 		kvm_before_interrupt(vcpu, KVM_HANDLING_NMI);
 
-	if (!(svm->vmcb->control.virt_ext & LBR_CTL_ENABLE_MASK) &&
+	if (!(svm->vmcb->control.misc_ctl2 & SVM_MISC2_ENABLE_V_LBR) &&
 	    vcpu->arch.host_debugctl != svm->vmcb->save.dbgctl)
 		update_debugctlmsr(vcpu->arch.host_debugctl);
 
@@ -4435,6 +4569,16 @@ static __no_kcsan fastpath_t svm_vcpu_run(struct kvm_vcpu *vcpu, u64 run_flags)
 	trace_kvm_exit(vcpu, KVM_ISA_SVM);
 
 	svm_complete_interrupts(vcpu);
+
+	/*
+	 * Update the cache after completing interrupts to get an accurate
+	 * NextRIP, e.g. when re-injecting a soft interrupt.
+	 *
+	 * FIXME: Rework svm_get_nested_state() to not pull data from the
+	 *        cache (except for maybe int_ctl).
+	 */
+	if (is_guest_mode(vcpu))
+		svm->nested.ctl.next_rip = svm->vmcb->control.next_rip;
 
 	return svm_exit_handlers_fastpath(vcpu);
 }
@@ -4784,7 +4928,6 @@ static int svm_enter_smm(struct kvm_vcpu *vcpu, union kvm_smram *smram)
 {
 	struct vcpu_svm *svm = to_svm(vcpu);
 	struct kvm_host_map map_save;
-	int ret;
 
 	if (!is_guest_mode(vcpu))
 		return 0;
@@ -4804,9 +4947,7 @@ static int svm_enter_smm(struct kvm_vcpu *vcpu, union kvm_smram *smram)
 	svm->vmcb->save.rsp = vcpu->arch.regs[VCPU_REGS_RSP];
 	svm->vmcb->save.rip = vcpu->arch.regs[VCPU_REGS_RIP];
 
-	ret = nested_svm_simple_vmexit(svm, SVM_EXIT_SW);
-	if (ret)
-		return ret;
+	nested_svm_simple_vmexit(svm, SVM_EXIT_SW);
 
 	/*
 	 * KVM uses VMCB01 to store L1 host state while L2 runs but
@@ -4884,8 +5025,7 @@ static int svm_leave_smm(struct kvm_vcpu *vcpu, const union kvm_smram *smram)
 	if (nested_svm_check_cached_vmcb12(vcpu) < 0)
 		goto unmap_save;
 
-	if (enter_svm_guest_mode(vcpu, smram64->svm_guest_vmcb_gpa,
-				 vmcb12, false) != 0)
+	if (enter_svm_guest_mode(vcpu, smram64->svm_guest_vmcb_gpa, false) != 0)
 		goto unmap_save;
 
 	ret = 0;
@@ -5410,13 +5550,9 @@ static __init int svm_hardware_setup(void)
 		pr_err_ratelimited("NX (Execute Disable) not supported\n");
 		return -EOPNOTSUPP;
 	}
-	kvm_enable_efer_bits(EFER_NX);
 
 	kvm_caps.supported_xcr0 &= ~(XFEATURE_MASK_BNDREGS |
 				     XFEATURE_MASK_BNDCSR);
-
-	if (boot_cpu_has(X86_FEATURE_FXSR_OPT))
-		kvm_enable_efer_bits(EFER_FFXSR);
 
 	if (tsc_scaling) {
 		if (!boot_cpu_has(X86_FEATURE_TSCRATEMSR)) {
@@ -5430,9 +5566,6 @@ static __init int svm_hardware_setup(void)
 	kvm_caps.tsc_scaling_ratio_frac_bits = 32;
 
 	tsc_aux_uret_slot = kvm_add_user_return_msr(MSR_TSC_AUX);
-
-	if (boot_cpu_has(X86_FEATURE_AUTOIBRS))
-		kvm_enable_efer_bits(EFER_AUTOIBRS);
 
 	/* Check for pause filtering support */
 	if (!boot_cpu_has(X86_FEATURE_PAUSEFILTER)) {
