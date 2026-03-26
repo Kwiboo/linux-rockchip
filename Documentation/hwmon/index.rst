@@ -52,7 +52,6 @@ Hardware Monitoring Kernel Drivers
    bcm54140
    bel-pfe
    bpa-rs600
-   bt1-pvt
    cgbc-hwmon
    chipcap2
    coretemp
@@ -111,6 +110,7 @@ Hardware Monitoring Kernel Drivers
    kbatt
    kfan
    lan966x
+   lattepanda-sigma-ec
    lineage-pem
    lm25066
    lm63
