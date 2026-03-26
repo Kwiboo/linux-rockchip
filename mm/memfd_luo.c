@@ -90,8 +90,8 @@ static int memfd_luo_preserve_folios(struct file *file,
 {
 	struct inode *inode = file_inode(file);
 	struct memfd_luo_folio_ser *folios_ser;
-	unsigned int max_folios;
-	long i, size, nr_pinned;
+	u64 size, max_folios;
+	long i, nr_pinned;
 	struct folio **folios;
 	int err = -EINVAL;
 	pgoff_t offset;
