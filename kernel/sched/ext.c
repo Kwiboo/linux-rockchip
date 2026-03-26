@@ -8094,6 +8094,7 @@ static bool scx_dsq_move(struct bpf_iter_scx_dsq_kern *kit,
 	if (unlikely(!scx_task_on_sched(sch, p))) {
 		scx_error(sch, "scx_bpf_dsq_move[_vtime]() on %s[%d] but the task belongs to a different scheduler",
 			  p->comm, p->pid);
+		return false;
 	}
 
 	/*
@@ -9408,6 +9409,7 @@ static void scx_read_events(struct scx_sched *sch, struct scx_event_stats *event
 		scx_agg_event(events, e_cpu, SCX_EV_BYPASS_DISPATCH);
 		scx_agg_event(events, e_cpu, SCX_EV_BYPASS_ACTIVATE);
 		scx_agg_event(events, e_cpu, SCX_EV_INSERT_NOT_OWNED);
+		scx_agg_event(events, e_cpu, SCX_EV_SUB_BYPASS_DISPATCH);
 	}
 }
 
