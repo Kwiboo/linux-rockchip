@@ -1027,6 +1027,8 @@ struct usb_device_id cx231xx_id_table[] = {
 	 .driver_info = CX231XX_BOARD_HAUPPAUGE_955Q},
 	{USB_DEVICE(0x2040, 0xb151),
 	 .driver_info = CX231XX_BOARD_HAUPPAUGE_935C},
+	{USB_DEVICE(0x2040, 0x8360),
+	 .driver_info = CX231XX_BOARD_HAUPPAUGE_935C},
 	{USB_DEVICE(0x2040, 0xb150),
 	 .driver_info = CX231XX_BOARD_HAUPPAUGE_975},
 	{USB_DEVICE(0x2040, 0xb130),
@@ -1368,8 +1370,6 @@ void cx231xx_release_resources(struct cx231xx *dev)
 	v4l2_device_unregister(&dev->v4l2_dev);
 
 	cx231xx_unregister_media_device(dev);
-
-	usb_put_dev(dev->udev);
 
 	/* Mark device as unused */
 	clear_bit(dev->devno, &cx231xx_devused);
@@ -1719,7 +1719,7 @@ static int cx231xx_usb_probe(struct usb_interface *interface,
 		}
 	} while (test_and_set_bit(nr, &cx231xx_devused));
 
-	udev = usb_get_dev(interface_to_usbdev(interface));
+	udev = interface_to_usbdev(interface);
 
 	/* allocate memory for our device state and initialize it */
 	dev = devm_kzalloc(&udev->dev, sizeof(*dev), GFP_KERNEL);
@@ -1915,7 +1915,6 @@ err_v4l2:
 err_media_init:
 	usb_set_intfdata(interface, NULL);
 err_if:
-	usb_put_dev(udev);
 	clear_bit(nr, &cx231xx_devused);
 	return retval;
 }
