@@ -210,9 +210,8 @@ static void luo_flb_file_finish_one(struct liveupdate_flb *flb)
 		}
 	}
 
-	scoped_guard(mutex, &private->incoming.lock) {
+	scoped_guard(mutex, &private->incoming.lock)
 		count = --private->incoming.count;
-	}
 
 	if (!count) {
 		struct liveupdate_flb_op_args args = {0};
