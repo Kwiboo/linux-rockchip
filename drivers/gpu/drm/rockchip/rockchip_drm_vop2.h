@@ -369,13 +369,6 @@ struct vop2 {
 #define WB_COMPLETE_INTR		BIT(19)
 
 
-enum vop_csc_format {
-	CSC_BT601L,
-	CSC_BT709L,
-	CSC_BT601F,
-	CSC_BT2020,
-};
-
 enum src_factor_mode {
 	SRC_FAC_ALPHA_ZERO,
 	SRC_FAC_ALPHA_ONE,
