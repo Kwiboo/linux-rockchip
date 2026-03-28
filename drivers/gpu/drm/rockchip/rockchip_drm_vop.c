@@ -346,6 +346,26 @@ static int vop_convert_afbc_format(uint32_t format)
 	}
 }
 
+static enum vop_csc_format vop_convert_csc_mode(enum drm_color_encoding color_encoding,
+						enum drm_color_range color_range)
+{
+	switch (color_range) {
+	case DRM_COLOR_YCBCR_LIMITED_RANGE:
+		switch (color_encoding) {
+		case DRM_COLOR_YCBCR_BT709:
+			return CSC_BT709L;
+		case DRM_COLOR_YCBCR_BT2020:
+			return CSC_BT2020;
+		case DRM_COLOR_YCBCR_BT601:
+		default:
+			return CSC_BT601L;
+		}
+	case DRM_COLOR_YCBCR_FULL_RANGE:
+	default:
+		return CSC_BT601F;
+	}
+}
+
 static bool is_yuv_output(uint32_t bus_format)
 {
 	switch (bus_format) {
@@ -1052,6 +1072,10 @@ static void vop_plane_atomic_update(struct drm_plane *plane,
 		uv_swap = has_uv_swapped(fb->format->format);
 		VOP_WIN_SET(vop, win, uv_swap, uv_swap);
 	}
+
+	VOP_WIN_SET(vop, win, csc_mode, !is_yuv ? 0 :
+		    vop_convert_csc_mode(new_state->color_encoding,
+					 new_state->color_range));
 
 	if (win->phy->scl)
 		scl_vop_cal_scl_fac(vop, win, actual_w, actual_h,
@@ -1923,7 +1947,8 @@ static void vop_plane_add_properties(struct drm_plane *plane, int zpos,
 
 	drm_plane_create_zpos_immutable_property(plane, zpos);
 
-	if (!plane_supports_yuv_format(plane))
+	if (!VOP_WIN_HAS_REG(win_data, csc_mode) ||
+	    !plane_supports_yuv_format(plane))
 		return;
 
 	flags = BIT(DRM_COLOR_YCBCR_BT601) | BIT(DRM_COLOR_YCBCR_BT709);
