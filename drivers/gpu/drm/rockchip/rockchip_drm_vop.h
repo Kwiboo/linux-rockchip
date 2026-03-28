@@ -33,6 +33,13 @@
 			| AFBC_FORMAT_MOD_YTR \
 	)
 
+enum vop_csc_format {
+	CSC_BT601L,
+	CSC_BT709L,
+	CSC_BT601F,
+	CSC_BT2020,
+};
+
 enum vop_data_format {
 	VOP_FMT_ARGB8888 = 0,
 	VOP_FMT_RGB888,
@@ -196,6 +203,7 @@ struct vop_win_phy {
 	struct vop_reg gate;
 	struct vop_reg format;
 	struct vop_reg fmt_10;
+	struct vop_reg csc_mode;
 	struct vop_reg rb_swap;
 	struct vop_reg uv_swap;
 	struct vop_reg act_info;
