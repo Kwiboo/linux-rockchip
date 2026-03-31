@@ -972,7 +972,8 @@ static inline void sparse_init_one_section(struct mem_section *ms,
 {
 	unsigned long coded_mem_map;
 
-	BUILD_BUG_ON(SECTION_MAP_LAST_BIT > PFN_SECTION_SHIFT);
+	BUILD_BUG_ON(SECTION_MAP_LAST_BIT > min(PFN_SECTION_SHIFT + __ffs(sizeof(struct page)),
+						PAGE_SHIFT));
 
 	/*
 	 * We encode the start PFN of the section into the mem_map such that
