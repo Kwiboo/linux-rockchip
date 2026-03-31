@@ -283,6 +283,7 @@ obj-$(CONFIG_VIDEO_SC8238) += sc8238.o
 obj-$(CONFIG_VIDEO_SC830AI) += sc830ai.o
 obj-$(CONFIG_VIDEO_SC831AI) += sc831ai.o
 obj-$(CONFIG_VIDEO_SC850SL) += sc850sl.o
+obj-$(CONFIG_VIDEO_SCC86HAI) += scc86hai.o
 obj-$(CONFIG_VIDEO_SENSOR_ADAPTER) += sensor_adapter.o
 obj-$(CONFIG_VIDEO_SGM3784) += sgm3784.o
 obj-$(CONFIG_VIDEO_SONY_BTF_MPX) += sony-btf-mpx.o
