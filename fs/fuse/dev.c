@@ -570,6 +570,11 @@ static void request_wait_answer(struct fuse_req *req)
 		if (!err)
 			return;
 
+		if (req->args->abort_on_kill) {
+			fuse_abort_conn(fc);
+			return;
+		}
+
 		if (test_bit(FR_URING, &req->flags))
 			removed = fuse_uring_remove_pending_req(req);
 		else
@@ -676,7 +681,8 @@ ssize_t __fuse_simple_request(struct mnt_idmap *idmap,
 			fuse_force_creds(req);
 
 		__set_bit(FR_WAITING, &req->flags);
-		__set_bit(FR_FORCE, &req->flags);
+		if (!args->abort_on_kill)
+			__set_bit(FR_FORCE, &req->flags);
 	} else {
 		WARN_ON(args->nocreds);
 		req = fuse_get_req(idmap, fm, false);
@@ -1010,6 +1016,9 @@ static int fuse_try_move_folio(struct fuse_copy_state *cs, struct folio **foliop
 
 	folio_clear_uptodate(newfolio);
 	folio_clear_mappedtodisk(newfolio);
+
+	if (folio_test_large(newfolio))
+		goto out_fallback_unlock;
 
 	if (fuse_check_folio(newfolio) != 0)
 		goto out_fallback_unlock;
@@ -1764,10 +1773,9 @@ static int fuse_notify_store(struct fuse_conn *fc, unsigned int size,
 	struct address_space *mapping;
 	u64 nodeid;
 	int err;
-	pgoff_t index;
-	unsigned int offset;
 	unsigned int num;
 	loff_t file_size;
+	loff_t pos;
 	loff_t end;
 
 	if (size < sizeof(outarg))
@@ -1780,7 +1788,12 @@ static int fuse_notify_store(struct fuse_conn *fc, unsigned int size,
 	if (size - sizeof(outarg) != outarg.size)
 		return -EINVAL;
 
+	if (outarg.offset >= MAX_LFS_FILESIZE)
+		return -EINVAL;
+
 	nodeid = outarg.nodeid;
+	pos = outarg.offset;
+	num = min(outarg.size, MAX_LFS_FILESIZE - pos);
 
 	down_read(&fc->killsb);
 
@@ -1790,33 +1803,29 @@ static int fuse_notify_store(struct fuse_conn *fc, unsigned int size,
 		goto out_up_killsb;
 
 	mapping = inode->i_mapping;
-	index = outarg.offset >> PAGE_SHIFT;
-	offset = outarg.offset & ~PAGE_MASK;
 	file_size = i_size_read(inode);
-	end = outarg.offset + outarg.size;
+	end = pos + num;
 	if (end > file_size) {
 		file_size = end;
-		fuse_write_update_attr(inode, file_size, outarg.size);
+		fuse_write_update_attr(inode, file_size, num);
 	}
 
-	num = outarg.size;
 	while (num) {
 		struct folio *folio;
 		unsigned int folio_offset;
 		unsigned int nr_bytes;
-		unsigned int nr_pages;
+		pgoff_t index = pos >> PAGE_SHIFT;
 
 		folio = filemap_grab_folio(mapping, index);
 		err = PTR_ERR(folio);
 		if (IS_ERR(folio))
 			goto out_iput;
 
-		folio_offset = ((index - folio->index) << PAGE_SHIFT) + offset;
+		folio_offset = offset_in_folio(folio, pos);
 		nr_bytes = min(num, folio_size(folio) - folio_offset);
-		nr_pages = (offset + nr_bytes + PAGE_SIZE - 1) >> PAGE_SHIFT;
 
 		err = fuse_copy_folio(cs, &folio, folio_offset, nr_bytes, 0);
-		if (!folio_test_uptodate(folio) && !err && offset == 0 &&
+		if (!folio_test_uptodate(folio) && !err && folio_offset == 0 &&
 		    (nr_bytes == folio_size(folio) || file_size == end)) {
 			folio_zero_segment(folio, nr_bytes, folio_size(folio));
 			folio_mark_uptodate(folio);
@@ -1827,9 +1836,8 @@ static int fuse_notify_store(struct fuse_conn *fc, unsigned int size,
 		if (err)
 			goto out_iput;
 
+		pos += nr_bytes;
 		num -= nr_bytes;
-		offset = 0;
-		index += nr_pages;
 	}
 
 	err = 0;
@@ -1861,7 +1869,6 @@ static int fuse_retrieve(struct fuse_mount *fm, struct inode *inode,
 {
 	int err;
 	struct address_space *mapping = inode->i_mapping;
-	pgoff_t index;
 	loff_t file_size;
 	unsigned int num;
 	unsigned int offset;
@@ -1872,17 +1879,18 @@ static int fuse_retrieve(struct fuse_mount *fm, struct inode *inode,
 	size_t args_size = sizeof(*ra);
 	struct fuse_args_pages *ap;
 	struct fuse_args *args;
+	loff_t pos = outarg->offset;
 
-	offset = outarg->offset & ~PAGE_MASK;
+	offset = offset_in_page(pos);
 	file_size = i_size_read(inode);
 
 	num = min(outarg->size, fc->max_write);
-	if (outarg->offset > file_size)
+	if (pos > file_size)
 		num = 0;
-	else if (outarg->offset + num > file_size)
-		num = file_size - outarg->offset;
+	else if (num > file_size - pos)
+		num = file_size - pos;
 
-	num_pages = (num + offset + PAGE_SIZE - 1) >> PAGE_SHIFT;
+	num_pages = DIV_ROUND_UP(num + offset, PAGE_SIZE);
 	num_pages = min(num_pages, fc->max_pages);
 	num = min(num, num_pages << PAGE_SHIFT);
 
@@ -1903,31 +1911,27 @@ static int fuse_retrieve(struct fuse_mount *fm, struct inode *inode,
 	args->in_pages = true;
 	args->end = fuse_retrieve_end;
 
-	index = outarg->offset >> PAGE_SHIFT;
-
 	while (num && ap->num_folios < num_pages) {
 		struct folio *folio;
 		unsigned int folio_offset;
 		unsigned int nr_bytes;
-		unsigned int nr_pages;
+		pgoff_t index = pos >> PAGE_SHIFT;
 
 		folio = filemap_get_folio(mapping, index);
 		if (IS_ERR(folio))
 			break;
 
-		folio_offset = ((index - folio->index) << PAGE_SHIFT) + offset;
+		folio_offset = offset_in_folio(folio, pos);
 		nr_bytes = min(folio_size(folio) - folio_offset, num);
-		nr_pages = (offset + nr_bytes + PAGE_SIZE - 1) >> PAGE_SHIFT;
 
 		ap->folios[ap->num_folios] = folio;
 		ap->descs[ap->num_folios].offset = folio_offset;
 		ap->descs[ap->num_folios].length = nr_bytes;
 		ap->num_folios++;
 
-		offset = 0;
+		pos += nr_bytes;
 		num -= nr_bytes;
 		total_len += nr_bytes;
-		index += nr_pages;
 	}
 	ra->inarg.offset = outarg->offset;
 	ra->inarg.size = total_len;
@@ -1960,6 +1964,9 @@ static int fuse_notify_retrieve(struct fuse_conn *fc, unsigned int size,
 		return err;
 
 	fuse_copy_finish(cs);
+
+	if (outarg.offset >= MAX_LFS_FILESIZE)
+		return -EINVAL;
 
 	down_read(&fc->killsb);
 	err = -ENOENT;

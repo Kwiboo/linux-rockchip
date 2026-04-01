@@ -270,7 +270,8 @@ Description:	Shows all enabled kernel features.
 		inode_checksum, flexible_inline_xattr, quota_ino,
 		inode_crtime, lost_found, verity, sb_checksum,
 		casefold, readonly, compression, test_dummy_encryption_v2,
-		atomic_write, pin_file, encrypted_casefold, linear_lookup.
+		atomic_write, pin_file, encrypted_casefold, linear_lookup,
+		fserror.
 
 What:		/sys/fs/f2fs/<disk>/inject_rate
 Date:		May 2016
@@ -405,6 +406,12 @@ What:		/sys/fs/f2fs/<disk>/avg_vblocks
 Date:		September 2019
 Contact:	"Hridya Valsaraju" <hridya@google.com>
 Description:	Average number of valid blocks.
+		Available when CONFIG_F2FS_STAT_FS=y.
+
+What:		/sys/fs/f2fs/<disk>/defrag_blocks
+Date:		February 2026
+Contact:	"Jinbao Liu" <liujinbao1@xiaomi.com>
+Description:	Number of blocks moved by defragment.
 		Available when CONFIG_F2FS_STAT_FS=y.
 
 What:		/sys/fs/f2fs/<disk>/mounted_time_sec
