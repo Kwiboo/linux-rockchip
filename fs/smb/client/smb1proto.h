@@ -240,6 +240,10 @@ int map_and_check_smb_error(struct TCP_Server_Info *server,
 #if IS_ENABLED(CONFIG_SMB1_KUNIT_TESTS)
 const struct ntstatus_to_dos_err *
 search_ntstatus_to_dos_map_test(__u32 ntstatus);
+const struct smb_to_posix_error *
+search_mapping_table_ERRDOS_test(__u16 smb_err);
+const struct smb_to_posix_error *
+search_mapping_table_ERRSRV_test(__u16 smb_err);
 #endif
 
 /*
