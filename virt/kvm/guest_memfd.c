@@ -110,8 +110,7 @@ static int kvm_gmem_prepare_folio(struct kvm *kvm, struct kvm_memory_slot *slot,
 
 static struct folio *kvm_gmem_get_folio_noalloc(struct inode *inode, pgoff_t pgoff)
 {
-	return __filemap_get_folio(inode->i_mapping, pgoff,
-				   FGP_LOCK | FGP_ACCESSED, 0);
+	return filemap_lock_folio(inode->i_mapping, pgoff);
 }
 
 /*
@@ -139,7 +138,7 @@ static struct folio *kvm_gmem_get_folio(struct inode *inode, pgoff_t index)
 
 	policy = mpol_shared_policy_lookup(&GMEM_I(inode)->policy, index);
 	folio = __filemap_get_folio_mpol(inode->i_mapping, index,
-					 FGP_LOCK | FGP_ACCESSED | FGP_CREAT,
+					 FGP_LOCK | FGP_CREAT,
 					 mapping_gfp_mask(inode->i_mapping), policy);
 	mpol_cond_put(policy);
 
