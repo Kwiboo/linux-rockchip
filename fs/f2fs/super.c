@@ -29,6 +29,7 @@
 #include <linux/lz4.h>
 #include <linux/ctype.h>
 #include <linux/fs_parser.h>
+#include <linux/fserror.h>
 
 #include "f2fs.h"
 #include "node.h"
@@ -2009,7 +2010,7 @@ static void f2fs_put_super(struct super_block *sb)
 	}
 
 	/* be sure to wait for any on-going discard commands */
-	done = f2fs_issue_discard_timeout(sbi);
+	done = f2fs_issue_discard_timeout(sbi, true);
 	if (f2fs_realtime_discard_enable(sbi) && !sbi->discard_blks && done) {
 		struct cp_control cpc = {
 			.reason = CP_UMOUNT | CP_TRIMMED,
@@ -2152,7 +2153,7 @@ static int f2fs_unfreeze(struct super_block *sb)
 	 * will recover after removal of snapshot.
 	 */
 	if (test_opt(sbi, DISCARD) && !f2fs_hw_support_discard(sbi))
-		f2fs_issue_discard_timeout(sbi);
+		f2fs_issue_discard_timeout(sbi, true);
 
 	clear_sbi_flag(F2FS_SB(sb), SBI_IS_FREEZING);
 	return 0;
@@ -2957,7 +2958,12 @@ static int __f2fs_remount(struct fs_context *fc, struct super_block *sb)
 			need_stop_discard = true;
 		} else {
 			f2fs_stop_discard_thread(sbi);
-			f2fs_issue_discard_timeout(sbi);
+			/*
+			 * f2fs_ioc_fitrim() won't race w/ "remount ro"
+			 * so it's safe to check discard_cmd_cnt in
+			 * f2fs_issue_discard_timeout().
+			 */
+			f2fs_issue_discard_timeout(sbi, flags & SB_RDONLY);
 			need_restart_discard = true;
 		}
 	}
@@ -4619,6 +4625,8 @@ static void f2fs_record_stop_reason(struct f2fs_sb_info *sbi)
 		f2fs_err_ratelimited(sbi,
 			"f2fs_commit_super fails to record stop_reason, err:%d",
 			err);
+
+	fserror_report_shutdown(sbi->sb, GFP_NOFS);
 }
 
 void f2fs_save_errors(struct f2fs_sb_info *sbi, unsigned char flag)
@@ -4633,6 +4641,27 @@ void f2fs_save_errors(struct f2fs_sb_info *sbi, unsigned char flag)
 	spin_unlock_irqrestore(&sbi->error_lock, flags);
 }
 
+static void f2fs_report_fserror(struct f2fs_sb_info *sbi, unsigned char error)
+{
+	switch (error) {
+	case ERROR_INVALID_BLKADDR:
+	case ERROR_CORRUPTED_INODE:
+	case ERROR_INCONSISTENT_SUMMARY:
+	case ERROR_INCONSISTENT_SUM_TYPE:
+	case ERROR_CORRUPTED_JOURNAL:
+	case ERROR_INCONSISTENT_NODE_COUNT:
+	case ERROR_INCONSISTENT_BLOCK_COUNT:
+	case ERROR_INVALID_CURSEG:
+	case ERROR_INCONSISTENT_SIT:
+	case ERROR_INVALID_NODE_REFERENCE:
+	case ERROR_INCONSISTENT_NAT:
+		fserror_report_metadata(sbi->sb, -EFSCORRUPTED, GFP_NOFS);
+		break;
+	default:
+		return;
+	}
+}
+
 void f2fs_handle_error(struct f2fs_sb_info *sbi, unsigned char error)
 {
 	f2fs_save_errors(sbi, error);
@@ -4642,6 +4671,8 @@ void f2fs_handle_error(struct f2fs_sb_info *sbi, unsigned char error)
 	if (!test_bit(error, (unsigned long *)sbi->errors))
 		return;
 	schedule_work(&sbi->s_error_work);
+
+	f2fs_report_fserror(sbi, error);
 }
 
 static bool system_going_down(void)
@@ -4650,7 +4681,8 @@ static bool system_going_down(void)
 		|| system_state == SYSTEM_RESTART;
 }
 
-void f2fs_handle_critical_error(struct f2fs_sb_info *sbi, unsigned char reason)
+static void f2fs_handle_critical_error(struct f2fs_sb_info *sbi,
+						unsigned char reason)
 {
 	struct super_block *sb = sbi->sb;
 	bool shutdown = reason == STOP_CP_REASON_SHUTDOWN;
@@ -4706,6 +4738,16 @@ void f2fs_handle_critical_error(struct f2fs_sb_info *sbi, unsigned char reason)
 	 * freeze_super() which will lead to deadlocks and other problems.
 	 */
 }
+
+void f2fs_stop_checkpoint(struct f2fs_sb_info *sbi, bool end_io,
+						unsigned char reason)
+{
+	f2fs_build_fault_attr(sbi, 0, 0, FAULT_ALL);
+	if (!end_io)
+		f2fs_flush_merged_writes(sbi);
+	f2fs_handle_critical_error(sbi, reason);
+}
+
 
 static void f2fs_record_error_work(struct work_struct *work)
 {
@@ -4948,6 +4990,11 @@ try_onemore:
 	init_f2fs_rwsem_trace(&sbi->gc_lock, sbi, LOCK_NAME_GC_LOCK);
 	mutex_init(&sbi->writepages);
 	init_f2fs_rwsem_trace(&sbi->cp_global_sem, sbi, LOCK_NAME_CP_GLOBAL);
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+	lockdep_register_key(&sbi->cp_global_sem_key);
+	lockdep_set_class(&sbi->cp_global_sem.internal_rwsem,
+					&sbi->cp_global_sem_key);
+#endif
 	init_f2fs_rwsem_trace(&sbi->node_write, sbi, LOCK_NAME_NODE_WRITE);
 	init_f2fs_rwsem_trace(&sbi->node_change, sbi, LOCK_NAME_NODE_CHANGE);
 	spin_lock_init(&sbi->stat_lock);
@@ -5419,6 +5466,9 @@ free_options:
 free_sb_buf:
 	kfree(raw_super);
 free_sbi:
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+	lockdep_unregister_key(&sbi->cp_global_sem_key);
+#endif
 	kfree(sbi);
 	sb->s_fs_info = NULL;
 
@@ -5500,6 +5550,9 @@ static void kill_f2fs_super(struct super_block *sb)
 	/* Release block devices last, after fscrypt_destroy_keyring(). */
 	if (sbi) {
 		destroy_device_list(sbi);
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+		lockdep_unregister_key(&sbi->cp_global_sem_key);
+#endif
 		kfree(sbi);
 		sb->s_fs_info = NULL;
 	}
