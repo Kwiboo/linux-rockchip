@@ -65,6 +65,7 @@
 #include "xe_survivability_mode.h"
 #include "xe_sriov.h"
 #include "xe_svm.h"
+#include "xe_sysctrl.h"
 #include "xe_tile.h"
 #include "xe_ttm_stolen_mgr.h"
 #include "xe_ttm_sys_mgr.h"
@@ -833,6 +834,14 @@ static void detect_preproduction_hw(struct xe_device *xe)
 	}
 }
 
+static void xe_device_wedged_fini(struct drm_device *drm, void *arg)
+{
+	struct xe_device *xe = arg;
+
+	if (atomic_read(&xe->wedged.flag))
+		xe_pm_runtime_put(xe);
+}
+
 int xe_device_probe(struct xe_device *xe)
 {
 	struct xe_tile *tile;
@@ -984,6 +993,10 @@ int xe_device_probe(struct xe_device *xe)
 	if (err)
 		goto err_unregister_display;
 
+	err = xe_sysctrl_init(xe);
+	if (err)
+		goto err_unregister_display;
+
 	err = xe_device_sysfs_init(xe);
 	if (err)
 		goto err_unregister_display;
@@ -1008,6 +1021,10 @@ int xe_device_probe(struct xe_device *xe)
 		goto err_unregister_display;
 
 	detect_preproduction_hw(xe);
+
+	err = drmm_add_action_or_reset(&xe->drm, xe_device_wedged_fini, xe);
+	if (err)
+		goto err_unregister_display;
 
 	return devm_add_action_or_reset(xe->drm.dev, xe_device_sanitize, xe);
 
@@ -1240,13 +1257,6 @@ u64 xe_device_uncanonicalize_addr(struct xe_device *xe, u64 address)
 	return address & GENMASK_ULL(xe->info.va_bits - 1, 0);
 }
 
-static void xe_device_wedged_fini(struct drm_device *drm, void *arg)
-{
-	struct xe_device *xe = arg;
-
-	xe_pm_runtime_put(xe);
-}
-
 /**
  * DOC: Xe Device Wedging
  *
@@ -1324,15 +1334,9 @@ void xe_device_declare_wedged(struct xe_device *xe)
 		return;
 	}
 
-	xe_pm_runtime_get_noresume(xe);
-
-	if (drmm_add_action_or_reset(&xe->drm, xe_device_wedged_fini, xe)) {
-		drm_err(&xe->drm, "Failed to register xe_device_wedged_fini clean-up. Although device is wedged.\n");
-		return;
-	}
-
 	if (!atomic_xchg(&xe->wedged.flag, 1)) {
 		xe->needs_flr_on_fini = true;
+		xe_pm_runtime_get_noresume(xe);
 		drm_err(&xe->drm,
 			"CRITICAL: Xe has declared device %s as wedged.\n"
 			"IOCTLs and executions are blocked.\n"
