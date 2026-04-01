@@ -10,6 +10,8 @@
 
 #include <linux/fs.h>
 #include <linux/types.h>
+#include <linux/io_uring/zcrx.h>
+
 /*
  * this file is shared with liburing and that has to autodetect
  * if linux/time_types.h is available or not, it can
@@ -341,6 +343,10 @@ enum io_uring_op {
 
 /*
  * sqe->timeout_flags
+ *
+ * IORING_TIMEOUT_IMMEDIATE_ARG:	If set, sqe->addr stores the timeout
+ *					value in nanoseconds instead of
+ *					pointing to a timespec.
  */
 #define IORING_TIMEOUT_ABS		(1U << 0)
 #define IORING_TIMEOUT_UPDATE		(1U << 1)
@@ -349,6 +355,7 @@ enum io_uring_op {
 #define IORING_LINK_TIMEOUT_UPDATE	(1U << 4)
 #define IORING_TIMEOUT_ETIME_SUCCESS	(1U << 5)
 #define IORING_TIMEOUT_MULTISHOT	(1U << 6)
+#define IORING_TIMEOUT_IMMEDIATE_ARG	(1U << 7)
 #define IORING_TIMEOUT_CLOCK_MASK	(IORING_TIMEOUT_BOOTTIME | IORING_TIMEOUT_REALTIME)
 #define IORING_TIMEOUT_UPDATE_MASK	(IORING_TIMEOUT_UPDATE | IORING_LINK_TIMEOUT_UPDATE)
 /*
@@ -886,15 +893,29 @@ struct io_uring_buf_ring {
  *			use of it will consume only as much as it needs. This
  *			requires that both the kernel and application keep
  *			track of where the current read/recv index is at.
+ * IOU_PBUF_RING_KERNEL_MANAGED: If set, kernel allocates and manages the memory
+ *                      for the ring and its buffers. The application must set
+ *                      the buffer size through reg->buf_size and the size must
+ *                      be page-aligned. When the application subsequently calls
+ *                      mmap(2) with
+ *                      IORING_OFF_PBUF_RING | (bgid << IORING_OFF_PBUF_SHIFT),
+ *                      the virtual mapping returned is a contiguous mapping of
+ *                      the buffers. If set, IOU_PBUF_RING_MMAP must be set as
+ *                      well.
  */
 enum io_uring_register_pbuf_ring_flags {
 	IOU_PBUF_RING_MMAP	= 1,
 	IOU_PBUF_RING_INC	= 2,
+	IOU_PBUF_RING_KERNEL_MANAGED = 4,
 };
 
 /* argument for IORING_(UN)REGISTER_PBUF_RING */
 struct io_uring_buf_reg {
-	__u64	ring_addr;
+	union {
+		__u64	ring_addr;
+		/* used if reg->flags & IOU_PBUF_RING_KERNEL_MANAGED */
+		__u32   buf_size;
+	};
 	__u32	ring_entries;
 	__u16	bgid;
 	__u16	flags;
@@ -1048,100 +1069,6 @@ enum io_uring_socket_op {
 struct io_timespec {
 	__u64		tv_sec;
 	__u64		tv_nsec;
-};
-
-/* Zero copy receive refill queue entry */
-struct io_uring_zcrx_rqe {
-	__u64	off;
-	__u32	len;
-	__u32	__pad;
-};
-
-struct io_uring_zcrx_cqe {
-	__u64	off;
-	__u64	__pad;
-};
-
-/* The bit from which area id is encoded into offsets */
-#define IORING_ZCRX_AREA_SHIFT	48
-#define IORING_ZCRX_AREA_MASK	(~(((__u64)1 << IORING_ZCRX_AREA_SHIFT) - 1))
-
-struct io_uring_zcrx_offsets {
-	__u32	head;
-	__u32	tail;
-	__u32	rqes;
-	__u32	__resv2;
-	__u64	__resv[2];
-};
-
-enum io_uring_zcrx_area_flags {
-	IORING_ZCRX_AREA_DMABUF		= 1,
-};
-
-struct io_uring_zcrx_area_reg {
-	__u64	addr;
-	__u64	len;
-	__u64	rq_area_token;
-	__u32	flags;
-	__u32	dmabuf_fd;
-	__u64	__resv2[2];
-};
-
-enum zcrx_reg_flags {
-	ZCRX_REG_IMPORT	= 1,
-};
-
-enum zcrx_features {
-	/*
-	 * The user can ask for the desired rx page size by passing the
-	 * value in struct io_uring_zcrx_ifq_reg::rx_buf_len.
-	 */
-	ZCRX_FEATURE_RX_PAGE_SIZE	= 1 << 0,
-};
-
-/*
- * Argument for IORING_REGISTER_ZCRX_IFQ
- */
-struct io_uring_zcrx_ifq_reg {
-	__u32	if_idx;
-	__u32	if_rxq;
-	__u32	rq_entries;
-	__u32	flags;
-
-	__u64	area_ptr; /* pointer to struct io_uring_zcrx_area_reg */
-	__u64	region_ptr; /* struct io_uring_region_desc * */
-
-	struct io_uring_zcrx_offsets offsets;
-	__u32	zcrx_id;
-	__u32	rx_buf_len;
-	__u64	__resv[3];
-};
-
-enum zcrx_ctrl_op {
-	ZCRX_CTRL_FLUSH_RQ,
-	ZCRX_CTRL_EXPORT,
-
-	__ZCRX_CTRL_LAST,
-};
-
-struct zcrx_ctrl_flush_rq {
-	__u64		__resv[6];
-};
-
-struct zcrx_ctrl_export {
-	__u32		zcrx_fd;
-	__u32 		__resv1[11];
-};
-
-struct zcrx_ctrl {
-	__u32	zcrx_id;
-	__u32	op; /* see enum zcrx_ctrl_op */
-	__u64	__resv[2];
-
-	union {
-		struct zcrx_ctrl_export		zc_export;
-		struct zcrx_ctrl_flush_rq	zc_flush;
-	};
 };
 
 #ifdef __cplusplus
