@@ -21,6 +21,7 @@ my $input_name  = (split m|/|, $in_file)[-1];
 my $script_name = (split m|/|, $0)[-1];
 my @list     = ();
 my %seen     = ();
+my $current_class = "";
 
 # Parse annotated entries from the input file
 open(my $in, "<", $in_file) or die "Cannot open $in_file: $!";
@@ -43,6 +44,20 @@ if ($in_file =~ /nterr\.h$/) {
 				$val |= hex($part);
 			}
 			push @list, { val => $val, name => $name, class => $class, code => $code };
+		}
+	}
+} elsif ($in_file =~ /smberr\.h$/) {
+	while (<$in>) {
+		# Detect current error class from header comments (ERRDOS or ERRSRV)
+		if (/generated with the (\w+) error class/) {
+			$current_class = $1;
+		}
+
+		# Match #define ERR... <value> // -POSIX_ERR
+		if (/^\s*#define\s+(ERR[A-Za-z0-9_]+)\s+([0-9a-fA-FxX]+)\s*\/\/\s*(-[A-Z0-9_]+)/) {
+			my ($name, $val_str, $error) = ($1, $2, $3);
+			my $val = ($val_str =~ /^0x/i) ? hex($val_str) : $val_str;
+			push @list, { val => $val, name => $name, error => $error, class => $current_class };
 		}
 	}
 }
@@ -79,6 +94,16 @@ if ($in_file =~ /nterr\.h$/) {
 		printf $out "\t{ %s, %s, 0x%08x, \"%s\" },\n", $e->{class}, $e->{code}, $val, $full_names;
 
 		$full_names = "";
+	}
+} elsif ($in_file =~ /smberr\.h$/) {
+	# Generate SMB1 error -> POSIX error mapping file smb1_err_dos_map.c and smb1_err_srv_map.c
+
+	# Filtered by dos/srv
+	my $filter = ($out_file =~ /dos/) ? "ERRDOS" : ($out_file =~ /srv/ ? "ERRSRV" : "");
+	foreach my $e (@list) {
+		if (!$filter || $e->{class} eq $filter) {
+			printf $out "\t{%s, %s},\n", $e->{name}, $e->{error};
+		}
 	}
 }
 close($out);
