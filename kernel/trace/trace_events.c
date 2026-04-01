@@ -1718,7 +1718,7 @@ static int t_show_filters(struct seq_file *m, void *v)
 
 	len = get_call_len(call);
 
-	seq_printf(m, "%s:%s%*.s%s\n", call->class->system,
+	seq_printf(m, "%s:%s%*s%s\n", call->class->system,
 		   trace_event_name(call), len, "", filter->filter_string);
 
 	return 0;
@@ -1750,7 +1750,7 @@ static int t_show_triggers(struct seq_file *m, void *v)
 	len = get_call_len(call);
 
 	list_for_each_entry_rcu(data, &file->triggers, list) {
-		seq_printf(m, "%s:%s%*.s", call->class->system,
+		seq_printf(m, "%s:%s%*s", call->class->system,
 			   trace_event_name(call), len, "");
 
 		data->cmd_ops->print(m, data);
@@ -2184,12 +2184,12 @@ static int trace_format_open(struct inode *inode, struct file *file)
 static ssize_t
 event_id_read(struct file *filp, char __user *ubuf, size_t cnt, loff_t *ppos)
 {
-	int id = (long)event_file_data(filp);
+	/* id is directly in i_private and available for inode's lifetime. */
+	int id = (long)file_inode(filp)->i_private;
 	char buf[32];
 	int len;
 
-	if (unlikely(!id))
-		return -ENODEV;
+	WARN_ON(!id);
 
 	len = sprintf(buf, "%d\n", id);
 
@@ -2247,12 +2247,8 @@ event_filter_write(struct file *filp, const char __user *ubuf, size_t cnt,
 
 	mutex_lock(&event_mutex);
 	file = event_file_file(filp);
-	if (file) {
-		if (file->flags & EVENT_FILE_FL_FREED)
-			err = -ENODEV;
-		else
-			err = apply_event_filter(file, buf);
-	}
+	if (file)
+		err = apply_event_filter(file, buf);
 	mutex_unlock(&event_mutex);
 
 	kfree(buf);
