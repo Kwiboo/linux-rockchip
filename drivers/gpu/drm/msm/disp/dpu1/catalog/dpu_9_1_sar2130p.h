@@ -298,7 +298,6 @@ static const struct dpu_wb_cfg sar2130p_wb[] = {
 		.format_list = wb2_formats_rgb_yuv,
 		.num_formats = ARRAY_SIZE(wb2_formats_rgb_yuv),
 		.xin_id = 6,
-		.vbif_idx = VBIF_RT,
 		.maxlinewidth = 4096,
 		.intr_wb_done = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR, 4),
 	},
@@ -400,8 +399,7 @@ const struct dpu_mdss_cfg dpu_sar2130p_cfg = {
 	.wb = sar2130p_wb,
 	.intf_count = ARRAY_SIZE(sar2130p_intf),
 	.intf = sar2130p_intf,
-	.vbif_count = ARRAY_SIZE(sm8550_vbif),
-	.vbif = sm8550_vbif,
+	.vbif = &sm8550_vbif,
 	.perf = &sar2130p_perf_data,
 };
 

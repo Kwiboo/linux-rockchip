@@ -364,7 +364,6 @@ static const struct dpu_wb_cfg sm8750_wb[] = {
 		.format_list = wb2_formats_rgb_yuv,
 		.num_formats = ARRAY_SIZE(wb2_formats_rgb_yuv),
 		.xin_id = 6,
-		.vbif_idx = VBIF_RT,
 		.maxlinewidth = 4096,
 		.intr_wb_done = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR, 4),
 	},
@@ -486,8 +485,7 @@ const struct dpu_mdss_cfg dpu_sm8750_cfg = {
 	.cwb = sm8650_cwb,
 	.intf_count = ARRAY_SIZE(sm8750_intf),
 	.intf = sm8750_intf,
-	.vbif_count = ARRAY_SIZE(sm8650_vbif),
-	.vbif = sm8650_vbif,
+	.vbif = &sm8650_vbif,
 	.perf = &sm8750_perf_data,
 };
 
