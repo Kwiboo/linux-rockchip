@@ -8,6 +8,8 @@
 #include <linux/mount.h>
 #include <linux/pid.h>
 #include <linux/pidfs.h>
+#include <linux/sched/signal.h>
+#include <linux/signal.h>
 #include <linux/pid_namespace.h>
 #include <linux/poll.h>
 #include <linux/proc_fs.h>
@@ -22,6 +24,7 @@
 #include <net/net_namespace.h>
 #include <linux/coredump.h>
 #include <linux/rhashtable.h>
+#include <linux/llist.h>
 #include <linux/xattr.h>
 #include <linux/cookie.h>
 
@@ -31,7 +34,6 @@
 #define PIDFS_PID_DEAD ERR_PTR(-ESRCH)
 
 static struct kmem_cache *pidfs_attr_cachep __ro_after_init;
-static struct kmem_cache *pidfs_xattr_cachep __ro_after_init;
 
 static struct path pidfs_root_path = {};
 
@@ -46,9 +48,8 @@ enum pidfs_attr_mask_bits {
 	PIDFS_ATTR_BIT_COREDUMP	= 1,
 };
 
-struct pidfs_attr {
+struct pidfs_anon_attr {
 	unsigned long attr_mask;
-	struct simple_xattrs *xattrs;
 	struct /* exit info */ {
 		__u64 cgroupid;
 		__s32 exit_code;
@@ -93,6 +94,13 @@ static const struct rhashtable_params pidfs_ino_ht_params = {
  * inode number and the inode generation number to compare or
  * use file handles.
  */
+struct pidfs_attr {
+	struct simple_xattrs *xattrs;
+	union {
+		struct pidfs_anon_attr;
+		struct llist_node pidfs_llist;
+	};
+};
 
 #if BITS_PER_LONG == 32
 
@@ -178,10 +186,30 @@ void pidfs_remove_pid(struct pid *pid)
 				       pidfs_ino_ht_params);
 }
 
+static LLIST_HEAD(pidfs_free_list);
+
+static void pidfs_free_attr_work(struct work_struct *work)
+{
+	struct pidfs_attr *attr, *next;
+	struct llist_node *head;
+
+	head = llist_del_all(&pidfs_free_list);
+	llist_for_each_entry_safe(attr, next, head, pidfs_llist) {
+		struct simple_xattrs *xattrs = attr->xattrs;
+
+		if (xattrs) {
+			simple_xattrs_free(xattrs, NULL);
+			kfree(xattrs);
+		}
+		kfree(attr);
+	}
+}
+
+static DECLARE_WORK(pidfs_free_work, pidfs_free_attr_work);
+
 void pidfs_free_pid(struct pid *pid)
 {
-	struct pidfs_attr *attr __free(kfree) = no_free_ptr(pid->attr);
-	struct simple_xattrs *xattrs __free(kfree) = NULL;
+	struct pidfs_attr *attr = pid->attr;
 
 	/*
 	 * Any dentry must've been wiped from the pid by now.
@@ -200,9 +228,10 @@ void pidfs_free_pid(struct pid *pid)
 	if (IS_ERR(attr))
 		return;
 
-	xattrs = no_free_ptr(attr->xattrs);
-	if (xattrs)
-		simple_xattrs_free(xattrs, NULL);
+	if (likely(!attr->xattrs))
+		kfree(attr);
+	else if (llist_add(&attr->pidfs_llist, &pidfs_free_list))
+		schedule_work(&pidfs_free_work);
 }
 
 #ifdef CONFIG_PROC_FS
@@ -635,7 +664,28 @@ static long pidfd_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	return open_namespace(ns_common);
 }
 
+static int pidfs_file_release(struct inode *inode, struct file *file)
+{
+	struct pid *pid = inode->i_private;
+	struct task_struct *task;
+
+	if (!(file->f_flags & PIDFD_AUTOKILL))
+		return 0;
+
+	guard(rcu)();
+	task = pid_task(pid, PIDTYPE_TGID);
+	if (!task)
+		return 0;
+
+	/* Not available for kthreads or user workers for now. */
+	if (WARN_ON_ONCE(task->flags & (PF_KTHREAD | PF_USER_WORKER)))
+		return 0;
+	do_send_sig_info(SIGKILL, SEND_SIG_PRIV, task, PIDTYPE_TGID);
+	return 0;
+}
+
 static const struct file_operations pidfs_file_operations = {
+	.release	= pidfs_file_release,
 	.poll		= pidfd_poll,
 #ifdef CONFIG_PROC_FS
 	.show_fdinfo	= pidfd_show_fdinfo,
@@ -1009,7 +1059,7 @@ static int pidfs_xattr_get(const struct xattr_handler *handler,
 
 	xattrs = READ_ONCE(attr->xattrs);
 	if (!xattrs)
-		return 0;
+		return -ENODATA;
 
 	name = xattr_full_name(handler, suffix);
 	return simple_xattr_get(xattrs, name, value, size);
@@ -1029,22 +1079,16 @@ static int pidfs_xattr_set(const struct xattr_handler *handler,
 	/* Ensure we're the only one to set @attr->xattrs. */
 	WARN_ON_ONCE(!inode_is_locked(inode));
 
-	xattrs = READ_ONCE(attr->xattrs);
-	if (!xattrs) {
-		xattrs = kmem_cache_zalloc(pidfs_xattr_cachep, GFP_KERNEL);
-		if (!xattrs)
-			return -ENOMEM;
-
-		simple_xattrs_init(xattrs);
-		smp_store_release(&pid->attr->xattrs, xattrs);
-	}
+	xattrs = simple_xattrs_lazy_alloc(&attr->xattrs, value, flags);
+	if (IS_ERR_OR_NULL(xattrs))
+		return PTR_ERR(xattrs);
 
 	name = xattr_full_name(handler, suffix);
 	old_xattr = simple_xattr_set(xattrs, name, value, size, flags);
 	if (IS_ERR(old_xattr))
 		return PTR_ERR(old_xattr);
 
-	simple_xattr_free(old_xattr);
+	simple_xattr_free_rcu(old_xattr);
 	return 0;
 }
 
@@ -1091,11 +1135,11 @@ struct file *pidfs_alloc_file(struct pid *pid, unsigned int flags)
 	int ret;
 
 	/*
-	 * Ensure that PIDFD_STALE can be passed as a flag without
-	 * overloading other uapi pidfd flags.
+	 * Ensure that internal pidfd flags don't overlap with each
+	 * other or with uapi pidfd flags.
 	 */
-	BUILD_BUG_ON(PIDFD_STALE == PIDFD_THREAD);
-	BUILD_BUG_ON(PIDFD_STALE == PIDFD_NONBLOCK);
+	BUILD_BUG_ON(hweight32(PIDFD_THREAD | PIDFD_NONBLOCK |
+				PIDFD_STALE | PIDFD_AUTOKILL) != 4);
 
 	ret = path_from_stashed(&pid->stashed, pidfs_mnt, get_pid(pid), &path);
 	if (ret < 0)
@@ -1106,9 +1150,12 @@ struct file *pidfs_alloc_file(struct pid *pid, unsigned int flags)
 	flags &= ~PIDFD_STALE;
 	flags |= O_RDWR;
 	pidfd_file = dentry_open(&path, flags, current_cred());
-	/* Raise PIDFD_THREAD explicitly as do_dentry_open() strips it. */
+	/*
+	 * Raise PIDFD_THREAD and PIDFD_AUTOKILL explicitly as
+	 * do_dentry_open() strips O_EXCL and O_TRUNC.
+	 */
 	if (!IS_ERR(pidfd_file))
-		pidfd_file->f_flags |= (flags & PIDFD_THREAD);
+		pidfd_file->f_flags |= (flags & (PIDFD_THREAD | PIDFD_AUTOKILL));
 
 	return pidfd_file;
 }
@@ -1121,11 +1168,6 @@ void __init pidfs_init(void)
 	pidfs_attr_cachep = kmem_cache_create("pidfs_attr_cache", sizeof(struct pidfs_attr), 0,
 					 (SLAB_HWCACHE_ALIGN | SLAB_RECLAIM_ACCOUNT |
 					  SLAB_ACCOUNT | SLAB_PANIC), NULL);
-
-	pidfs_xattr_cachep = kmem_cache_create("pidfs_xattr_cache",
-					       sizeof(struct simple_xattrs), 0,
-					       (SLAB_HWCACHE_ALIGN | SLAB_RECLAIM_ACCOUNT |
-						SLAB_ACCOUNT | SLAB_PANIC), NULL);
 
 	pidfs_mnt = kern_mount(&pidfs_type);
 	if (IS_ERR(pidfs_mnt))
