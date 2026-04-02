@@ -273,3 +273,8 @@ syscall_list() {
 
 (ignore_list && syscall_list ${reference_table}) | \
 $* -Wno-error -Wno-unused-macros -E -x c - > /dev/null
+
+# For fixdep
+if [ -n "${DEPFILE}" ]; then
+	echo "${0}: ${0} ${reference_table}" >> "${DEPFILE}"
+fi
