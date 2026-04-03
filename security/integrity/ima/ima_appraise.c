@@ -27,7 +27,7 @@ core_param(ima_appraise, ima_appraise_cmdline_default, charp, 0);
 void __init ima_appraise_parse_cmdline(void)
 {
 	const char *str = ima_appraise_cmdline_default;
-	bool sb_state = arch_ima_get_secureboot();
+	bool sb_state = arch_get_secureboot();
 	int appraisal_state = ima_appraise;
 
 	if (!str)
@@ -590,6 +590,11 @@ out:
 		    (!xattr_value ||
 		     xattr_value->type != EVM_IMA_XATTR_DIGSIG)) {
 			if (!ima_fix_xattr(dentry, iint))
+				status = INTEGRITY_PASS;
+		} else if (status == INTEGRITY_NOLABEL) {
+			if (!evm_fix_hmac(dentry, XATTR_NAME_IMA,
+					  (const char *)xattr_value,
+					  xattr_len))
 				status = INTEGRITY_PASS;
 		}
 
