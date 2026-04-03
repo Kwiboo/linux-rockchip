@@ -8,6 +8,7 @@
 
 #ifndef __ASSEMBLER__
 
+#include <linux/bits.h>
 #include <linux/types.h>
 #include <linux/const.h>
 
