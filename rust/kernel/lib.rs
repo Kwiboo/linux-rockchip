@@ -77,7 +77,6 @@ pub mod bits;
 #[cfg(CONFIG_BLOCK)]
 pub mod block;
 pub mod bug;
-#[doc(hidden)]
 pub mod build_assert;
 pub mod clk;
 #[cfg(CONFIG_CONFIGFS_FS)]
@@ -148,7 +147,6 @@ pub mod sizes;
 pub mod slice;
 #[cfg(CONFIG_SOC_BUS)]
 pub mod soc;
-mod static_assert;
 #[doc(hidden)]
 pub mod std_vendor;
 pub mod str;
