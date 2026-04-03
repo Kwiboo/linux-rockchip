@@ -1812,6 +1812,6 @@ static void __exit glymur_tlmm_exit(void)
 }
 module_exit(glymur_tlmm_exit);
 
-MODULE_DESCRIPTION("QTI GLYMUR TLMM driver");
+MODULE_DESCRIPTION("QTI Glymur TLMM driver");
 MODULE_LICENSE("GPL");
 MODULE_DEVICE_TABLE(of, glymur_tlmm_of_match);
