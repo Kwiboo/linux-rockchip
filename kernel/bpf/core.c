@@ -18,7 +18,6 @@
  */
 
 #include <uapi/linux/btf.h>
-#include <crypto/sha1.h>
 #include <linux/filter.h>
 #include <linux/skbuff.h>
 #include <linux/vmalloc.h>
@@ -2087,11 +2086,11 @@ select_insn:
 		if (unlikely(tail_call_cnt >= MAX_TAIL_CALL_CNT))
 			goto out;
 
-		tail_call_cnt++;
-
 		prog = READ_ONCE(array->ptrs[index]);
 		if (!prog)
 			goto out;
+
+		tail_call_cnt++;
 
 		/* ARG1 at this point is guaranteed to point to CTX from
 		 * the verifier side due to the fact that the tail call is
