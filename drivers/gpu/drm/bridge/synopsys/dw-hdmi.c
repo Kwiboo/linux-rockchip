@@ -3071,10 +3071,13 @@ static void dw_hdmi_hpd_work(struct work_struct *work)
 {
 	struct dw_hdmi *hdmi = container_of(work, struct dw_hdmi, hpd_work.work);
 
-	if (hdmi->bridge.dev) {
+	if (hdmi->connector.dev)
+		drm_connector_helper_hpd_irq_event(&hdmi->connector);
+	else if (hdmi->bridge.dev)
 		drm_helper_hpd_irq_event(hdmi->bridge.dev);
+
+	if (hdmi->bridge.dev)
 		drm_bridge_hpd_notify(&hdmi->bridge, hdmi->last_connector_result);
-	}
 }
 
 static irqreturn_t dw_hdmi_irq(int irq, void *dev_id)
