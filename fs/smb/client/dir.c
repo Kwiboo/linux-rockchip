@@ -287,16 +287,22 @@ static int cifs_do_create(struct inode *inode, struct dentry *direntry, unsigned
 		desired_access |= GENERIC_WRITE;
 	if (rdwr_for_fscache == 1)
 		desired_access |= GENERIC_READ;
+	if (oflags & O_TMPFILE)
+		desired_access |= DELETE;
 
 	disposition = FILE_OVERWRITE_IF;
-	if ((oflags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL))
+	if (oflags & O_CREAT) {
+		if (oflags & O_EXCL)
+			disposition = FILE_CREATE;
+		else if (oflags & O_TRUNC)
+			disposition = FILE_OVERWRITE_IF;
+		else
+			disposition = FILE_OPEN_IF;
+	} else if (oflags & O_TMPFILE) {
 		disposition = FILE_CREATE;
-	else if ((oflags & (O_CREAT | O_TRUNC)) == (O_CREAT | O_TRUNC))
-		disposition = FILE_OVERWRITE_IF;
-	else if ((oflags & O_CREAT) == O_CREAT)
-		disposition = FILE_OPEN_IF;
-	else
+	} else {
 		cifs_dbg(FYI, "Create flag not set in create function\n");
+	}
 
 	/*
 	 * BB add processing to set equivalent of mode - e.g. via CreateX with
@@ -436,15 +442,20 @@ cifs_create_set_dentry:
 		goto out_err;
 	}
 
-	if (newinode)
-		if (S_ISDIR(newinode->i_mode)) {
-			rc = -EISDIR;
-			goto out_err;
-		}
+	if (newinode && S_ISDIR(newinode->i_mode)) {
+		rc = -EISDIR;
+		goto out_err;
+	}
 
 	d_drop(direntry);
-	d_add(direntry, newinode);
-
+	inode_set_mtime_to_ts(inode, inode_set_ctime_current(inode));
+	if (oflags & O_TMPFILE) {
+		set_nlink(newinode, 0);
+		mark_inode_dirty(newinode);
+		d_instantiate(direntry, newinode);
+	} else {
+		d_add(direntry, newinode);
+	}
 out:
 	free_dentry_path(page);
 	return rc;
@@ -957,6 +968,201 @@ static int cifs_ci_compare(const struct dentry *dentry,
 	}
 
 	return 0;
+}
+
+static int set_hidden_attr(const unsigned int xid,
+			   struct TCP_Server_Info *server,
+			   struct file *file)
+{
+	struct dentry *dentry = file->f_path.dentry;
+	struct cifsInodeInfo *cinode = CIFS_I(d_inode(dentry));
+	FILE_BASIC_INFO fi = {
+		.Attributes = cpu_to_le32(cinode->cifsAttrs |
+					  ATTR_HIDDEN),
+	};
+	void *page = alloc_dentry_path();
+	const char *full_path;
+	int rc;
+
+	full_path = build_path_from_dentry(dentry, page);
+	if (IS_ERR(full_path))
+		rc = PTR_ERR(full_path);
+	else
+		rc =  server->ops->set_file_info(d_inode(dentry),
+						 full_path, &fi, xid);
+	free_dentry_path(page);
+	return rc;
+}
+
+static void cifs_d_mark_tmpfile(struct file *file,
+				const unsigned char *name,
+				size_t namelen)
+{
+	struct dentry *dentry = file->f_path.dentry;
+
+	BUG_ON(dentry->d_name.name != dentry->d_shortname.string ||
+	       !hlist_unhashed(&dentry->d_u.d_alias) ||
+	       !d_unlinked(dentry) ||
+	       namelen > DNAME_INLINE_LEN - 1);
+	spin_lock(&dentry->d_parent->d_lock);
+	spin_lock_nested(&dentry->d_lock, DENTRY_D_LOCK_NESTED);
+	dentry->__d_name.len = sprintf(dentry->d_shortname.string, "%.*s",
+				       (int)namelen, name);
+	spin_unlock(&dentry->d_lock);
+	spin_unlock(&dentry->d_parent->d_lock);
+}
+
+static int set_tmpfile_name(struct file *file)
+{
+	struct dentry *dentry = file->f_path.dentry;
+	unsigned char name[CIFS_TMPNAME_LEN + 1];
+	struct dentry *sdentry = NULL;
+
+	do {
+		dput(sdentry);
+		scnprintf(name, sizeof(name),
+			  CIFS_TMPNAME_PREFIX "%0*x",
+			  CIFS_TMPNAME_COUNTER_LEN,
+			  atomic_inc_return(&cifs_tmpcounter));
+		sdentry = lookup_noperm_unlocked(&QSTR(name), dentry->d_parent);
+		if (IS_ERR(sdentry))
+			return -EBUSY;
+	} while (!d_is_negative(sdentry));
+	dput(sdentry);
+	cifs_d_mark_tmpfile(file, name, sizeof(name) - 1);
+	return 0;
+}
+
+int cifs_tmpfile(struct mnt_idmap *idmap, struct inode *dir,
+		 struct file *file, umode_t mode)
+{
+	struct dentry *dentry = file->f_path.dentry;
+	struct cifs_sb_info *cifs_sb = CIFS_SB(dir);
+	struct TCP_Server_Info *server;
+	struct cifs_pending_open open;
+	struct cifsFileInfo *cfile;
+	struct cifs_fid fid = {};
+	struct tcon_link *tlink;
+	struct cifs_tcon *tcon;
+	unsigned int sbflags;
+	unsigned int xid;
+	__u32 oplock;
+	int rc;
+
+	if (unlikely(cifs_forced_shutdown(cifs_sb)))
+		return smb_EIO(smb_eio_trace_forced_shutdown);
+
+	tlink = cifs_sb_tlink(cifs_sb);
+	if (IS_ERR(tlink))
+		return PTR_ERR(tlink);
+	tcon = tlink_tcon(tlink);
+	server = tcon->ses->server;
+
+	xid = get_xid();
+
+	if (server->vals->protocol_id < SMB20_PROT_ID) {
+		cifs_dbg(VFS | ONCE, "O_TMPFILE is supported only in SMB2+\n");
+		rc = -EOPNOTSUPP;
+		goto out;
+	}
+
+	rc = set_tmpfile_name(file);
+	if (rc)
+		goto out;
+
+	if (server->ops->new_lease_key)
+		server->ops->new_lease_key(&fid);
+	cifs_add_pending_open(&fid, tlink, &open);
+
+	rc = cifs_do_create(dir, dentry, xid, tlink, file->f_flags,
+			    mode, &oplock, &fid, NULL);
+	if (rc) {
+		cifs_del_pending_open(&open);
+		goto out;
+	}
+
+	rc = finish_open(file, dentry, generic_file_open);
+	if (rc)
+		goto err_open;
+
+	sbflags = cifs_sb_flags(cifs_sb);
+	if ((file->f_flags & O_DIRECT) && (sbflags & CIFS_MOUNT_STRICT_IO)) {
+		if (sbflags & CIFS_MOUNT_NO_BRL)
+			file->f_op = &cifs_file_direct_nobrl_ops;
+		else
+			file->f_op = &cifs_file_direct_ops;
+	}
+
+	cfile = cifs_new_fileinfo(&fid, file, tlink, oplock, NULL);
+	if (!cfile) {
+		rc = -ENOMEM;
+		goto err_open;
+	}
+
+	rc = set_hidden_attr(xid, server, file);
+	if (rc)
+		goto out;
+
+	fscache_use_cookie(cifs_inode_cookie(file_inode(file)),
+			   file->f_mode & FMODE_WRITE);
+out:
+	cifs_put_tlink(tlink);
+	free_xid(xid);
+	return rc;
+err_open:
+	cifs_del_pending_open(&open);
+	if (server->ops->close)
+		server->ops->close(xid, tcon, &fid);
+	goto out;
+}
+
+static char *__cifs_silly_fullpath(struct dentry *dentry,
+				   const unsigned char *name,
+				   size_t namelen)
+{
+	struct cifs_sb_info *cifs_sb = CIFS_SB(dentry);
+	char *page = alloc_dentry_path();
+	const char *path;
+	char *npath;
+	size_t len;
+
+	path = build_path_from_dentry(dentry->d_parent, page);
+	if (IS_ERR(path)) {
+		npath = ERR_CAST(path);
+		goto out;
+	}
+
+	len = strlen(path) + namelen + 2;
+	npath = kmalloc(len, GFP_KERNEL);
+	if (npath) {
+		scnprintf(npath, len, "%s%c%s", path,
+			  CIFS_DIR_SEP(cifs_sb), name);
+	} else {
+		npath = ERR_PTR(-ENOMEM);
+	}
+out:
+	free_dentry_path(page);
+	return npath;
+}
+
+char *cifs_silly_fullpath(struct dentry *dentry)
+{
+	unsigned char name[CIFS_SILLYNAME_LEN + 1];
+	size_t namesize = sizeof(name);
+	struct dentry *sdentry = NULL;
+
+	do {
+		dput(sdentry);
+		scnprintf(name, namesize,
+			  CIFS_SILLYNAME_PREFIX "%0*x",
+			  CIFS_SILLYNAME_COUNTER_LEN,
+			  atomic_inc_return(&cifs_sillycounter));
+		sdentry = lookup_noperm(&QSTR(name), dentry->d_parent);
+		if (IS_ERR(sdentry))
+			return ERR_PTR(-EBUSY);
+	} while (!d_is_negative(sdentry));
+	dput(sdentry);
+	return __cifs_silly_fullpath(dentry, name, namesize - 1);
 }
 
 const struct dentry_operations cifs_ci_dentry_ops = {
