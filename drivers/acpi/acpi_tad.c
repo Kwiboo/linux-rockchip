@@ -2,12 +2,10 @@
 /*
  * ACPI Time and Alarm (TAD) Device Driver
  *
- * Copyright (C) 2018 Intel Corporation
+ * Copyright (C) 2018 - 2026 Intel Corporation
  * Author: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
  *
- * This driver is based on Section 9.18 of the ACPI 6.2 specification revision.
- *
- * It only supports the system wakeup capabilities of the TAD.
+ * This driver is based on ACPI 6.6, Section 9.17.
  *
  * Provided are sysfs attributes, available under the TAD platform device,
  * allowing user space to manage the AC and DC wakeup timers of the TAD:
@@ -18,6 +16,11 @@
  *
  * The wakeup events handling and power management of the TAD is expected to
  * be taken care of by the ACPI PM domain attached to its platform device.
+ *
+ * If the TAD supports the get/set real time features, as indicated by the
+ * capability mask returned by _GCP under the TAD object, additional sysfs
+ * attributes are created allowing the real time to be set and read and an RTC
+ * class device is registered under the TAD platform device.
  */
 
 #include <linux/acpi.h>
@@ -25,13 +28,14 @@
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/rtc.h>
 #include <linux/suspend.h>
 
 MODULE_DESCRIPTION("ACPI Time and Alarm (TAD) Device Driver");
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Rafael J. Wysocki");
 
-/* ACPI TAD capability flags (ACPI 6.2, Section 9.18.2) */
+/* ACPI TAD capability flags (ACPI 6.6, Section 9.17.2) */
 #define ACPI_TAD_AC_WAKE	BIT(0)
 #define ACPI_TAD_DC_WAKE	BIT(1)
 #define ACPI_TAD_RT		BIT(2)
@@ -48,6 +52,10 @@ MODULE_AUTHOR("Rafael J. Wysocki");
 
 /* Special value for disabled timer or expired timer wake policy. */
 #define ACPI_TAD_WAKE_DISABLED	(~(u32)0)
+
+/* ACPI TAD RTC */
+#define ACPI_TAD_TZ_UNSPEC	2047
+#define ACPI_TAD_TIME_ISDST	3
 
 struct acpi_tad_driver_data {
 	u32 capabilities;
@@ -67,6 +75,16 @@ struct acpi_tad_rt {
 	u8 padding[3]; /* must be 0 */
 } __packed;
 
+static bool acpi_tad_rt_is_invalid(struct acpi_tad_rt *rt)
+{
+	return rt->year < 1900 || rt->year > 9999 ||
+	    rt->month < 1 || rt->month > 12 ||
+	    rt->hour > 23 || rt->minute > 59 || rt->second > 59 ||
+	    rt->tz < -1440 ||
+	    (rt->tz > 1440 && rt->tz != ACPI_TAD_TZ_UNSPEC) ||
+	    rt->daylight > 3;
+}
+
 static int acpi_tad_set_real_time(struct device *dev, struct acpi_tad_rt *rt)
 {
 	acpi_handle handle = ACPI_HANDLE(dev);
@@ -80,12 +98,12 @@ static int acpi_tad_set_real_time(struct device *dev, struct acpi_tad_rt *rt)
 	unsigned long long retval;
 	acpi_status status;
 
-	if (rt->year < 1900 || rt->year > 9999 ||
-	    rt->month < 1 || rt->month > 12 ||
-	    rt->hour > 23 || rt->minute > 59 || rt->second > 59 ||
-	    rt->tz < -1440 || (rt->tz > 1440 && rt->tz != 2047) ||
-	    rt->daylight > 3)
-		return -ERANGE;
+	if (acpi_tad_rt_is_invalid(rt))
+		return -EINVAL;
+
+	rt->valid = 0;
+	rt->msec = 0;
+	memset(rt->padding, 0, 3);
 
 	args[0].buffer.pointer = (u8 *)rt;
 	args[0].buffer.length = sizeof(*rt);
@@ -145,8 +163,13 @@ static int acpi_tad_get_real_time(struct device *dev, struct acpi_tad_rt *rt)
 	if (ret)
 		return ret;
 
+	if (acpi_tad_rt_is_invalid(rt))
+		return -ENODATA;
+
 	return 0;
 }
+
+/* sysfs interface */
 
 static char *acpi_tad_rt_next_field(char *s, int *val)
 {
@@ -167,69 +190,65 @@ static ssize_t time_store(struct device *dev, struct device_attribute *attr,
 			  const char *buf, size_t count)
 {
 	struct acpi_tad_rt rt;
-	char *str, *s;
-	int val, ret = -ENODATA;
+	int val, ret;
+	char *s;
 
-	str = kmemdup_nul(buf, count, GFP_KERNEL);
+	char *str __free(kfree) = kmemdup_nul(buf, count, GFP_KERNEL);
 	if (!str)
 		return -ENOMEM;
 
 	s = acpi_tad_rt_next_field(str, &val);
 	if (!s)
-		goto out_free;
+		return -ENODATA;
 
 	rt.year = val;
 
 	s = acpi_tad_rt_next_field(s, &val);
 	if (!s)
-		goto out_free;
+		return -ENODATA;
 
 	rt.month = val;
 
 	s = acpi_tad_rt_next_field(s, &val);
 	if (!s)
-		goto out_free;
+		return -ENODATA;
 
 	rt.day = val;
 
 	s = acpi_tad_rt_next_field(s, &val);
 	if (!s)
-		goto out_free;
+		return -ENODATA;
 
 	rt.hour = val;
 
 	s = acpi_tad_rt_next_field(s, &val);
 	if (!s)
-		goto out_free;
+		return -ENODATA;
 
 	rt.minute = val;
 
 	s = acpi_tad_rt_next_field(s, &val);
 	if (!s)
-		goto out_free;
+		return -ENODATA;
 
 	rt.second = val;
 
 	s = acpi_tad_rt_next_field(s, &val);
 	if (!s)
-		goto out_free;
+		return -ENODATA;
 
 	rt.tz = val;
 
 	if (kstrtoint(s, 10, &val))
-		goto out_free;
+		return -ENODATA;
 
 	rt.daylight = val;
 
-	rt.valid = 0;
-	rt.msec = 0;
-	memset(rt.padding, 0, 3);
-
 	ret = acpi_tad_set_real_time(dev, &rt);
+	if (ret)
+		return ret;
 
-out_free:
-	kfree(str);
-	return ret ? ret : count;
+	return count;
 }
 
 static ssize_t time_show(struct device *dev, struct device_attribute *attr,
@@ -248,14 +267,6 @@ static ssize_t time_show(struct device *dev, struct device_attribute *attr,
 }
 
 static DEVICE_ATTR_RW(time);
-
-static struct attribute *acpi_tad_time_attrs[] = {
-	&dev_attr_time.attr,
-	NULL,
-};
-static const struct attribute_group acpi_tad_time_attr_group = {
-	.attrs	= acpi_tad_time_attrs,
-};
 
 static int acpi_tad_wake_set(struct device *dev, char *method, u32 timer_id,
 			     u32 value)
@@ -486,17 +497,6 @@ static ssize_t ac_status_show(struct device *dev, struct device_attribute *attr,
 
 static DEVICE_ATTR_RW(ac_status);
 
-static struct attribute *acpi_tad_attrs[] = {
-	&dev_attr_caps.attr,
-	&dev_attr_ac_alarm.attr,
-	&dev_attr_ac_policy.attr,
-	&dev_attr_ac_status.attr,
-	NULL,
-};
-static const struct attribute_group acpi_tad_attr_group = {
-	.attrs	= acpi_tad_attrs,
-};
-
 static ssize_t dc_alarm_store(struct device *dev, struct device_attribute *attr,
 			      const char *buf, size_t count)
 {
@@ -545,15 +545,116 @@ static ssize_t dc_status_show(struct device *dev, struct device_attribute *attr,
 
 static DEVICE_ATTR_RW(dc_status);
 
-static struct attribute *acpi_tad_dc_attrs[] = {
+static struct attribute *acpi_tad_attrs[] = {
+	&dev_attr_caps.attr,
+	&dev_attr_ac_alarm.attr,
+	&dev_attr_ac_policy.attr,
+	&dev_attr_ac_status.attr,
 	&dev_attr_dc_alarm.attr,
 	&dev_attr_dc_policy.attr,
 	&dev_attr_dc_status.attr,
+	&dev_attr_time.attr,
 	NULL,
 };
-static const struct attribute_group acpi_tad_dc_attr_group = {
-	.attrs	= acpi_tad_dc_attrs,
+
+static umode_t acpi_tad_attr_is_visible(struct kobject *kobj,
+					struct attribute *a, int n)
+{
+	struct acpi_tad_driver_data *dd = dev_get_drvdata(kobj_to_dev(kobj));
+
+	if (a == &dev_attr_caps.attr)
+		return a->mode;
+
+	if ((dd->capabilities & ACPI_TAD_AC_WAKE) &&
+	    (a == &dev_attr_ac_alarm.attr || a == &dev_attr_ac_policy.attr ||
+	     a == &dev_attr_ac_status.attr))
+		return a->mode;
+
+	if ((dd->capabilities & ACPI_TAD_DC_WAKE) &&
+	    (a == &dev_attr_dc_alarm.attr || a == &dev_attr_dc_policy.attr ||
+	     a == &dev_attr_dc_status.attr))
+		return a->mode;
+
+	if ((dd->capabilities & ACPI_TAD_RT) && a == &dev_attr_time.attr)
+		return a->mode;
+
+	return 0;
+}
+
+static const struct attribute_group acpi_tad_attr_group = {
+	.attrs	= acpi_tad_attrs,
+	.is_visible = acpi_tad_attr_is_visible,
 };
+
+static const struct attribute_group *acpi_tad_attr_groups[] = {
+	&acpi_tad_attr_group,
+	NULL,
+};
+
+#ifdef CONFIG_RTC_CLASS
+/* RTC class device interface */
+
+static int acpi_tad_rtc_set_time(struct device *dev, struct rtc_time *tm)
+{
+	struct acpi_tad_rt rt;
+
+	rt.year = tm->tm_year + 1900;
+	rt.month = tm->tm_mon + 1;
+	rt.day = tm->tm_mday;
+	rt.hour = tm->tm_hour;
+	rt.minute = tm->tm_min;
+	rt.second = tm->tm_sec;
+	rt.tz = ACPI_TAD_TZ_UNSPEC;
+	rt.daylight = ACPI_TAD_TIME_ISDST * !!tm->tm_isdst;
+
+	return acpi_tad_set_real_time(dev, &rt);
+}
+
+static int acpi_tad_rtc_read_time(struct device *dev, struct rtc_time *tm)
+{
+	struct acpi_tad_rt rt;
+	int ret;
+
+	ret = acpi_tad_get_real_time(dev, &rt);
+	if (ret)
+		return ret;
+
+	tm->tm_year = rt.year - 1900;
+	tm->tm_mon = rt.month - 1;
+	tm->tm_mday = rt.day;
+	tm->tm_hour = rt.hour;
+	tm->tm_min = rt.minute;
+	tm->tm_sec = rt.second;
+	tm->tm_isdst = rt.daylight == ACPI_TAD_TIME_ISDST;
+
+	return 0;
+}
+
+static const struct rtc_class_ops acpi_tad_rtc_ops = {
+	.read_time = acpi_tad_rtc_read_time,
+	.set_time = acpi_tad_rtc_set_time,
+};
+
+static void acpi_tad_register_rtc(struct device *dev)
+{
+	struct rtc_device *rtc;
+
+	rtc = devm_rtc_allocate_device(dev);
+	if (IS_ERR(rtc))
+		return;
+
+	rtc->range_min = mktime64(1900,  1,  1,  0,  0,  0);
+	rtc->range_max = mktime64(9999, 12, 31, 23, 59, 59);
+
+	rtc->ops = &acpi_tad_rtc_ops;
+
+	devm_rtc_register_device(rtc);
+}
+#else /* !CONFIG_RTC_CLASS */
+static inline void acpi_tad_register_rtc(struct device *dev) {}
+#endif /* !CONFIG_RTC_CLASS */
+
+/* Platform driver interface */
 
 static int acpi_tad_disable_timer(struct device *dev, u32 timer_id)
 {
@@ -563,22 +664,15 @@ static int acpi_tad_disable_timer(struct device *dev, u32 timer_id)
 static void acpi_tad_remove(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	acpi_handle handle = ACPI_HANDLE(dev);
 	struct acpi_tad_driver_data *dd = dev_get_drvdata(dev);
 
 	device_init_wakeup(dev, false);
 
-	if (dd->capabilities & ACPI_TAD_RT)
-		sysfs_remove_group(&dev->kobj, &acpi_tad_time_attr_group);
-
-	if (dd->capabilities & ACPI_TAD_DC_WAKE)
-		sysfs_remove_group(&dev->kobj, &acpi_tad_dc_attr_group);
-
-	sysfs_remove_group(&dev->kobj, &acpi_tad_attr_group);
-
 	scoped_guard(pm_runtime_noresume, dev) {
-		acpi_tad_disable_timer(dev, ACPI_TAD_AC_TIMER);
-		acpi_tad_clear_status(dev, ACPI_TAD_AC_TIMER);
+		if (dd->capabilities & ACPI_TAD_AC_WAKE) {
+			acpi_tad_disable_timer(dev, ACPI_TAD_AC_TIMER);
+			acpi_tad_clear_status(dev, ACPI_TAD_AC_TIMER);
+		}
 		if (dd->capabilities & ACPI_TAD_DC_WAKE) {
 			acpi_tad_disable_timer(dev, ACPI_TAD_DC_TIMER);
 			acpi_tad_clear_status(dev, ACPI_TAD_DC_TIMER);
@@ -587,7 +681,6 @@ static void acpi_tad_remove(struct platform_device *pdev)
 
 	pm_runtime_suspend(dev);
 	pm_runtime_disable(dev);
-	acpi_remove_cmos_rtc_space_handler(handle);
 }
 
 static int acpi_tad_probe(struct platform_device *pdev)
@@ -597,13 +690,7 @@ static int acpi_tad_probe(struct platform_device *pdev)
 	struct acpi_tad_driver_data *dd;
 	acpi_status status;
 	unsigned long long caps;
-	int ret;
 
-	ret = acpi_install_cmos_rtc_space_handler(handle);
-	if (ret < 0) {
-		dev_info(dev, "Unable to install space handler\n");
-		return -ENODEV;
-	}
 	/*
 	 * Initialization failure messages are mostly about firmware issues, so
 	 * print them at the "info" level.
@@ -611,27 +698,20 @@ static int acpi_tad_probe(struct platform_device *pdev)
 	status = acpi_evaluate_integer(handle, "_GCP", NULL, &caps);
 	if (ACPI_FAILURE(status)) {
 		dev_info(dev, "Unable to get capabilities\n");
-		ret = -ENODEV;
-		goto remove_handler;
-	}
-
-	if (!(caps & ACPI_TAD_AC_WAKE)) {
-		dev_info(dev, "Unsupported capabilities\n");
-		ret = -ENODEV;
-		goto remove_handler;
+		return -ENODEV;
 	}
 
 	if (!acpi_has_method(handle, "_PRW")) {
 		dev_info(dev, "Missing _PRW\n");
-		ret = -ENODEV;
-		goto remove_handler;
+		caps &= ~(ACPI_TAD_AC_WAKE | ACPI_TAD_DC_WAKE);
 	}
 
+	if (!(caps & ACPI_TAD_AC_WAKE))
+		caps &= ~ACPI_TAD_DC_WAKE;
+
 	dd = devm_kzalloc(dev, sizeof(*dd), GFP_KERNEL);
-	if (!dd) {
-		ret = -ENOMEM;
-		goto remove_handler;
-	}
+	if (!dd)
+		return -ENOMEM;
 
 	dd->capabilities = caps;
 	dev_set_drvdata(dev, dd);
@@ -642,9 +722,12 @@ static int acpi_tad_probe(struct platform_device *pdev)
 	 * runtime suspend.  Everything else should be taken care of by the ACPI
 	 * PM domain callbacks.
 	 */
-	device_init_wakeup(dev, true);
-	dev_pm_set_driver_flags(dev, DPM_FLAG_SMART_SUSPEND |
-				     DPM_FLAG_MAY_SKIP_RESUME);
+	if (ACPI_TAD_AC_WAKE) {
+		device_init_wakeup(dev, true);
+		dev_pm_set_driver_flags(dev, DPM_FLAG_SMART_SUSPEND |
+					     DPM_FLAG_MAY_SKIP_RESUME);
+	}
+
 	/*
 	 * The platform bus type layer tells the ACPI PM domain powers up the
 	 * device, so set the runtime PM status of it to "active".
@@ -653,32 +736,10 @@ static int acpi_tad_probe(struct platform_device *pdev)
 	pm_runtime_enable(dev);
 	pm_runtime_suspend(dev);
 
-	ret = sysfs_create_group(&dev->kobj, &acpi_tad_attr_group);
-	if (ret)
-		goto fail;
-
-	if (caps & ACPI_TAD_DC_WAKE) {
-		ret = sysfs_create_group(&dev->kobj, &acpi_tad_dc_attr_group);
-		if (ret)
-			goto fail;
-	}
-
-	if (caps & ACPI_TAD_RT) {
-		ret = sysfs_create_group(&dev->kobj, &acpi_tad_time_attr_group);
-		if (ret)
-			goto fail;
-	}
+	if (caps & ACPI_TAD_RT)
+		acpi_tad_register_rtc(dev);
 
 	return 0;
-
-fail:
-	acpi_tad_remove(pdev);
-	/* Don't fallthrough because cmos rtc space handler is removed in acpi_tad_remove() */
-	return ret;
-
-remove_handler:
-	acpi_remove_cmos_rtc_space_handler(handle);
-	return ret;
 }
 
 static const struct acpi_device_id acpi_tad_ids[] = {
@@ -690,6 +751,7 @@ static struct platform_driver acpi_tad_driver = {
 	.driver = {
 		.name = "acpi-tad",
 		.acpi_match_table = acpi_tad_ids,
+		.dev_groups = acpi_tad_attr_groups,
 	},
 	.probe = acpi_tad_probe,
 	.remove = acpi_tad_remove,
