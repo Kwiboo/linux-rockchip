@@ -403,16 +403,10 @@ static int scmi_clock_attributes_get(const struct scmi_protocol_handle *ph,
 		    SUPPORTS_RATE_CHANGE_REQUESTED_NOTIF(attributes))
 			clk->rate_change_requested_notifications = true;
 		if (PROTOCOL_REV_MAJOR(ph->version) >= 0x3) {
-			if (SUPPORTS_PARENT_CLOCK(attributes)) {
-				ret = scmi_clock_possible_parents(ph, clk_id, cinfo);
-				if (ret)
-					return ret;
-			}
-			if (SUPPORTS_GET_PERMISSIONS(attributes)) {
-				ret = scmi_clock_get_permissions(ph, clk_id, clk);
-				if (ret)
-					return ret;
-			}
+			if (SUPPORTS_PARENT_CLOCK(attributes))
+				scmi_clock_possible_parents(ph, clk_id, cinfo);
+			if (SUPPORTS_GET_PERMISSIONS(attributes))
+				scmi_clock_get_permissions(ph, clk_id, clk);
 			if (SUPPORTS_EXTENDED_CONFIG(attributes))
 				clk->extended_config = true;
 		}
@@ -1256,12 +1250,8 @@ static int scmi_clock_protocol_init(const struct scmi_protocol_handle *ph)
 	for (clkid = 0; clkid < cinfo->num_clocks; clkid++) {
 		cinfo->clkds[clkid].id = clkid;
 		ret = scmi_clock_attributes_get(ph, clkid, cinfo);
-		if (ret)
-			return ret;
-
-		ret = scmi_clock_describe_rates_get(ph, clkid, cinfo);
-		if (ret)
-			return ret;
+		if (!ret)
+			scmi_clock_describe_rates_get(ph, clkid, cinfo);
 	}
 
 	if (PROTOCOL_REV_MAJOR(ph->version) >= 0x3) {
