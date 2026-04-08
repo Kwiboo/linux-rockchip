@@ -1133,8 +1133,8 @@ cifs_query_dir_first(const unsigned int xid, struct cifs_tcon *tcon,
 
 static int
 cifs_query_dir_next(const unsigned int xid, struct cifs_tcon *tcon,
-		    struct cifs_fid *fid, __u16 search_flags,
-		    struct cifs_search_info *srch_inf)
+		    struct cifs_sb_info *cifs_sb, struct cifs_fid *fid,
+		    __u16 search_flags, struct cifs_search_info *srch_inf)
 {
 	return CIFSFindNext(xid, tcon, fid->netfid, search_flags, srch_inf);
 }

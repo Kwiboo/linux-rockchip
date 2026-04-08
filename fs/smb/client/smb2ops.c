@@ -2487,7 +2487,9 @@ replay_again:
 
 	/*
 	 * Clamp compound Create+QD1+QD2 response sizing to a response size
-	 * for suited for one credit even if CIFSMaxBufSize is tuned larger
+	 * suited for one credit. This keeps the first QueryDir operation
+	 * simple and compatible, while smb2_query_dir_next uses multi-credit
+	 * sizing for larger paginated responses.
 	 */
 	compound_resp_bufsize = min_t(unsigned int, CIFSMaxBufSize,
 				      SMB2_MAX_BUFFER_SIZE);
@@ -2721,11 +2723,138 @@ replay_again:
 
 static int
 smb2_query_dir_next(const unsigned int xid, struct cifs_tcon *tcon,
-		    struct cifs_fid *fid, __u16 search_flags,
-		    struct cifs_search_info *srch_inf)
+		    struct cifs_sb_info *cifs_sb, struct cifs_fid *fid,
+		    __u16 search_flags, struct cifs_search_info *srch_inf)
 {
-	return SMB2_query_directory(xid, tcon, fid->persistent_fid,
-				    fid->volatile_fid, 0, srch_inf);
+	struct cifs_query_dir_io qd_io;
+	struct TCP_Server_Info *server;
+	struct cifs_ses *ses = tcon->ses;
+	size_t buf_size;
+	int rc;
+	int resp_buftype = CIFS_DYNAMIC_BUFFER;
+
+	/* Pick server and determine buffer size based on negotiated rsize */
+	server = cifs_pick_channel(ses);
+	if (!server)
+		return smb_EIO(smb_eio_trace_null_pointers);
+
+	/* Use negotiated transaction size for buffer size, with reasonable limits */
+	/* Prefer max_tx_size (full MaxTransactSize) over maxBuf (one-credit limit) for multi-credit QD */
+	buf_size = server->max_tx_size ? server->max_tx_size : server->maxBuf;
+	if (!buf_size) {
+		/* cifsd could've marked the session for reconnect */
+		rc = -EAGAIN;
+		cifs_dbg(VFS, "%s: failed to get credits: %d\n", __func__, rc);
+		return rc;
+	}
+
+	/* Cap to kmalloc-safe limit before credit reservation to ensure accurate credit accounting */
+	buf_size = min_t(size_t, buf_size, SMB2_MAX_QD_DATABUF_SIZE);
+
+	cifs_dbg(FYI, "%s: buf_size=%zu (max_tx_size=%u maxBuf=%u encrypted=%d)\n",
+		 __func__, buf_size, server->max_tx_size, server->maxBuf, smb3_encryption_required(tcon));
+
+	/* Initialize qd_io structure */
+	memset(&qd_io, 0, sizeof(qd_io));
+	qd_io.tcon = tcon;
+	qd_io.server = server;
+	qd_io.srch_inf = srch_inf;
+	qd_io.xid = xid;
+	qd_io.persistent_fid = fid->persistent_fid;
+	qd_io.volatile_fid = fid->volatile_fid;
+	qd_io.index = 0;
+	qd_io.result = 0;
+	qd_io.replay = false;
+	qd_io.retries = 0;
+	qd_io.cur_sleep = 0;
+
+	/* Allocate credits for the buffer size (now finalized with all caps applied) */
+	rc = server->ops->wait_mtu_credits(server, buf_size, &buf_size,
+					   &qd_io.credits);
+	if (rc) {
+		cifs_dbg(VFS, "%s: failed to get credits: %d\n", __func__, rc);
+		return rc;
+	}
+
+	cifs_dbg(FYI, "%s: allocated %u credits for %zu bytes\n",
+		 __func__, qd_io.credits.value, buf_size);
+
+	/* Send query directory with large buffer and wait for completion */
+	rc = SMB2_query_directory_large(&qd_io, buf_size);
+	if (rc) {
+		if (rc == -ENODATA) {
+			const struct smb2_hdr *hdr = NULL;
+
+			if (qd_io.combined_iov.iov_base)
+				hdr = (const struct smb2_hdr *)qd_io.combined_iov.iov_base;
+			else if (qd_io.iov[0].iov_base)
+				hdr = (const struct smb2_hdr *)qd_io.iov[0].iov_base;
+
+			/*
+			 * ENODATA from QUERY_DIRECTORY generally means enumeration reached
+			 * the end. Treat it as end-of-search even if the header buffer is
+			 * unavailable in this async path.
+			 */
+			if (!hdr) {
+				cifs_dbg(FYI, "%s: ENODATA but hdr is NULL\n", __func__);
+			} else {
+				cifs_dbg(FYI, "%s: ENODATA with hdr->Status=0x%x (STATUS_NO_MORE_FILES=0x%x)\n",
+					 __func__, le32_to_cpu(hdr->Status),
+					 le32_to_cpu(STATUS_NO_MORE_FILES));
+			}
+
+			if (hdr && hdr->Status == STATUS_NO_MORE_FILES) {
+				trace_smb3_query_dir_done(xid, fid->persistent_fid,
+					tcon->tid, tcon->ses->Suid, 0, 0);
+				srch_inf->endOfSearch = true;
+				rc = 0;
+			} else {
+				cifs_dbg(FYI, "%s: ENODATA but Status mismatch - not treating as end-of-search\n",
+					__func__);
+				trace_smb3_query_dir_err(xid, fid->persistent_fid,
+					tcon->tid, tcon->ses->Suid, 0, 0, rc);
+			}
+		} else {
+			trace_smb3_query_dir_err(xid, fid->persistent_fid,
+				tcon->tid, tcon->ses->Suid, 0, 0, rc);
+		}
+		goto qdir_next_exit;
+	}
+
+	/* Parse the response using the combined buffer built in receive handler */
+	if (qd_io.combined_iov.iov_len > 0) {
+		rc = smb2_parse_query_directory(tcon, &qd_io.combined_iov, resp_buftype,
+						srch_inf);
+		if (rc) {
+			trace_smb3_query_dir_err(xid, fid->persistent_fid,
+				tcon->tid, tcon->ses->Suid, 0, 0, rc);
+			kfree(qd_io.combined_iov.iov_base);
+			qd_io.combined_iov.iov_base = NULL;
+			goto qdir_next_exit;
+		}
+
+		/* combined_iov.iov_base ownership transferred to srch_inf->ntwrk_buf_start */
+		qd_io.combined_iov.iov_base = NULL;
+
+		trace_smb3_query_dir_done(xid, fid->persistent_fid,
+			tcon->tid, tcon->ses->Suid, 0,
+			srch_inf->entries_in_buffer);
+	}
+
+qdir_next_exit:
+	/* Free the data buffer if not transferred to srch_inf */
+	kfree(qd_io.combined_iov.iov_base);
+
+	/* Return credits if we still have them (they should have been cleared in callback) */
+	if (qd_io.credits.value != 0) {
+		trace_smb3_rw_credits(0, 0, 0,
+				      server->credits, server->in_flight,
+				      qd_io.credits.value,
+				      cifs_trace_rw_credits_query_dir_done);
+		add_credits(server, &qd_io.credits, 0);
+	}
+
+	return rc;
 }
 
 static int
@@ -4867,6 +4996,252 @@ cifs_copy_folioq_to_iter(struct folio_queue *folioq, size_t data_size,
 }
 
 static int
+cifs_copy_folioq_to_buf(struct folio_queue *folioq, size_t total_size,
+			size_t skip, char *buf, size_t buf_len)
+{
+	size_t copied = 0;
+
+	if (buf_len > total_size - skip)
+		buf_len = total_size - skip;
+
+	for (; folioq; folioq = folioq->next) {
+		for (int s = 0; s < folioq_count(folioq); s++) {
+			struct folio *folio = folioq_folio(folioq, s);
+			size_t fsize = folio_size(folio);
+			size_t len = umin(fsize - skip, buf_len);
+
+			if (len == 0)
+				break;
+
+			memcpy_from_folio(buf + copied, folio, skip, len);
+			copied += len;
+			buf_len -= len;
+			skip = 0;
+
+			if (buf_len == 0)
+				return 0;
+		}
+	}
+
+	return 0;
+}
+
+/*
+ * Handle encrypted QueryDirectory response data.
+ * Called only for encrypted responses where mid->decrypted == true.
+ * For unencrypted responses, cifs_query_dir_receive handles everything.
+ *
+ * This is written in such a way that handle_read_data does not need modification.
+ *
+ * buf: contains read_rsp_size bytes of decrypted response
+ * buffer: contains (total_len - read_rsp_size) bytes of decrypted data
+ *
+ * Since sizeof(struct smb2_query_directory_rsp) < read_rsp_size,
+ * the response header is always fully in buf. Data may be split between
+ * buf and buffer depending on data_offset.
+ */
+static int
+handle_query_dir_data(struct TCP_Server_Info *server, struct mid_q_entry *mid,
+		      char *buf, unsigned int buf_len, struct folio_queue *buffer,
+		      unsigned int buffer_len, bool is_offloaded)
+{
+	struct cifs_query_dir_io *qd_io = mid->callback_data;
+	struct smb2_query_directory_rsp *rsp;
+	struct smb2_hdr *shdr = (struct smb2_hdr *)buf;
+	unsigned int data_offset, data_len;
+	unsigned int hdr_len;
+
+	cifs_dbg(FYI, "%s: processing encrypted QueryDirectory response\n", __func__);
+
+	if (shdr->Command != SMB2_QUERY_DIRECTORY) {
+		cifs_server_dbg(VFS, "only QueryDirectory responses are supported\n");
+		return -EOPNOTSUPP;
+	}
+
+	if (server->ops->is_session_expired &&
+	    server->ops->is_session_expired(buf)) {
+		if (!is_offloaded)
+			cifs_reconnect(server, true);
+		return -1;
+	}
+
+	if (server->ops->is_status_pending &&
+			server->ops->is_status_pending(buf, server))
+		return -1;
+
+	rsp = (struct smb2_query_directory_rsp *)buf;
+	hdr_len = min_t(unsigned int, buf_len,
+			 sizeof(struct smb2_query_directory_rsp));
+
+	/* Map error code first */
+	qd_io->result = server->ops->map_error(buf, false);
+
+	/* Get data_offset early to set up iov properly */
+	data_offset = le16_to_cpu(rsp->OutputBufferOffset);
+	data_len = le32_to_cpu(rsp->OutputBufferLength);
+
+	/* Set up first iov to point to header portion (needed for credits/signature) */
+	qd_io->iov[0].iov_base = buf;
+	qd_io->iov[0].iov_len = qd_io->result ? hdr_len : data_offset;
+
+	if (qd_io->result != 0) {
+		cifs_dbg(FYI, "%s: server returned error %d (Status=0x%x)\n",
+			 __func__, qd_io->result, le32_to_cpu(rsp->hdr.Status));
+
+		/*
+		 * Copy header to persistent combined_iov buffer so status
+		 * remains accessible after receive handler returns. buf is temporary
+		 * and will be freed/reused, so we can't leave iov[0] pointing to it
+		 */
+		if (qd_io->combined_iov.iov_base && hdr_len > 0 &&
+		    hdr_len <= qd_io->combined_iov.iov_len) {
+			memcpy(qd_io->combined_iov.iov_base, buf, hdr_len);
+			qd_io->iov[0].iov_base = qd_io->combined_iov.iov_base;
+			qd_io->iov[0].iov_len = hdr_len;
+			cifs_dbg(FYI, "%s: copied error response header to combined_iov\n",
+				__func__);
+		}
+
+		/*
+		 * Normal error on query_directory response - response received successfully,
+		 * but the command failed. Store error in qd_io->result for callback
+		 */
+		if (is_offloaded)
+			mid->mid_state = MID_RESPONSE_RECEIVED;
+		else
+			dequeue_mid(server, mid, false);
+		return 0;
+	}
+
+	/* Success - parse the response data */
+	cifs_dbg(FYI, "%s: data_offset=%u data_len=%u buf_len=%u buffer_len=%u\n",
+		 __func__, data_offset, data_len, buf_len, buffer_len);
+
+	/* Validate data_offset */
+	if (data_offset < sizeof(struct smb2_query_directory_rsp)) {
+		cifs_dbg(FYI, "%s: data offset (%u) inside response header\n",
+			 __func__, data_offset);
+		data_offset = sizeof(struct smb2_query_directory_rsp);
+	} else if (data_offset > MAX_CIFS_SMALL_BUFFER_SIZE) {
+		cifs_dbg(VFS, "%s: data offset (%u) beyond end of smallbuf\n",
+			 __func__, data_offset);
+		qd_io->result = -EIO;
+		dequeue_mid(server, mid, qd_io->result);
+		return qd_io->result;
+	}
+
+	/* Validate data_offset is within buf_len + buffer_len */
+	if (data_offset > buf_len + buffer_len) {
+		cifs_dbg(VFS, "%s: data offset (%u) beyond response length (%u)\n",
+			 __func__, data_offset, buf_len + buffer_len);
+		qd_io->result = -EIO;
+		dequeue_mid(server, mid, qd_io->result);
+		return qd_io->result;
+	}
+
+	/* Validate response fits in pre-allocated combined buffer */
+	if ((size_t)data_offset + data_len > qd_io->combined_iov.iov_len) {
+		cifs_dbg(VFS, "%s: response (%u + %u) exceeds buffer capacity (%zu)\n",
+			 __func__, data_offset, data_len, qd_io->combined_iov.iov_len);
+		qd_io->result = -EIO;
+		dequeue_mid(server, mid, qd_io->result);
+		return qd_io->result;
+	}
+
+	/* Copy the prefix present in buf into combined_iov, preserving wire layout */
+	memcpy(qd_io->combined_iov.iov_base, buf, min(data_offset, buf_len));
+
+	if (data_offset < buf_len) {
+		/* Data starts in buf, may continue into buffer */
+		unsigned int data_in_buf = buf_len - data_offset;
+		unsigned int data_in_buffer;
+
+		if (data_len <= data_in_buf) {
+			/* All data is in buf */
+			memcpy(qd_io->combined_iov.iov_base + data_offset,
+			       buf + data_offset, data_len);
+		} else {
+			/* Copy from buf first */
+			memcpy(qd_io->combined_iov.iov_base + data_offset,
+			       buf + data_offset, data_in_buf);
+
+			/* Copy remainder from buffer at offset 0 */
+			data_in_buffer = data_len - data_in_buf;
+			if (data_in_buffer > buffer_len) {
+				cifs_dbg(VFS, "%s: data_in_buffer (%u) > buffer_len (%u)\n",
+					 __func__, data_in_buffer, buffer_len);
+				qd_io->result = -EIO;
+				dequeue_mid(server, mid, qd_io->result);
+				return qd_io->result;
+			}
+
+			qd_io->result = cifs_copy_folioq_to_buf(buffer, buffer_len, 0,
+								qd_io->combined_iov.iov_base +
+								data_offset + data_in_buf,
+								data_in_buffer);
+			if (qd_io->result != 0) {
+				cifs_dbg(VFS, "%s: failed to copy from folio_queue: %d\n",
+					 __func__, qd_io->result);
+				dequeue_mid(server, mid, qd_io->result);
+				return qd_io->result;
+			}
+		}
+	} else {
+		/* Padding and data are in buffer starting at offset 0 */
+		unsigned int bytes_in_buffer = data_offset - buf_len + data_len;
+
+		if (bytes_in_buffer > buffer_len) {
+			cifs_dbg(VFS, "%s: data beyond buffer: prefix+len=%u buffer_len=%u\n",
+				 __func__, bytes_in_buffer, buffer_len);
+			qd_io->result = -EIO;
+			dequeue_mid(server, mid, qd_io->result);
+			return qd_io->result;
+		}
+
+		qd_io->result = cifs_copy_folioq_to_buf(buffer, buffer_len, 0,
+							qd_io->combined_iov.iov_base + buf_len,
+							bytes_in_buffer);
+		if (qd_io->result != 0) {
+			cifs_dbg(VFS, "%s: failed to copy from folio_queue: %d\n",
+				 __func__, qd_io->result);
+			dequeue_mid(server, mid, qd_io->result);
+			return qd_io->result;
+		}
+	}
+
+	/* Set up iov[1] pointing into combined buffer, finalize valid length */
+	qd_io->iov[1].iov_base = qd_io->combined_iov.iov_base + data_offset;
+	qd_io->iov[1].iov_len = data_len;
+	qd_io->combined_iov.iov_len = data_offset + data_len;
+
+	dequeue_mid(server, mid, false);
+	return 0;
+}
+
+/*
+ * Handle callback for async QueryDirectory with multi-credit support.
+ * For encrypted responses, extracts decrypted data.
+ * For unencrypted responses, cifs_query_dir_receive already processed everything.
+ */
+int
+smb2_query_dir_handle_data(struct TCP_Server_Info *server, struct mid_q_entry *mid)
+{
+	char *buf = server->large_buf ? server->bigbuf : server->smallbuf;
+
+	/* For unencrypted responses, data already processed in cifs_query_dir_receive */
+	if (!mid->decrypted)
+		return 0;
+
+	/*
+	 * For small encrypted responses (< CIFSMaxBufSize), all data is in buf.
+	 * For large encrypted responses, this callback is not used - instead,
+	 * receive_encrypted_read/smb2_decrypt_offload call handle_query_dir_data directly.
+	 */
+	return handle_query_dir_data(server, mid, buf, server->pdu_size,
+				      NULL, 0, false);
+}
+
+static int
 handle_read_data(struct TCP_Server_Info *server, struct mid_q_entry *mid,
 		 char *buf, unsigned int buf_len, struct folio_queue *buffer,
 		 unsigned int buffer_len, bool is_offloaded)
@@ -5031,25 +5406,46 @@ static void smb2_decrypt_offload(struct work_struct *work)
 	int rc;
 	struct mid_q_entry *mid;
 	struct iov_iter iter;
+	struct smb2_hdr *shdr;
+	unsigned int read_rsp_size = dw->server->vals->read_rsp_size;
 
+	/* decrypt read_rsp_size in buf + remainder in folio_queue */
 	iov_iter_folio_queue(&iter, ITER_DEST, dw->buffer, 0, 0, dw->len);
-	rc = decrypt_raw_data(dw->server, dw->buf, dw->server->vals->read_rsp_size,
-			      &iter, true);
+	rc = decrypt_raw_data(dw->server, dw->buf, read_rsp_size, &iter, true);
 	if (rc) {
 		cifs_dbg(VFS, "error decrypting rc=%d\n", rc);
 		goto free_pages;
 	}
 
 	dw->server->lstrp = jiffies;
+
+	shdr = (struct smb2_hdr *)(dw->buf + sizeof(struct smb2_transform_hdr));
+
+	/*
+	 * buf now contains read_rsp_size bytes after transform_hdr.
+	 * folio_queue contains (total_len - read_rsp_size) bytes.
+	 * The handle functions will determine where data actually starts based on data_offset.
+	 */
+
 	mid = smb2_find_dequeue_mid(dw->server, dw->buf);
 	if (mid == NULL)
 		cifs_dbg(FYI, "mid not found\n");
 	else {
 		mid->decrypted = true;
-		rc = handle_read_data(dw->server, mid, dw->buf,
-				      dw->server->vals->read_rsp_size,
-				      dw->buffer, dw->len,
-				      true);
+
+		/* Handle based on command type */
+		if (shdr->Command == SMB2_READ) {
+			rc = handle_read_data(dw->server, mid, dw->buf, read_rsp_size,
+					      dw->buffer, dw->len, true);
+		} else if (shdr->Command == SMB2_QUERY_DIRECTORY) {
+			rc = handle_query_dir_data(dw->server, mid, dw->buf, read_rsp_size,
+						   dw->buffer, dw->len, true);
+		} else {
+			cifs_dbg(VFS, "Unexpected command %u in decrypt offload\n",
+				 le16_to_cpu(shdr->Command));
+			rc = -EOPNOTSUPP;
+		}
+
 		if (rc >= 0) {
 #ifdef CONFIG_CIFS_STATS2
 			mid->when_received = jiffies;
@@ -5093,9 +5489,10 @@ receive_encrypted_read(struct TCP_Server_Info *server, struct mid_q_entry **mid,
 {
 	char *buf = server->smallbuf;
 	struct smb2_transform_hdr *tr_hdr = (struct smb2_transform_hdr *)buf;
+	struct smb2_hdr *shdr;
 	struct iov_iter iter;
-	unsigned int len;
-	unsigned int buflen = server->pdu_size;
+	unsigned int len, total_len, buflen = server->pdu_size;
+	unsigned int read_rsp_size = server->vals->read_rsp_size;
 	int rc;
 	struct smb2_decrypt_work *dw;
 
@@ -5106,25 +5503,26 @@ receive_encrypted_read(struct TCP_Server_Info *server, struct mid_q_entry **mid,
 	dw->server = server;
 
 	*num_mids = 1;
-	len = min_t(unsigned int, buflen, server->vals->read_rsp_size +
-		sizeof(struct smb2_transform_hdr)) - HEADER_SIZE(server) + 1;
-
-	rc = cifs_read_from_socket(server, buf + HEADER_SIZE(server) - 1, len);
-	if (rc < 0)
-		goto free_dw;
-	server->total_read += rc;
-
-	if (le32_to_cpu(tr_hdr->OriginalMessageSize) <
-	    server->vals->read_rsp_size) {
-		cifs_server_dbg(VFS, "OriginalMessageSize %u too small for read response (%zu)\n",
-			le32_to_cpu(tr_hdr->OriginalMessageSize),
-			server->vals->read_rsp_size);
+	total_len = le32_to_cpu(tr_hdr->OriginalMessageSize);
+	if (total_len < read_rsp_size) {
+		cifs_server_dbg(VFS, "OriginalMessageSize %u too small for read response (%u)\n",
+			total_len,
+			read_rsp_size);
 		rc = -EINVAL;
 		goto discard_data;
 	}
-	len = le32_to_cpu(tr_hdr->OriginalMessageSize) -
-		server->vals->read_rsp_size;
-	dw->len = len;
+
+	/* Read transform_hdr + read_rsp_size into buf */
+	len = min_t(unsigned int, buflen, read_rsp_size +
+		sizeof(struct smb2_transform_hdr)) - HEADER_SIZE(server) + 1;
+
+	rc = cifs_read_from_socket(server, buf + HEADER_SIZE(server) - 1, len);
+	if (rc < 0 || rc < len)
+		goto free_dw;
+	server->total_read += rc;
+
+	/* Read remaining data into folio_queue */
+	dw->len = total_len - read_rsp_size;
 	len = round_up(dw->len, PAGE_SIZE);
 
 	size_t cur_size = 0;
@@ -5153,7 +5551,7 @@ receive_encrypted_read(struct TCP_Server_Info *server, struct mid_q_entry **mid,
 		goto free_pages;
 
 	/*
-	 * For large reads, offload to different thread for better performance,
+	 * For large responses, offload to different thread for better performance,
 	 * use more cores decrypting which can be expensive
 	 */
 
@@ -5167,20 +5565,41 @@ receive_encrypted_read(struct TCP_Server_Info *server, struct mid_q_entry **mid,
 		return -1;
 	}
 
-	rc = decrypt_raw_data(server, buf, server->vals->read_rsp_size,
-			      &iter, false);
+	/* Decrypt: read_rsp_size in buf + remainder in folio_queue */
+	rc = decrypt_raw_data(server, buf, read_rsp_size, &iter, false);
 	if (rc)
 		goto free_pages;
+
+	shdr = (struct smb2_hdr *) buf;
+
+	/*
+	 * buf now contains the complete response header (read_rsp_size bytes).
+	 * folio_queue contains (total_len - read_rsp_size) bytes.
+	 * The handle functions will determine where data actually starts based on data_offset.
+	 */
 
 	*mid = smb2_find_mid(server, buf);
 	if (*mid == NULL) {
 		cifs_dbg(FYI, "mid not found\n");
 	} else {
-		cifs_dbg(FYI, "mid found\n");
+		cifs_dbg(FYI, "mid found, command=%u\n", le16_to_cpu(shdr->Command));
 		(*mid)->decrypted = true;
-		rc = handle_read_data(server, *mid, buf,
-				      server->vals->read_rsp_size,
-				      dw->buffer, dw->len, false);
+
+		/* Handle based on command type */
+		if (shdr->Command == SMB2_READ) {
+			rc = handle_read_data(server, *mid, buf, read_rsp_size,
+					      dw->buffer, dw->len, false);
+		} else if (shdr->Command == SMB2_QUERY_DIRECTORY) {
+			rc = handle_query_dir_data(server, *mid, buf, read_rsp_size,
+						   dw->buffer, dw->len, false);
+		} else {
+			/* For now, other commands not supported in large encrypted path */
+			cifs_server_dbg(VFS,
+					"Large encrypted responses only supported for SMB2_READ and SMB2_QUERY_DIRECTORY (got %u)\n",
+					le16_to_cpu(shdr->Command));
+			rc = -EOPNOTSUPP;
+		}
+
 		if (rc >= 0) {
 			if (server->ops->is_network_name_deleted) {
 				server->ops->is_network_name_deleted(buf,
@@ -5321,7 +5740,6 @@ smb3_receive_transform(struct TCP_Server_Info *server,
 		return -ECONNABORTED;
 	}
 
-	/* TODO: add support for compounds containing READ. */
 	if (pdu_length > CIFSMaxBufSize + MAX_HEADER_SIZE(server)) {
 		return receive_encrypted_read(server, &mids[0], num_mids);
 	}

@@ -760,7 +760,7 @@ find_cifs_entry(const unsigned int xid, struct cifs_tcon *tcon, loff_t pos,
 	while ((index_to_find >= cfile->srch_inf.index_of_last_entry) &&
 	       (rc == 0) && !cfile->srch_inf.endOfSearch) {
 		cifs_dbg(FYI, "calling findnext2\n");
-		rc = server->ops->query_dir_next(xid, tcon, &cfile->fid,
+		rc = server->ops->query_dir_next(xid, tcon, cifs_sb, &cfile->fid,
 						 search_flags,
 						 &cfile->srch_inf);
 		if (rc)
