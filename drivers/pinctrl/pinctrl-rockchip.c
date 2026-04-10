@@ -4291,6 +4291,7 @@ static struct rockchip_pin_ctrl *rockchip_pinctrl_get_soc_data(
 
 	match = of_match_node(rockchip_pinctrl_dt_match, node);
 	ctrl = (struct rockchip_pin_ctrl *)match->data;
+	ctrl->nr_pins = 0;
 
 	grf_offs = ctrl->grf_mux_offset;
 	pmu_offs = ctrl->pmu_mux_offset;
