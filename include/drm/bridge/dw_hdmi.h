@@ -142,6 +142,9 @@ struct dw_hdmi_plat_data {
 	enum drm_mode_status (*mode_valid)(struct dw_hdmi *hdmi, void *data,
 					   const struct drm_display_info *info,
 					   const struct drm_display_mode *mode);
+	enum drm_mode_status (*tmds_char_rate_valid)(struct dw_hdmi *hdmi, void *data,
+						     const struct drm_display_mode *mode,
+						     unsigned long long tmds_rate);
 
 	/*
 	 * priv_audio is specially used for additional audio device to get
