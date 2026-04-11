@@ -1768,6 +1768,7 @@ static int dw_hdmi_clear_infoframe(struct dw_hdmi *hdmi,
 {
 	switch (type) {
 	case HDMI_INFOFRAME_TYPE_AVI:
+	case HDMI_INFOFRAME_TYPE_AUDIO:
 		break;
 	case HDMI_INFOFRAME_TYPE_DRM:
 		hdmi_modb(hdmi, HDMI_FC_PACKET_TX_EN_DRM_DISABLE,
@@ -1915,6 +1916,37 @@ static int dw_hdmi_write_spd_infoframe(struct dw_hdmi *hdmi,
 
 	hdmi_mask_writeb(hdmi, 1, HDMI_FC_DATAUTO0, HDMI_FC_DATAUTO0_SPD_OFFSET,
 			 HDMI_FC_DATAUTO0_SPD_MASK);
+
+	return 0;
+}
+
+static int dw_hdmi_write_audio_infoframe(struct dw_hdmi *hdmi,
+					 const u8 *infoframe, size_t len)
+{
+	u8 val;
+
+	dw_hdmi_clear_infoframe(hdmi, HDMI_INFOFRAME_TYPE_AUDIO);
+
+	/* reg: CC[6:4] CT[3:0] */
+	/* infoframe: CT[7:4] CC[2:0] */
+	val = ((infoframe[4] & GENMASK(7, 4)) >> 4) |
+	      ((infoframe[4] & GENMASK(2, 0)) << 4);
+	hdmi_writeb(hdmi, val, HDMI_FC_AUDICONF0);
+
+	/* reg: SS[5:4] SF[2:0] */
+	/* infoframe: SF[4:2] SS[1:0] */
+	val = ((infoframe[5] & GENMASK(4, 2)) >> 2) |
+	      ((infoframe[5] & GENMASK(1, 0)) << 4);
+	hdmi_writeb(hdmi, val, HDMI_FC_AUDICONF1);
+
+	/* reg: CA[7:0] */
+	/* infoframe: CA[7:0] */
+	hdmi_writeb(hdmi, infoframe[6], HDMI_FC_AUDICONF2);
+
+	/* reg: LFEPBL[6:5] DM_INH[4] LSV[3:0] */
+	/* infoframe: DM_INH[7] LSV[6:3] */
+	val = (infoframe[7] & GENMASK(7, 3)) >> 3;
+	hdmi_writeb(hdmi, val, HDMI_FC_AUDICONF3);
 
 	return 0;
 }
@@ -2803,6 +2835,21 @@ static int dw_hdmi_bridge_write_spd_infoframe(struct drm_bridge *bridge,
 	return dw_hdmi_write_spd_infoframe(hdmi, buffer, len);
 }
 
+static int dw_hdmi_bridge_clear_audio_infoframe(struct drm_bridge *bridge)
+{
+	struct dw_hdmi *hdmi = bridge->driver_private;
+
+	return dw_hdmi_clear_infoframe(hdmi, HDMI_INFOFRAME_TYPE_AUDIO);
+}
+
+static int dw_hdmi_bridge_write_audio_infoframe(struct drm_bridge *bridge,
+						const u8 *buffer, size_t len)
+{
+	struct dw_hdmi *hdmi = bridge->driver_private;
+
+	return dw_hdmi_write_audio_infoframe(hdmi, buffer, len);
+}
+
 static const struct drm_bridge_funcs dw_hdmi_bridge_funcs = {
 	.atomic_duplicate_state = drm_atomic_helper_bridge_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_bridge_destroy_state,
@@ -2824,6 +2871,8 @@ static const struct drm_bridge_funcs dw_hdmi_bridge_funcs = {
 	.hdmi_write_hdr_drm_infoframe = dw_hdmi_bridge_write_hdr_drm_infoframe,
 	.hdmi_clear_spd_infoframe = dw_hdmi_bridge_clear_spd_infoframe,
 	.hdmi_write_spd_infoframe = dw_hdmi_bridge_write_spd_infoframe,
+	.hdmi_clear_audio_infoframe = dw_hdmi_bridge_clear_audio_infoframe,
+	.hdmi_write_audio_infoframe = dw_hdmi_bridge_write_audio_infoframe,
 };
 
 /* -----------------------------------------------------------------------------
@@ -3375,6 +3424,11 @@ struct dw_hdmi *dw_hdmi_probe(struct platform_device *pdev,
 		pdevinfo.size_data = sizeof(audio);
 		pdevinfo.dma_mask = DMA_BIT_MASK(32);
 		hdmi->audio = platform_device_register_full(&pdevinfo);
+
+		hdmi->bridge.hdmi_audio_max_i2s_playback_channels = 8;
+		hdmi->bridge.hdmi_audio_dev = hdmi->dev;
+		hdmi->bridge.hdmi_audio_dai_port = 1;
+		//hdmi->bridge.ops |= DRM_BRIDGE_OP_HDMI_AUDIO;
 	} else if (iores && config3 & HDMI_CONFIG3_GPAUD) {
 		struct dw_hdmi_audio_data audio;
 
@@ -3393,6 +3447,11 @@ struct dw_hdmi *dw_hdmi_probe(struct platform_device *pdev,
 		pdevinfo.size_data = sizeof(audio);
 		pdevinfo.dma_mask = DMA_BIT_MASK(32);
 		hdmi->audio = platform_device_register_full(&pdevinfo);
+
+		hdmi->bridge.hdmi_audio_max_i2s_playback_channels = 8;
+		hdmi->bridge.hdmi_audio_dev = hdmi->dev;
+		hdmi->bridge.hdmi_audio_dai_port = 2;
+		//hdmi->bridge.ops |= DRM_BRIDGE_OP_HDMI_AUDIO;
 	}
 
 	if (!plat_data->disable_cec && (config0 & HDMI_CONFIG0_CEC)) {
