@@ -310,21 +310,9 @@ static int meson_encoder_hdmi_atomic_check(struct drm_bridge *bridge,
 	return 0;
 }
 
-static void meson_encoder_hdmi_hpd_notify(struct drm_bridge *bridge,
-					  struct drm_connector *connector,
-					  enum drm_connector_status status)
-{
-	/* FIXME: remove when dw-hdmi has been fully converted to a hdmi bridge */
-	if (status == connector_status_connected)
-		drm_connector_cec_phys_addr_set(connector);
-	else
-		drm_connector_cec_phys_addr_invalidate(connector);
-}
-
 static const struct drm_bridge_funcs meson_encoder_hdmi_bridge_funcs = {
 	.attach = meson_encoder_hdmi_attach,
 	.mode_valid = meson_encoder_hdmi_mode_valid,
-	.hpd_notify = meson_encoder_hdmi_hpd_notify,
 	.atomic_enable = meson_encoder_hdmi_atomic_enable,
 	.atomic_disable = meson_encoder_hdmi_atomic_disable,
 	.atomic_get_input_bus_fmts = meson_encoder_hdmi_get_inp_bus_fmts,
