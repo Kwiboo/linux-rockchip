@@ -2225,13 +2225,38 @@ static int dw_hdmi_poweron(struct dw_hdmi *hdmi,
 		dev_dbg(hdmi->dev, "CEA mode used vic=%d\n", hdmi->vic);
 	}
 
+	switch (conn_state->colorspace) {
+	case DRM_MODE_COLORIMETRY_SMPTE_170M_YCC:
+	case DRM_MODE_COLORIMETRY_XVYCC_601:
+	case DRM_MODE_COLORIMETRY_SYCC_601:
+	case DRM_MODE_COLORIMETRY_OPYCC_601:
+	case DRM_MODE_COLORIMETRY_BT601_YCC:
+		hdmi->hdmi_data.enc_out_encoding = V4L2_YCBCR_ENC_601;
+		break;
+
+	default:
+	case DRM_MODE_COLORIMETRY_NO_DATA:
+	case DRM_MODE_COLORIMETRY_BT709_YCC:
+	case DRM_MODE_COLORIMETRY_XVYCC_709:
+	case DRM_MODE_COLORIMETRY_RGB_WIDE_FIXED:
+	case DRM_MODE_COLORIMETRY_RGB_WIDE_FLOAT:
+		hdmi->hdmi_data.enc_out_encoding = V4L2_YCBCR_ENC_709;
+		break;
+
+	case DRM_MODE_COLORIMETRY_BT2020_CYCC:
+	case DRM_MODE_COLORIMETRY_BT2020_YCC:
+	case DRM_MODE_COLORIMETRY_BT2020_RGB:
+	case DRM_MODE_COLORIMETRY_DCI_P3_RGB_D65:
+	case DRM_MODE_COLORIMETRY_DCI_P3_RGB_THEATER:
+		hdmi->hdmi_data.enc_out_encoding = V4L2_YCBCR_ENC_BT2020;
+		break;
+	}
+
 	if ((hdmi->vic == 6) || (hdmi->vic == 7) ||
 	    (hdmi->vic == 21) || (hdmi->vic == 22) ||
 	    (hdmi->vic == 2) || (hdmi->vic == 3) ||
 	    (hdmi->vic == 17) || (hdmi->vic == 18))
 		hdmi->hdmi_data.enc_out_encoding = V4L2_YCBCR_ENC_601;
-	else
-		hdmi->hdmi_data.enc_out_encoding = V4L2_YCBCR_ENC_709;
 
 	if (hdmi->hdmi_data.enc_in_bus_format == MEDIA_BUS_FMT_FIXED)
 		hdmi->hdmi_data.enc_in_bus_format = MEDIA_BUS_FMT_RGB888_1X24;
@@ -2361,10 +2386,17 @@ static int dw_hdmi_connector_create(struct dw_hdmi *hdmi)
 {
 	struct drm_encoder *encoder = hdmi->bridge.encoder;
 	struct drm_connector *connector;
+	int ret;
 
 	connector = drm_bridge_connector_init(hdmi->bridge.dev, encoder);
 	if (IS_ERR(connector))
 		return PTR_ERR(connector);
+
+	ret = drm_mode_create_hdmi_colorspace_property(connector, 0);
+	if (ret)
+		return ret;
+
+	drm_connector_attach_colorspace_property(connector);
 
 	return drm_connector_attach_broadcast_rgb_property(connector);
 }
