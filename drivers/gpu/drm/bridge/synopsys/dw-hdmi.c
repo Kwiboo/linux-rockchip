@@ -1773,6 +1773,11 @@ static int dw_hdmi_clear_infoframe(struct dw_hdmi *hdmi,
 		hdmi_modb(hdmi, HDMI_FC_PACKET_TX_EN_DRM_DISABLE,
 			  HDMI_FC_PACKET_TX_EN_DRM_MASK, HDMI_FC_PACKET_TX_EN);
 		break;
+	case HDMI_INFOFRAME_TYPE_SPD:
+		hdmi_mask_writeb(hdmi, 0, HDMI_FC_DATAUTO0,
+				 HDMI_FC_DATAUTO0_SPD_OFFSET,
+				 HDMI_FC_DATAUTO0_SPD_MASK);
+		break;
 	case HDMI_INFOFRAME_TYPE_VENDOR:
 		hdmi_mask_writeb(hdmi, 0, HDMI_FC_DATAUTO0,
 				 HDMI_FC_DATAUTO0_VSD_OFFSET,
@@ -1889,6 +1894,27 @@ static int dw_hdmi_write_hdr_drm_infoframe(struct dw_hdmi *hdmi,
 	hdmi_writeb(hdmi, 1, HDMI_FC_DRM_UP);
 	hdmi_modb(hdmi, HDMI_FC_PACKET_TX_EN_DRM_ENABLE,
 		  HDMI_FC_PACKET_TX_EN_DRM_MASK, HDMI_FC_PACKET_TX_EN);
+
+	return 0;
+}
+
+static int dw_hdmi_write_spd_infoframe(struct dw_hdmi *hdmi,
+				       const u8 *infoframe, size_t len)
+{
+	int i;
+
+	dw_hdmi_clear_infoframe(hdmi, HDMI_INFOFRAME_TYPE_SPD);
+
+	for (i = 0; i < 8; i++)
+		hdmi_writeb(hdmi, infoframe[4 + i], HDMI_FC_SPDVENDORNAME0 + i);
+
+	for (i = 0; i < 16; i++)
+		hdmi_writeb(hdmi, infoframe[12 + i], HDMI_FC_SDPPRODUCTNAME0 + i);
+
+	hdmi_writeb(hdmi, infoframe[28], HDMI_FC_SPDDEVICEINF);
+
+	hdmi_mask_writeb(hdmi, 1, HDMI_FC_DATAUTO0, HDMI_FC_DATAUTO0_SPD_OFFSET,
+			 HDMI_FC_DATAUTO0_SPD_MASK);
 
 	return 0;
 }
@@ -2762,6 +2788,21 @@ static int dw_hdmi_bridge_write_hdr_drm_infoframe(struct drm_bridge *bridge,
 	return dw_hdmi_write_hdr_drm_infoframe(hdmi, buffer, len);
 }
 
+static int dw_hdmi_bridge_clear_spd_infoframe(struct drm_bridge *bridge)
+{
+	struct dw_hdmi *hdmi = bridge->driver_private;
+
+	return dw_hdmi_clear_infoframe(hdmi, HDMI_INFOFRAME_TYPE_SPD);
+}
+
+static int dw_hdmi_bridge_write_spd_infoframe(struct drm_bridge *bridge,
+					      const u8 *buffer, size_t len)
+{
+	struct dw_hdmi *hdmi = bridge->driver_private;
+
+	return dw_hdmi_write_spd_infoframe(hdmi, buffer, len);
+}
+
 static const struct drm_bridge_funcs dw_hdmi_bridge_funcs = {
 	.atomic_duplicate_state = drm_atomic_helper_bridge_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_bridge_destroy_state,
@@ -2781,6 +2822,8 @@ static const struct drm_bridge_funcs dw_hdmi_bridge_funcs = {
 	.hdmi_write_hdmi_infoframe = dw_hdmi_bridge_write_hdmi_infoframe,
 	.hdmi_clear_hdr_drm_infoframe = dw_hdmi_bridge_clear_hdr_drm_infoframe,
 	.hdmi_write_hdr_drm_infoframe = dw_hdmi_bridge_write_hdr_drm_infoframe,
+	.hdmi_clear_spd_infoframe = dw_hdmi_bridge_clear_spd_infoframe,
+	.hdmi_write_spd_infoframe = dw_hdmi_bridge_write_spd_infoframe,
 };
 
 /* -----------------------------------------------------------------------------
@@ -3271,7 +3314,8 @@ struct dw_hdmi *dw_hdmi_probe(struct platform_device *pdev,
 
 	hdmi->bridge.driver_private = hdmi;
 	hdmi->bridge.ops = DRM_BRIDGE_OP_DETECT | DRM_BRIDGE_OP_EDID
-			 | DRM_BRIDGE_OP_HPD | DRM_BRIDGE_OP_HDMI;
+			 | DRM_BRIDGE_OP_HPD | DRM_BRIDGE_OP_HDMI
+			 | DRM_BRIDGE_OP_HDMI_SPD_INFOFRAME;
 	hdmi->bridge.interlace_allowed = true;
 	hdmi->bridge.ddc = hdmi->ddc;
 	hdmi->bridge.of_node = pdev->dev.of_node;
