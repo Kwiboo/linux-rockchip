@@ -518,17 +518,8 @@ static irqreturn_t dw_hdmi_top_thread_irq(int irq, void *dev_id)
 	u32 stat = dw_hdmi->irq_stat;
 
 	/* HPD Events */
-	if (stat & (HDMITX_TOP_INTR_HPD_RISE | HDMITX_TOP_INTR_HPD_FALL)) {
-		bool hpd_connected = false;
-
-		if (stat & HDMITX_TOP_INTR_HPD_RISE)
-			hpd_connected = true;
-
+	if (stat & (HDMITX_TOP_INTR_HPD_RISE | HDMITX_TOP_INTR_HPD_FALL))
 		drm_helper_hpd_irq_event(dw_hdmi->bridge->dev);
-		drm_bridge_hpd_notify(dw_hdmi->bridge,
-				      hpd_connected ? connector_status_connected
-						    : connector_status_disconnected);
-	}
 
 	return IRQ_HANDLED;
 }
