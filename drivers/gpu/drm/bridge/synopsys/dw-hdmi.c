@@ -1688,40 +1688,20 @@ static void hdmi_tx_hdcp_config(struct dw_hdmi *hdmi)
 		  HDMI_A_HDCPCFG1_ENCRYPTIONDISABLE_MASK, HDMI_A_HDCPCFG1);
 }
 
-static int dw_hdmi_clear_infoframe(struct dw_hdmi *hdmi,
-				   enum hdmi_infoframe_type type)
+static int dw_hdmi_bridge_clear_avi_infoframe(struct drm_bridge *bridge)
 {
-	switch (type) {
-	case HDMI_INFOFRAME_TYPE_AVI:
-	case HDMI_INFOFRAME_TYPE_AUDIO:
-		break;
-	case HDMI_INFOFRAME_TYPE_DRM:
-		hdmi_modb(hdmi, HDMI_FC_PACKET_TX_EN_DRM_DISABLE,
-			  HDMI_FC_PACKET_TX_EN_DRM_MASK, HDMI_FC_PACKET_TX_EN);
-		break;
-	case HDMI_INFOFRAME_TYPE_SPD:
-		hdmi_mask_writeb(hdmi, 0, HDMI_FC_DATAUTO0,
-				 HDMI_FC_DATAUTO0_SPD_OFFSET,
-				 HDMI_FC_DATAUTO0_SPD_MASK);
-		break;
-	case HDMI_INFOFRAME_TYPE_VENDOR:
-		hdmi_mask_writeb(hdmi, 0, HDMI_FC_DATAUTO0,
-				 HDMI_FC_DATAUTO0_VSD_OFFSET,
-				 HDMI_FC_DATAUTO0_VSD_MASK);
-		break;
-	default:
-		return -EINVAL;
-	}
-
+	//hdmi_modb(hdmi, HDMI_FC_PACKET_TX_EN_AVI_DISABLE,
+	//	  HDMI_FC_PACKET_TX_EN_AVI_MASK, HDMI_FC_PACKET_TX_EN);
 	return 0;
 }
 
-static int dw_hdmi_write_avi_infoframe(struct dw_hdmi *hdmi,
-				       const u8 *infoframe, size_t len)
+static int dw_hdmi_bridge_write_avi_infoframe(struct drm_bridge *bridge,
+					      const u8 *buffer, size_t len)
 {
+	struct dw_hdmi *hdmi = bridge->driver_private;
 	u8 val;
 
-	dw_hdmi_clear_infoframe(hdmi, HDMI_INFOFRAME_TYPE_AVI);
+	dw_hdmi_bridge_clear_avi_infoframe(bridge);
 
 	/*
 	 * The Designware IP uses a different byte format from standard
@@ -1766,15 +1746,29 @@ static int dw_hdmi_write_avi_infoframe(struct dw_hdmi *hdmi,
 	hdmi_writeb(hdmi, infoframe[15], HDMI_FC_AVISRB0);
 	hdmi_writeb(hdmi, infoframe[16], HDMI_FC_AVISRB1);
 
+	//hdmi_modb(hdmi, HDMI_FC_PACKET_TX_EN_AVI_ENABLE,
+	//	  HDMI_FC_PACKET_TX_EN_AVI_MASK, HDMI_FC_PACKET_TX_EN);
+
 	return 0;
 }
 
-static int dw_hdmi_write_vendor_infoframe(struct dw_hdmi *hdmi,
-					  const u8 *infoframe, size_t len)
+static int dw_hdmi_bridge_clear_hdmi_infoframe(struct drm_bridge *bridge)
 {
+	struct dw_hdmi *hdmi = bridge->driver_private;
+
+	hdmi_mask_writeb(hdmi, 0, HDMI_FC_DATAUTO0, HDMI_FC_DATAUTO0_VSD_OFFSET,
+			 HDMI_FC_DATAUTO0_VSD_MASK);
+
+	return 0;
+}
+
+static int dw_hdmi_bridge_write_hdmi_infoframe(struct drm_bridge *bridge,
+					       const u8 *buffer, size_t len)
+{
+	struct dw_hdmi *hdmi = bridge->driver_private;
 	int i;
 
-	dw_hdmi_clear_infoframe(hdmi, HDMI_INFOFRAME_TYPE_VENDOR);
+	dw_hdmi_bridge_clear_hdmi_infoframe(bridge);
 
 	/* Set the length of HDMI vendor specific InfoFrame payload */
 	hdmi_writeb(hdmi, infoframe[2], HDMI_FC_VSDSIZE);
@@ -1801,15 +1795,23 @@ static int dw_hdmi_write_vendor_infoframe(struct dw_hdmi *hdmi,
 	return 0;
 }
 
-static int dw_hdmi_write_hdr_drm_infoframe(struct dw_hdmi *hdmi,
-					   const u8 *infoframe, size_t len)
+static int dw_hdmi_bridge_clear_hdr_drm_infoframe(struct drm_bridge *bridge)
 {
+	struct dw_hdmi *hdmi = bridge->driver_private;
+
+	hdmi_modb(hdmi, HDMI_FC_PACKET_TX_EN_DRM_DISABLE,
+		  HDMI_FC_PACKET_TX_EN_DRM_MASK, HDMI_FC_PACKET_TX_EN);
+
+	return 0;
+}
+
+static int dw_hdmi_bridge_write_hdr_drm_infoframe(struct drm_bridge *bridge,
+						  const u8 *buffer, size_t len)
+{
+	struct dw_hdmi *hdmi = bridge->driver_private;
 	int i;
 
-	if (!hdmi->plat_data->use_drm_infoframe)
-		return 0;
-
-	dw_hdmi_clear_infoframe(hdmi, HDMI_INFOFRAME_TYPE_DRM);
+	dw_hdmi_bridge_clear_hdr_drm_infoframe(bridge);
 
 	hdmi_writeb(hdmi, infoframe[1], HDMI_FC_DRM_HB0);
 	hdmi_writeb(hdmi, infoframe[2], HDMI_FC_DRM_HB1);
@@ -1824,12 +1826,23 @@ static int dw_hdmi_write_hdr_drm_infoframe(struct dw_hdmi *hdmi,
 	return 0;
 }
 
-static int dw_hdmi_write_spd_infoframe(struct dw_hdmi *hdmi,
-				       const u8 *infoframe, size_t len)
+static int dw_hdmi_bridge_clear_spd_infoframe(struct drm_bridge *bridge)
 {
+	struct dw_hdmi *hdmi = bridge->driver_private;
+
+	hdmi_mask_writeb(hdmi, 0, HDMI_FC_DATAUTO0, HDMI_FC_DATAUTO0_SPD_OFFSET,
+			 HDMI_FC_DATAUTO0_SPD_MASK);
+
+	return 0;
+}
+
+static int dw_hdmi_bridge_write_spd_infoframe(struct drm_bridge *bridge,
+					      const u8 *buffer, size_t len)
+{
+	struct dw_hdmi *hdmi = bridge->driver_private;
 	int i;
 
-	dw_hdmi_clear_infoframe(hdmi, HDMI_INFOFRAME_TYPE_SPD);
+	dw_hdmi_bridge_clear_spd_infoframe(bridge);
 
 	for (i = 0; i < 8; i++)
 		hdmi_writeb(hdmi, infoframe[4 + i], HDMI_FC_SPDVENDORNAME0 + i);
@@ -1845,12 +1858,20 @@ static int dw_hdmi_write_spd_infoframe(struct dw_hdmi *hdmi,
 	return 0;
 }
 
-static int dw_hdmi_write_audio_infoframe(struct dw_hdmi *hdmi,
-					 const u8 *infoframe, size_t len)
+static int dw_hdmi_bridge_clear_audio_infoframe(struct drm_bridge *bridge)
 {
+	//hdmi_modb(hdmi, HDMI_FC_PACKET_TX_EN_AUDI_DISABLE,
+	//	  HDMI_FC_PACKET_TX_EN_AUDI_MASK, HDMI_FC_PACKET_TX_EN);
+	return 0;
+}
+
+static int dw_hdmi_bridge_write_audio_infoframe(struct drm_bridge *bridge,
+						const u8 *buffer, size_t len)
+{
+	struct dw_hdmi *hdmi = bridge->driver_private;
 	u8 val;
 
-	dw_hdmi_clear_infoframe(hdmi, HDMI_INFOFRAME_TYPE_AUDIO);
+	dw_hdmi_bridge_clear_audio_infoframe(bridge);
 
 	/* reg: CC[6:4] CT[3:0] */
 	/* infoframe: CT[7:4] CC[2:0] */
@@ -1872,6 +1893,9 @@ static int dw_hdmi_write_audio_infoframe(struct dw_hdmi *hdmi,
 	/* infoframe: DM_INH[7] LSV[6:3] */
 	val = (infoframe[7] & GENMASK(7, 3)) >> 3;
 	hdmi_writeb(hdmi, val, HDMI_FC_AUDICONF3);
+
+	//hdmi_modb(hdmi, HDMI_FC_PACKET_TX_EN_AUDI_ENABLE,
+	//	  HDMI_FC_PACKET_TX_EN_AUDI_MASK, HDMI_FC_PACKET_TX_EN);
 
 	return 0;
 }
@@ -2715,81 +2739,6 @@ static const struct drm_edid *dw_hdmi_bridge_edid_read(struct drm_bridge *bridge
 	return dw_hdmi_edid_read(hdmi, connector);
 }
 
-static int dw_hdmi_bridge_clear_avi_infoframe(struct drm_bridge *bridge)
-{
-	struct dw_hdmi *hdmi = bridge->driver_private;
-
-	return dw_hdmi_clear_infoframe(hdmi, HDMI_INFOFRAME_TYPE_AVI);
-}
-
-static int dw_hdmi_bridge_write_avi_infoframe(struct drm_bridge *bridge,
-					      const u8 *buffer, size_t len)
-{
-	struct dw_hdmi *hdmi = bridge->driver_private;
-
-	return dw_hdmi_write_avi_infoframe(hdmi, buffer, len);
-}
-
-static int dw_hdmi_bridge_clear_hdmi_infoframe(struct drm_bridge *bridge)
-{
-	struct dw_hdmi *hdmi = bridge->driver_private;
-
-	return dw_hdmi_clear_infoframe(hdmi, HDMI_INFOFRAME_TYPE_VENDOR);
-}
-
-static int dw_hdmi_bridge_write_hdmi_infoframe(struct drm_bridge *bridge,
-					       const u8 *buffer, size_t len)
-{
-	struct dw_hdmi *hdmi = bridge->driver_private;
-
-	return dw_hdmi_write_vendor_infoframe(hdmi, buffer, len);
-}
-
-static int dw_hdmi_bridge_clear_hdr_drm_infoframe(struct drm_bridge *bridge)
-{
-	struct dw_hdmi *hdmi = bridge->driver_private;
-
-	return dw_hdmi_clear_infoframe(hdmi, HDMI_INFOFRAME_TYPE_DRM);
-}
-
-static int dw_hdmi_bridge_write_hdr_drm_infoframe(struct drm_bridge *bridge,
-						  const u8 *buffer, size_t len)
-{
-	struct dw_hdmi *hdmi = bridge->driver_private;
-
-	return dw_hdmi_write_hdr_drm_infoframe(hdmi, buffer, len);
-}
-
-static int dw_hdmi_bridge_clear_spd_infoframe(struct drm_bridge *bridge)
-{
-	struct dw_hdmi *hdmi = bridge->driver_private;
-
-	return dw_hdmi_clear_infoframe(hdmi, HDMI_INFOFRAME_TYPE_SPD);
-}
-
-static int dw_hdmi_bridge_write_spd_infoframe(struct drm_bridge *bridge,
-					      const u8 *buffer, size_t len)
-{
-	struct dw_hdmi *hdmi = bridge->driver_private;
-
-	return dw_hdmi_write_spd_infoframe(hdmi, buffer, len);
-}
-
-static int dw_hdmi_bridge_clear_audio_infoframe(struct drm_bridge *bridge)
-{
-	struct dw_hdmi *hdmi = bridge->driver_private;
-
-	return dw_hdmi_clear_infoframe(hdmi, HDMI_INFOFRAME_TYPE_AUDIO);
-}
-
-static int dw_hdmi_bridge_write_audio_infoframe(struct drm_bridge *bridge,
-						const u8 *buffer, size_t len)
-{
-	struct dw_hdmi *hdmi = bridge->driver_private;
-
-	return dw_hdmi_write_audio_infoframe(hdmi, buffer, len);
-}
-
 static const struct drm_bridge_funcs dw_hdmi_bridge_funcs = {
 	.atomic_duplicate_state = drm_atomic_helper_bridge_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_bridge_destroy_state,
@@ -2803,6 +2752,7 @@ static const struct drm_bridge_funcs dw_hdmi_bridge_funcs = {
 	.mode_valid = dw_hdmi_bridge_mode_valid,
 	.detect = dw_hdmi_bridge_detect,
 	.edid_read = dw_hdmi_bridge_edid_read,
+	//.hdmi_tmds_char_rate_valid = dw_hdmi_bridge_tmds_char_rate_valid,
 	.hdmi_clear_avi_infoframe = dw_hdmi_bridge_clear_avi_infoframe,
 	.hdmi_write_avi_infoframe = dw_hdmi_bridge_write_avi_infoframe,
 	.hdmi_clear_hdmi_infoframe = dw_hdmi_bridge_clear_hdmi_infoframe,
