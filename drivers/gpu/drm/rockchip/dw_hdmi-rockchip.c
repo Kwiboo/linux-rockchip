@@ -547,11 +547,14 @@ static int dw_hdmi_rockchip_bind(struct device *dev, struct device *master,
 	if (!np)
 		return -ENODEV;
 
+	match = of_match_node(dw_hdmi_rockchip_dt_ids, np);
+	if (!match)
+		return -ENODEV;
+
 	hdmi = devm_kzalloc(dev, sizeof(*hdmi), GFP_KERNEL);
 	if (!hdmi)
 		return -ENOMEM;
 
-	match = of_match_node(dw_hdmi_rockchip_dt_ids, np);
 	plat_data = devm_kmemdup(dev, match->data, sizeof(*plat_data), GFP_KERNEL);
 	if (!plat_data)
 		return -ENOMEM;
