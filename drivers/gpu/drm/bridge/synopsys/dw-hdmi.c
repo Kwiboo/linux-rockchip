@@ -3501,9 +3501,9 @@ void dw_hdmi_remove(struct dw_hdmi *hdmi)
 
 	drm_bridge_remove(&hdmi->bridge);
 
-	if (hdmi->audio && !IS_ERR(hdmi->audio))
+	if (!IS_ERR_OR_NULL(hdmi->audio))
 		platform_device_unregister(hdmi->audio);
-	if (!IS_ERR(hdmi->cec))
+	if (!IS_ERR_OR_NULL(hdmi->cec))
 		platform_device_unregister(hdmi->cec);
 
 	if (hdmi->i2c)
