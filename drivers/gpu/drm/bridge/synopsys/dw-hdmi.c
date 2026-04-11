@@ -2865,10 +2865,18 @@ static int dw_hdmi_bridge_attach(struct drm_bridge *bridge,
 				 enum drm_bridge_attach_flags flags)
 {
 	struct dw_hdmi *hdmi = bridge->driver_private;
+	struct drm_bridge *next_bridge = hdmi->bridge.next_bridge;
+	int ret;
+
+	if (next_bridge) {
+		ret = drm_bridge_attach(encoder, next_bridge, bridge,
+					flags | DRM_BRIDGE_ATTACH_NO_CONNECTOR);
+		if (ret)
+			return ret;
+	}
 
 	if (flags & DRM_BRIDGE_ATTACH_NO_CONNECTOR)
-		return drm_bridge_attach(encoder, hdmi->bridge.next_bridge,
-					 bridge, flags);
+		return 0;
 
 	return dw_hdmi_connector_create(hdmi);
 }
