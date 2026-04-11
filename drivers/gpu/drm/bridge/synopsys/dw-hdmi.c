@@ -2781,12 +2781,13 @@ static int dw_hdmi_bridge_attach(struct drm_bridge *bridge,
 				 enum drm_bridge_attach_flags flags)
 {
 	struct dw_hdmi *hdmi = bridge->driver_private;
+	int ret;
 
 	/* DRM_BRIDGE_ATTACH_NO_CONNECTOR requires a remote-endpoint to the next bridge */
 	if (WARN_ON((flags & DRM_BRIDGE_ATTACH_NO_CONNECTOR) && !hdmi->plat_data->output_port))
 		return -EINVAL;
 
-	if (flags & DRM_BRIDGE_ATTACH_NO_CONNECTOR) {
+	if (hdmi->plat_data->output_port) {
 		struct device_node *remote __free(device_node) =
 			of_graph_get_remote_node(hdmi->dev->of_node,
 						 hdmi->plat_data->output_port, -1);
@@ -2798,7 +2799,10 @@ static int dw_hdmi_bridge_attach(struct drm_bridge *bridge,
 		if (!next_bridge)
 			return -EPROBE_DEFER;
 
-		return drm_bridge_attach(encoder, next_bridge, bridge, flags);
+		ret = drm_bridge_attach(encoder, next_bridge, bridge,
+					flags | DRM_BRIDGE_ATTACH_NO_CONNECTOR);
+		if (ret || (flags & DRM_BRIDGE_ATTACH_NO_CONNECTOR))
+			return ret;
 	}
 
 	return dw_hdmi_connector_create(hdmi);
