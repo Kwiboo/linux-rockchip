@@ -1260,7 +1260,7 @@ static void vop2_plane_atomic_update(struct drm_plane *plane,
 	format = vop2_convert_format(fb->format->format);
 	half_block_en = vop2_half_block_enable(pstate);
 
-	drm_dbg(vop2->drm, "vp%d update %s[%dx%d->%dx%d@%dx%d] fmt[%p4cc_%s] addr[%pad]\n",
+	drm_dbg_atomic(vop2->drm, "vp%d update %s[%dx%d->%dx%d@%dx%d] fmt[%p4cc_%s] addr[%pad]\n",
 		vp->id, win->data->name, src_w, src_h, dsp_w, dsp_h,
 		dest->x1, dest->y1,
 		&fb->format->format,
