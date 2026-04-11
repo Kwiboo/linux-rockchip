@@ -379,7 +379,7 @@ static int display_connector_probe(struct platform_device *pdev)
 	if (conn->hpd_irq >= 0)
 		conn->bridge.ops |= DRM_BRIDGE_OP_HPD;
 
-	dev_dbg(&pdev->dev,
+	dev_info(&pdev->dev,
 		"Found %s display connector '%s' %s DDC bus and %s HPD GPIO (ops 0x%x)\n",
 		drm_get_connector_type_name(conn->bridge.type),
 		label ? label : "<unlabelled>",
