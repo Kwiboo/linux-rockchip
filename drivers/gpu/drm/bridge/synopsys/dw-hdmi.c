@@ -2353,7 +2353,7 @@ static u32 *dw_hdmi_bridge_atomic_get_output_bus_fmts(struct drm_bridge *bridge,
 	struct drm_connector *conn = conn_state->connector;
 	struct drm_display_info *info = &conn->display_info;
 	struct drm_display_mode *mode = &crtc_state->mode;
-	u8 max_bpc = conn_state->max_requested_bpc;
+	u8 max_bpc = conn_state->hdmi.output_bpc ?: conn_state->max_requested_bpc;
 	bool is_hdmi2_sink = info->hdmi.scdc.supported ||
 			     (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR420));
 	u32 *output_fmts;
@@ -2581,6 +2581,9 @@ static int dw_hdmi_bridge_atomic_check(struct drm_bridge *bridge,
 				       struct drm_connector_state *conn_state)
 {
 	struct dw_hdmi *hdmi = bridge->driver_private;
+	struct drm_connector_state *old_conn_state =
+		drm_atomic_get_old_connector_state(conn_state->state,
+						   conn_state->connector);
 
 	hdmi->hdmi_data.enc_out_bus_format =
 			bridge_state->output_bus_cfg.format;
@@ -2591,6 +2594,9 @@ static int dw_hdmi_bridge_atomic_check(struct drm_bridge *bridge,
 	dev_dbg(hdmi->dev, "input format 0x%04x, output format 0x%04x\n",
 		bridge_state->input_bus_cfg.format,
 		bridge_state->output_bus_cfg.format);
+
+	if (!drm_connector_atomic_hdr_metadata_equal(old_conn_state, conn_state))
+		crtc_state->mode_changed = true;
 
 	return 0;
 }
@@ -2684,6 +2690,25 @@ static const struct drm_edid *dw_hdmi_bridge_edid_read(struct drm_bridge *bridge
 	return dw_hdmi_edid_read(hdmi, connector);
 }
 
+static enum drm_mode_status
+dw_hdmi_bridge_tmds_char_rate_valid(const struct drm_bridge *bridge,
+				    const struct drm_display_mode *mode,
+				    unsigned long long tmds_rate)
+{
+	struct dw_hdmi *hdmi = bridge->driver_private;
+	const struct dw_hdmi_plat_data *pdata = hdmi->plat_data;
+
+	if (tmds_rate > 600000000)
+		return MODE_CLOCK_HIGH;
+	else if (tmds_rate > HDMI14_MAX_TMDSCLK && hdmi->version < 0x200a)
+		return MODE_CLOCK_HIGH;
+	else if (pdata->tmds_char_rate_valid)
+		return pdata->tmds_char_rate_valid(hdmi, pdata->priv_data,
+						   mode, tmds_rate);
+
+	return MODE_OK;
+}
+
 static const struct drm_bridge_funcs dw_hdmi_bridge_funcs = {
 	.atomic_duplicate_state = drm_atomic_helper_bridge_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_bridge_destroy_state,
@@ -2697,7 +2722,7 @@ static const struct drm_bridge_funcs dw_hdmi_bridge_funcs = {
 	.mode_valid = dw_hdmi_bridge_mode_valid,
 	.detect = dw_hdmi_bridge_detect,
 	.edid_read = dw_hdmi_bridge_edid_read,
-	//.hdmi_tmds_char_rate_valid = dw_hdmi_bridge_tmds_char_rate_valid,
+	.hdmi_tmds_char_rate_valid = dw_hdmi_bridge_tmds_char_rate_valid,
 	.hdmi_clear_avi_infoframe = dw_hdmi_bridge_clear_avi_infoframe,
 	.hdmi_write_avi_infoframe = dw_hdmi_bridge_write_avi_infoframe,
 	.hdmi_clear_hdmi_infoframe = dw_hdmi_bridge_clear_hdmi_infoframe,
