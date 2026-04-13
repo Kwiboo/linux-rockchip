@@ -1275,11 +1275,8 @@ static void hdmi_video_packetize(struct dw_hdmi *hdmi)
 	}
 
 	/* set the packetizer registers */
-	val = ((color_depth << HDMI_VP_PR_CD_COLOR_DEPTH_OFFSET) &
-		HDMI_VP_PR_CD_COLOR_DEPTH_MASK) |
-		((hdmi_data->pix_repet_factor <<
-		HDMI_VP_PR_CD_DESIRED_PR_FACTOR_OFFSET) &
-		HDMI_VP_PR_CD_DESIRED_PR_FACTOR_MASK);
+	val = (color_depth << HDMI_VP_PR_CD_COLOR_DEPTH_OFFSET) &
+	      HDMI_VP_PR_CD_COLOR_DEPTH_MASK;
 	hdmi_writeb(hdmi, val, HDMI_VP_PR_CD);
 
 	/* HDMI1.4b specification section 6.5.3:
@@ -1299,7 +1296,7 @@ static void hdmi_video_packetize(struct dw_hdmi *hdmi)
 		  HDMI_VP_STUFF_PR_STUFFING_MASK, HDMI_VP_STUFF);
 
 	/* Data from pixel repeater block */
-	if (hdmi_data->pix_repet_factor > 1) {
+	if (hdmi_data->pix_repet_factor) {
 		vp_conf = HDMI_VP_CONF_PR_EN_ENABLE |
 			  HDMI_VP_CONF_BYPASS_SELECT_PIX_REPEATER;
 	} else { /* data from packetizer block */
@@ -1311,8 +1308,7 @@ static void hdmi_video_packetize(struct dw_hdmi *hdmi)
 		  HDMI_VP_CONF_PR_EN_MASK |
 		  HDMI_VP_CONF_BYPASS_SELECT_MASK, HDMI_VP_CONF);
 
-	hdmi_modb(hdmi, 1 << HDMI_VP_STUFF_IDEFAULT_PHASE_OFFSET,
-		  HDMI_VP_STUFF_IDEFAULT_PHASE_MASK, HDMI_VP_STUFF);
+	hdmi_modb(hdmi, 0, HDMI_VP_STUFF_IDEFAULT_PHASE_MASK, HDMI_VP_STUFF);
 
 	hdmi_writeb(hdmi, remap_size, HDMI_VP_REMAP);
 
@@ -2193,6 +2189,12 @@ static void dw_hdmi_enable_video_path(struct dw_hdmi *hdmi)
 	hdmi->mc_clkdis &= ~HDMI_MC_CLKDIS_TMDSCLK_DISABLE;
 	hdmi_writeb(hdmi, hdmi->mc_clkdis, HDMI_MC_CLKDIS);
 
+	/* Enable pixel repetition path */
+	if (hdmi->hdmi_data.pix_repet_factor) {
+		hdmi->mc_clkdis &= ~HDMI_MC_CLKDIS_PREPCLK_DISABLE;
+		hdmi_writeb(hdmi, hdmi->mc_clkdis, HDMI_MC_CLKDIS);
+	}
+
 	/* Enable csc path */
 	if (is_csc_needed(hdmi)) {
 		hdmi->mc_clkdis &= ~HDMI_MC_CLKDIS_CSCCLK_DISABLE;
@@ -2279,8 +2281,13 @@ static int dw_hdmi_poweron(struct dw_hdmi *hdmi,
 	else
 		hdmi->hdmi_data.enc_out_encoding = V4L2_YCBCR_ENC_709;
 
-	hdmi->hdmi_data.video_mode.mpixelrepetitionoutput = 0;
-	hdmi->hdmi_data.video_mode.mpixelrepetitioninput = 0;
+	if (mode->flags & DRM_MODE_FLAG_DBLCLK) {
+		hdmi->hdmi_data.video_mode.mpixelrepetitionoutput = 1;
+		hdmi->hdmi_data.video_mode.mpixelrepetitioninput = 1;
+	} else {
+		hdmi->hdmi_data.video_mode.mpixelrepetitionoutput = 0;
+		hdmi->hdmi_data.video_mode.mpixelrepetitioninput = 0;
+	}
 
 	if (hdmi->hdmi_data.enc_in_bus_format == MEDIA_BUS_FMT_FIXED)
 		hdmi->hdmi_data.enc_in_bus_format = MEDIA_BUS_FMT_RGB888_1X24;
@@ -2299,7 +2306,8 @@ static int dw_hdmi_poweron(struct dw_hdmi *hdmi,
 		drm_default_rgb_quant_range(mode) ==
 		HDMI_QUANTIZATION_RANGE_LIMITED;
 
-	hdmi->hdmi_data.pix_repet_factor = 0;
+	hdmi->hdmi_data.pix_repet_factor =
+		(mode->flags & DRM_MODE_FLAG_DBLCLK) ? 1 : 0;
 	hdmi->hdmi_data.hdcp_enable = 0;
 	hdmi->hdmi_data.video_mode.mdataenablepolarity = true;
 
@@ -2816,10 +2824,6 @@ dw_hdmi_bridge_mode_valid(struct drm_bridge *bridge,
 	struct dw_hdmi *hdmi = bridge->driver_private;
 	const struct dw_hdmi_plat_data *pdata = hdmi->plat_data;
 	enum drm_mode_status mode_status = MODE_OK;
-
-	/* We don't support double-clocked modes */
-	if (mode->flags & DRM_MODE_FLAG_DBLCLK)
-		return MODE_BAD;
 
 	if (pdata->mode_valid)
 		mode_status = pdata->mode_valid(hdmi, pdata->priv_data, info,
