@@ -218,6 +218,7 @@ static int __cifs_do_create(struct inode *dir, struct dentry *direntry,
 	struct cached_fid *parent_cfid = NULL;
 	int rdwr_for_fscache = 0;
 	__le32 lease_flags = 0;
+	bool found_parent_cfid;
 
 	*inode = NULL;
 	*oplock = 0;
@@ -347,24 +348,33 @@ static int __cifs_do_create(struct inode *dir, struct dentry *direntry,
 
 retry_open:
 	if (tcon->cfids && direntry->d_parent && server->dialect >= SMB30_PROT_ID) {
+		found_parent_cfid = false;
 		parent_cfid = NULL;
 		spin_lock(&tcon->cfids->cfid_list_lock);
 		list_for_each_entry(parent_cfid, &tcon->cfids->entries, entry) {
+			spin_lock(&parent_cfid->cfid_lock);
 			if (parent_cfid->dentry == direntry->d_parent) {
+				kref_get(&parent_cfid->refcount);
+				spin_unlock(&parent_cfid->cfid_lock);
+				spin_unlock(&tcon->cfids->cfid_list_lock);
+				found_parent_cfid = true;
 				cifs_dbg(FYI, "found a parent cached file handle\n");
-				if (is_valid_cached_dir(parent_cfid)) {
+				if (cached_dir_copy_lease_key(parent_cfid,
+						      fid->parent_lease_key)) {
 					lease_flags
 						|= SMB2_LEASE_FLAG_PARENT_LEASE_KEY_SET_LE;
-					memcpy(fid->parent_lease_key,
-					       parent_cfid->fid.lease_key,
-					       SMB2_LEASE_KEY_SIZE);
+					mutex_lock(&parent_cfid->dirents.de_mutex);
 					parent_cfid->dirents.is_valid = false;
 					parent_cfid->dirents.is_failed = true;
+					mutex_unlock(&parent_cfid->dirents.de_mutex);
 				}
+				close_cached_dir(parent_cfid);
 				break;
 			}
+			spin_unlock(&parent_cfid->cfid_lock);
 		}
-		spin_unlock(&tcon->cfids->cfid_list_lock);
+		if (!found_parent_cfid)
+			spin_unlock(&tcon->cfids->cfid_list_lock);
 	}
 
 	oparms = (struct cifs_open_parms) {
@@ -818,7 +828,12 @@ cifs_lookup(struct inode *parent_dir_inode, struct dentry *direntry,
 			 * dentry is negative and parent is fully cached:
 			 * we can assume file does not exist
 			 */
-			if (cfid->dirents.is_valid) {
+			bool dirents_valid;
+
+			mutex_lock(&cfid->dirents.de_mutex);
+			dirents_valid = cfid->dirents.is_valid;
+			mutex_unlock(&cfid->dirents.de_mutex);
+			if (dirents_valid) {
 				close_cached_dir(cfid);
 				goto out;
 			}
@@ -929,7 +944,12 @@ cifs_d_revalidate(struct inode *dir, const struct qstr *name,
 			 * dentry is negative and parent is fully cached:
 			 * we can assume file does not exist
 			 */
-			if (cfid->dirents.is_valid) {
+			bool dirents_valid;
+
+			mutex_lock(&cfid->dirents.de_mutex);
+			dirents_valid = cfid->dirents.is_valid;
+			mutex_unlock(&cfid->dirents.de_mutex);
+			if (dirents_valid) {
 				close_cached_dir(cfid);
 				return 1;
 			}
