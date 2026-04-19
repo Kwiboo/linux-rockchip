@@ -396,6 +396,7 @@ int meson_encoder_hdmi_probe(struct meson_drm *priv)
 	meson_encoder_hdmi->bridge.of_node = priv->dev->of_node;
 	meson_encoder_hdmi->bridge.type = DRM_MODE_CONNECTOR_HDMIA;
 	meson_encoder_hdmi->bridge.interlace_allowed = true;
+	meson_encoder_hdmi->bridge.ycbcr_420_allowed = true;
 
 	drm_bridge_add(&meson_encoder_hdmi->bridge);
 
@@ -435,9 +436,6 @@ int meson_encoder_hdmi_probe(struct meson_drm *priv)
 	 * We should have now in place:
 	 * encoder->[hdmi encoder bridge]->[dw-hdmi bridge]->[display connector bridge]->[display connector]
 	 */
-
-	/* Handle this here until handled by drm_bridge_connector_init() */
-	meson_encoder_hdmi->connector->ycbcr_420_allowed = true;
 
 	pdev = of_find_device_by_node(remote);
 	of_node_put(remote);
