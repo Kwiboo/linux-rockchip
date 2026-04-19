@@ -855,6 +855,7 @@ enum {
 	HDMI_FC_DBGFORCE_FORCEVIDEO = 0x1,
 
 /* FC_DATAUTO0 field values */
+	HDMI_FC_DATAUTO0_SPD_AUTO = 0x10,
 	HDMI_FC_DATAUTO0_VSD_AUTO = 0x08,
 
 /* FC_DATAUTO3 field values */
