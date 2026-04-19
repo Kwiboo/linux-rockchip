@@ -1907,6 +1907,37 @@ static int dw_hdmi_bridge_write_hdr_drm_infoframe(struct drm_bridge *bridge,
 	return 0;
 }
 
+static int dw_hdmi_bridge_clear_spd_infoframe(struct drm_bridge *bridge)
+{
+	struct dw_hdmi *hdmi = bridge->driver_private;
+
+	hdmi_modb(hdmi, 0, HDMI_FC_DATAUTO0_SPD_AUTO, HDMI_FC_DATAUTO0);
+
+	return 0;
+}
+
+static int dw_hdmi_bridge_write_spd_infoframe(struct drm_bridge *bridge,
+					      const u8 *buffer, size_t len)
+{
+	struct dw_hdmi *hdmi = bridge->driver_private;
+	int i;
+
+	dw_hdmi_bridge_clear_spd_infoframe(bridge);
+
+	for (i = 0; i < 8; i++)
+		hdmi_writeb(hdmi, buffer[4 + i], HDMI_FC_SPDVENDORNAME0 + i);
+
+	for (i = 0; i < 16; i++)
+		hdmi_writeb(hdmi, buffer[12 + i], HDMI_FC_SDPPRODUCTNAME0 + i);
+
+	hdmi_writeb(hdmi, buffer[28], HDMI_FC_SPDDEVICEINF);
+
+	hdmi_modb(hdmi, HDMI_FC_DATAUTO0_SPD_AUTO,
+		  HDMI_FC_DATAUTO0_SPD_AUTO, HDMI_FC_DATAUTO0);
+
+	return 0;
+}
+
 static void hdmi_av_composer(struct dw_hdmi *hdmi,
 			     const struct drm_display_info *display,
 			     const struct drm_display_mode *mode,
@@ -2806,6 +2837,8 @@ static const struct drm_bridge_funcs dw_hdmi_bridge_funcs = {
 	.hdmi_write_hdmi_infoframe = dw_hdmi_bridge_write_hdmi_infoframe,
 	.hdmi_clear_hdr_drm_infoframe = dw_hdmi_bridge_clear_hdr_drm_infoframe,
 	.hdmi_write_hdr_drm_infoframe = dw_hdmi_bridge_write_hdr_drm_infoframe,
+	.hdmi_clear_spd_infoframe = dw_hdmi_bridge_clear_spd_infoframe,
+	.hdmi_write_spd_infoframe = dw_hdmi_bridge_write_spd_infoframe,
 };
 
 /* -----------------------------------------------------------------------------
@@ -3238,7 +3271,8 @@ struct dw_hdmi *dw_hdmi_probe(struct platform_device *pdev,
 
 	hdmi->bridge.driver_private = hdmi;
 	hdmi->bridge.ops = DRM_BRIDGE_OP_DETECT | DRM_BRIDGE_OP_EDID
-			 | DRM_BRIDGE_OP_HPD | DRM_BRIDGE_OP_HDMI;
+			 | DRM_BRIDGE_OP_HPD | DRM_BRIDGE_OP_HDMI
+			 | DRM_BRIDGE_OP_HDMI_SPD_INFOFRAME;
 	hdmi->bridge.interlace_allowed = true;
 	hdmi->bridge.ddc = hdmi->ddc;
 	hdmi->bridge.of_node = pdev->dev.of_node;
