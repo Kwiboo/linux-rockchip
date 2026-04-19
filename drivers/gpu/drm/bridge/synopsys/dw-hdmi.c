@@ -3005,7 +3005,7 @@ struct dw_hdmi *dw_hdmi_probe(struct platform_device *pdev,
 
 	if (hdmi->version >= 0x200a && plat_data->use_drm_infoframe) {
 		hdmi->bridge.ops |= DRM_BRIDGE_OP_HDMI_HDR_DRM_INFOFRAME;
-		hdmi->bridge.max_bpc = 12;
+		hdmi->bridge.max_bpc = 8;
 	} else {
 		hdmi->bridge.max_bpc = 8;
 	}
