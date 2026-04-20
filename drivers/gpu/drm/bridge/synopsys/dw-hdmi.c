@@ -2544,22 +2544,6 @@ static int dw_hdmi_bridge_attach(struct drm_bridge *bridge,
 	return dw_hdmi_connector_create(hdmi);
 }
 
-static enum drm_mode_status
-dw_hdmi_bridge_mode_valid(struct drm_bridge *bridge,
-			  const struct drm_display_info *info,
-			  const struct drm_display_mode *mode)
-{
-	struct dw_hdmi *hdmi = bridge->driver_private;
-	const struct dw_hdmi_plat_data *pdata = hdmi->plat_data;
-	enum drm_mode_status mode_status = MODE_OK;
-
-	if (pdata->mode_valid)
-		mode_status = pdata->mode_valid(hdmi, pdata->priv_data, info,
-						mode);
-
-	return mode_status;
-}
-
 static void dw_hdmi_bridge_atomic_disable(struct drm_bridge *bridge,
 					  struct drm_atomic_commit *state)
 {
@@ -2645,8 +2629,6 @@ dw_hdmi_bridge_tmds_char_rate_valid(const struct drm_bridge *bridge,
 	else if (pdata->tmds_char_rate_valid)
 		return pdata->tmds_char_rate_valid(hdmi, pdata->priv_data,
 						   mode, tmds_rate);
-	else if (pdata->mode_valid)
-		return pdata->mode_valid(hdmi, pdata->priv_data, NULL, mode);
 
 	return MODE_OK;
 }
@@ -2661,7 +2643,6 @@ static const struct drm_bridge_funcs dw_hdmi_bridge_funcs = {
 	.atomic_get_input_bus_fmts = dw_hdmi_bridge_atomic_get_input_bus_fmts,
 	.atomic_enable = dw_hdmi_bridge_atomic_enable,
 	.atomic_disable = dw_hdmi_bridge_atomic_disable,
-	.mode_valid = dw_hdmi_bridge_mode_valid,
 	.detect = dw_hdmi_bridge_detect,
 	.edid_read = dw_hdmi_bridge_edid_read,
 	.hpd_enable = dw_hdmi_bridge_hpd_enable,

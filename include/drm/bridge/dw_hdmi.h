@@ -139,15 +139,12 @@ struct dw_hdmi_plat_data {
 	unsigned int max_bpc;
 
 	/*
-	 * Private data passed to all the .mode_valid(), .tmds_char_rate_valid()
-	 * and .configure_phy() callback functions.
+	 * Private data passed to all the .tmds_char_rate_valid() and
+	 * .configure_phy() callback functions.
 	 */
 	void *priv_data;
 
 	/* Platform-specific mode validation (optional). */
-	enum drm_mode_status (*mode_valid)(struct dw_hdmi *hdmi, void *data,
-					   const struct drm_display_info *info,
-					   const struct drm_display_mode *mode);
 	enum drm_mode_status (*tmds_char_rate_valid)(struct dw_hdmi *hdmi, void *data,
 						     const struct drm_display_mode *mode,
 						     unsigned long long tmds_rate);
