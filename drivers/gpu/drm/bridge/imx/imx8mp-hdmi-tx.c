@@ -20,9 +20,9 @@ struct imx8mp_hdmi {
 };
 
 static enum drm_mode_status
-imx8mp_hdmi_mode_valid(struct dw_hdmi *dw_hdmi, void *data,
-		       const struct drm_display_info *info,
-		       const struct drm_display_mode *mode)
+imx8mp_hdmi_tmds_char_rate_valid(struct dw_hdmi *dw_hdmi, void *data,
+				 const struct drm_display_mode *mode,
+				 unsigned long long tmds_rate)
 {
 	struct imx8mp_hdmi *hdmi = (struct imx8mp_hdmi *)data;
 	long round_rate;
@@ -132,7 +132,7 @@ static int imx8mp_dw_hdmi_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, PTR_ERR(hdmi->pixclk),
 				     "Unable to get pixel clock\n");
 
-	plat_data->mode_valid = imx8mp_hdmi_mode_valid;
+	plat_data->tmds_char_rate_valid = imx8mp_hdmi_tmds_char_rate_valid;
 	plat_data->phy_ops = &imx8mp_hdmi_phy_ops;
 	plat_data->phy_name = "SAMSUNG HDMI TX PHY";
 	plat_data->priv_data = hdmi;
