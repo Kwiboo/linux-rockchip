@@ -1398,7 +1398,6 @@ static int os03b10_initialize_controls(struct os03b10 *os03b10)
 {
 	const struct os03b10_mode *mode;
 	struct v4l2_ctrl_handler *handler;
-	struct v4l2_ctrl *ctrl;
 	s64 exposure_max, vblank_def;
 	u32 h_blank;
 	int ret;
@@ -1410,17 +1409,17 @@ static int os03b10_initialize_controls(struct os03b10 *os03b10)
 		return ret;
 	handler->lock = &os03b10->mutex;
 
-	ctrl = v4l2_ctrl_new_int_menu(handler, NULL,
-				      V4L2_CID_LINK_FREQ,
-				      0, 0,
-				      link_freq_menu_items);
-	if (ctrl)
-		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	os03b10->link_freq = v4l2_ctrl_new_int_menu(handler, NULL,
+						    V4L2_CID_LINK_FREQ,
+						    0, 0,
+						    link_freq_menu_items);
+	if (os03b10->link_freq)
+		os03b10->link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
-	v4l2_ctrl_new_std(handler, NULL,
-			  V4L2_CID_PIXEL_RATE,
-			  0, PIXEL_RATE_WITH_270M,
-			  1, PIXEL_RATE_WITH_270M);
+	os03b10->pixel_rate = v4l2_ctrl_new_std(handler, NULL,
+						V4L2_CID_PIXEL_RATE,
+						0, PIXEL_RATE_WITH_270M,
+						1, PIXEL_RATE_WITH_270M);
 
 	h_blank = mode->hts_def - mode->width;
 	os03b10->hblank = v4l2_ctrl_new_std(handler, NULL, V4L2_CID_HBLANK,
