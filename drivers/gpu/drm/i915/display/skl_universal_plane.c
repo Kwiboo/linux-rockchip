@@ -3148,12 +3148,6 @@ skl_get_initial_plane_config(struct intel_crtc *crtc,
 
 	fb->format = drm_get_format_info(display->drm, fourcc, fb->modifier);
 
-	if (!display->params.enable_dpt &&
-	    intel_fb_modifier_uses_dpt(display, fb->modifier)) {
-		drm_dbg_kms(display->drm, "DPT disabled, skipping initial FB\n");
-		goto error;
-	}
-
 	/*
 	 * DRM_MODE_ROTATE_ is counter clockwise to stay compatible with Xrandr
 	 * while i915 HW rotation is clockwise, that's why this swapping.
@@ -3206,7 +3200,7 @@ skl_get_initial_plane_config(struct intel_crtc *crtc,
 		    fb->width, fb->height, fb->format->cpp[0] * 8,
 		    base, fb->pitches[0], plane_config->size);
 
-	plane_config->fb = intel_fb;
+	plane_config->fb = &intel_fb->base;
 	return;
 
 error:
