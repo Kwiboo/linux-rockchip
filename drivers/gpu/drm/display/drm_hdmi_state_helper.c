@@ -1025,6 +1025,8 @@ static int write_infoframe(struct drm_connector *connector,
 	if (len < 0)
 		return len;
 
+	hdmi_infoframe_log(KERN_INFO, dev->dev, &new_frame->data);
+
 	ret = funcs->write_infoframe(connector, buffer, len);
 	if (ret) {
 		drm_dbg_kms(dev, "Call failed: %d\n", ret);
