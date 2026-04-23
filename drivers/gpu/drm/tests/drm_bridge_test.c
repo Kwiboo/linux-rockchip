@@ -5,6 +5,7 @@
 #include <linux/cleanup.h>
 #include <linux/media-bus-format.h>
 
+#include <drm/drm_atomic_helper.h>
 #include <drm/drm_atomic_state_helper.h>
 #include <drm/drm_atomic_uapi.h>
 #include <drm/drm_bridge.h>
@@ -116,6 +117,28 @@ static const struct drm_bridge_funcs drm_test_bridge_atomic_funcs = {
 	.atomic_destroy_state	= drm_atomic_helper_bridge_destroy_state,
 	.atomic_duplicate_state	= drm_atomic_helper_bridge_duplicate_state,
 	.atomic_reset		= drm_atomic_helper_bridge_reset,
+};
+
+static int dummy_clear_infoframe(struct drm_bridge *bridge)
+{
+	return 0;
+}
+
+static int dummy_write_infoframe(struct drm_bridge *bridge, const u8 *buffer,
+				 size_t len)
+{
+	return 0;
+}
+
+static const struct drm_bridge_funcs drm_test_bridge_bus_fmts_funcs = {
+	.atomic_get_output_bus_fmts	= drm_atomic_helper_bridge_get_hdmi_output_bus_fmts,
+	.atomic_destroy_state		= drm_atomic_helper_bridge_destroy_state,
+	.atomic_duplicate_state		= drm_atomic_helper_bridge_duplicate_state,
+	.atomic_reset			= drm_atomic_helper_bridge_reset,
+	.hdmi_write_avi_infoframe	= dummy_write_infoframe,
+	.hdmi_write_hdmi_infoframe	= dummy_write_infoframe,
+	.hdmi_clear_avi_infoframe	= dummy_clear_infoframe,
+	.hdmi_clear_hdmi_infoframe	= dummy_clear_infoframe,
 };
 
 /**
@@ -539,6 +562,83 @@ drm_test_bridge_chain_init(struct kunit *test, unsigned int num_bridges,
 	return priv;
 }
 
+static struct drm_bridge_init_priv *
+drm_test_bridge_hdmi_init(struct kunit *test, const struct drm_bridge_funcs *funcs,
+			  unsigned int supported_formats, int max_bpc)
+{
+	struct drm_bridge_init_priv *priv;
+	struct drm_encoder *enc;
+	struct drm_bridge *bridge;
+	struct drm_device *drm;
+	struct device *dev;
+	int ret;
+
+	dev = drm_kunit_helper_alloc_device(test);
+	if (IS_ERR(dev))
+		return ERR_CAST(dev);
+
+	priv = drm_kunit_helper_alloc_drm_device(test, dev,
+						 struct drm_bridge_init_priv, drm,
+						 DRIVER_MODESET | DRIVER_ATOMIC);
+	if (IS_ERR(priv))
+		return ERR_CAST(priv);
+
+	priv->test_bridge = devm_drm_bridge_alloc(dev, struct drm_bridge_priv, bridge, funcs);
+	if (IS_ERR(priv->test_bridge))
+		return ERR_CAST(priv->test_bridge);
+
+	priv->test_bridge->data = priv;
+
+	drm = &priv->drm;
+	priv->plane = drm_kunit_helper_create_primary_plane(test, drm,
+							    NULL,
+							    NULL,
+							    NULL, 0,
+							    NULL);
+	if (IS_ERR(priv->plane))
+		return ERR_CAST(priv->plane);
+
+	priv->crtc = drm_kunit_helper_create_crtc(test, drm,
+						  priv->plane, NULL,
+						  NULL,
+						  NULL);
+	if (IS_ERR(priv->crtc))
+		return ERR_CAST(priv->crtc);
+
+	enc = &priv->encoder;
+	ret = drmm_encoder_init(drm, enc, NULL, DRM_MODE_ENCODER_TMDS, NULL);
+	if (ret)
+		return ERR_PTR(ret);
+
+	enc->possible_crtcs = drm_crtc_mask(priv->crtc);
+
+	bridge = &priv->test_bridge->bridge;
+	bridge->type = DRM_MODE_CONNECTOR_HDMIA;
+	bridge->supported_formats = supported_formats;
+	bridge->max_bpc = max_bpc;
+	bridge->ops |= DRM_BRIDGE_OP_HDMI;
+	bridge->vendor = "LNX";
+	bridge->product = "KUnit";
+
+	ret = drm_kunit_bridge_add(test, bridge);
+	if (ret)
+		return ERR_PTR(ret);
+
+	ret = drm_bridge_attach(enc, bridge, NULL, 0);
+	if (ret)
+		return ERR_PTR(ret);
+
+	priv->connector = drm_bridge_connector_init(drm, enc);
+	if (IS_ERR(priv->connector))
+		return ERR_CAST(priv->connector);
+
+	drm_connector_attach_encoder(priv->connector, enc);
+
+	drm_mode_config_reset(drm);
+
+	return priv;
+}
+
 /*
  * Test that drm_bridge_get_current_state() returns the last committed
  * state for an atomic bridge.
@@ -786,10 +886,94 @@ retry_reset:
 	KUNIT_EXPECT_EQ(test, bridge_priv->disable_count, 1);
 }
 
+/*
+ * Test that a bridge using the drm_atomic_helper_bridge_get_hdmi_output_bus_fmts()
+ * function for &drm_bridge_funcs.atomic_get_output_bus_fmts behaves as expected
+ * for an HDMI connector bridge. Does so by creating an HDMI bridge connector
+ * with RGB444, YCBCR444, and YCBCR420 (but not YCBCR422) as supported formats,
+ * sets the output depth to 8 bits per component, and then validates the returned
+ * list of bus formats.
+ */
+static void drm_test_drm_bridge_helper_hdmi_output_bus_fmts(struct kunit *test)
+{
+	struct drm_connector_state *conn_state;
+	struct drm_bridge_state *bridge_state;
+	struct drm_modeset_acquire_ctx ctx;
+	struct drm_bridge_init_priv *priv;
+	struct drm_crtc_state *crtc_state;
+	struct drm_atomic_state *state;
+	struct drm_display_mode *mode;
+	unsigned int num_output_fmts;
+	struct drm_bridge *bridge;
+	u32 *out_bus_fmts;
+	int ret;
+
+	priv = drm_test_bridge_hdmi_init(test, &drm_test_bridge_bus_fmts_funcs,
+					 BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444) |
+					 BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444) |
+					 BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR420),
+					 12);
+	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, priv);
+
+	bridge = &priv->test_bridge->bridge;
+
+	drm_modeset_acquire_init(&ctx, 0);
+
+	state = drm_kunit_helper_atomic_state_alloc(test, &priv->drm, &ctx);
+	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, state);
+
+retry_commit:
+	conn_state = drm_atomic_get_connector_state(state, priv->connector);
+	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, conn_state);
+
+	conn_state->hdmi.output_bpc = 8;
+
+	mode = drm_kunit_display_mode_from_cea_vic(test, &priv->drm, 16);
+	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, mode);
+
+	ret = drm_atomic_set_crtc_for_connector(conn_state, priv->crtc);
+	if (ret == -EDEADLK) {
+		drm_modeset_backoff(&ctx);
+		goto retry_commit;
+	}
+	KUNIT_ASSERT_EQ(test, ret, 0);
+
+	crtc_state = drm_atomic_get_crtc_state(state, priv->crtc);
+	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, crtc_state);
+
+	ret = drm_atomic_set_mode_for_crtc(crtc_state, mode);
+	if (ret == -EDEADLK) {
+		drm_modeset_backoff(&ctx);
+		goto retry_commit;
+	}
+	KUNIT_ASSERT_EQ(test, ret, 0);
+
+	crtc_state->enable = true;
+	crtc_state->active = true;
+
+	bridge_state = drm_atomic_get_bridge_state(state, bridge);
+	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, bridge_state);
+
+	out_bus_fmts = bridge->funcs->atomic_get_output_bus_fmts(
+		bridge, bridge_state, crtc_state, conn_state, &num_output_fmts);
+	KUNIT_EXPECT_NOT_NULL(test, out_bus_fmts);
+	KUNIT_EXPECT_EQ(test, num_output_fmts, 3);
+
+	KUNIT_EXPECT_EQ(test, out_bus_fmts[0], MEDIA_BUS_FMT_RGB888_1X24);
+	KUNIT_EXPECT_EQ(test, out_bus_fmts[1], MEDIA_BUS_FMT_YUV8_1X24);
+	KUNIT_EXPECT_EQ(test, out_bus_fmts[2], MEDIA_BUS_FMT_UYYVYY8_0_5X24);
+
+	drm_modeset_drop_locks(&ctx);
+	drm_modeset_acquire_fini(&ctx);
+
+	kfree(out_bus_fmts);
+}
+
 static struct kunit_case drm_bridge_helper_reset_crtc_tests[] = {
 	KUNIT_CASE(drm_test_drm_bridge_helper_reset_crtc_atomic),
 	KUNIT_CASE(drm_test_drm_bridge_helper_reset_crtc_atomic_disabled),
 	KUNIT_CASE(drm_test_drm_bridge_helper_reset_crtc_legacy),
+	KUNIT_CASE(drm_test_drm_bridge_helper_hdmi_output_bus_fmts),
 	{ }
 };
 
