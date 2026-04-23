@@ -571,13 +571,105 @@ enum drm_colorspace {
  *   YCbCr 4:2:2 output format (ie. with horizontal subsampling)
  * @DRM_OUTPUT_COLOR_FORMAT_YCBCR420:
  *   YCbCr 4:2:0 output format (ie. with horizontal and vertical subsampling)
+ * @DRM_OUTPUT_COLOR_FORMAT_COUNT:
+ *   Number of valid output color format values in this enum
  */
 enum drm_output_color_format {
 	DRM_OUTPUT_COLOR_FORMAT_RGB444 = 0,
 	DRM_OUTPUT_COLOR_FORMAT_YCBCR444,
 	DRM_OUTPUT_COLOR_FORMAT_YCBCR422,
 	DRM_OUTPUT_COLOR_FORMAT_YCBCR420,
+	DRM_OUTPUT_COLOR_FORMAT_COUNT,
 };
+
+/**
+ * enum drm_connector_color_format - Connector Color Format Request
+ *
+ * This enum, unlike &enum drm_output_color_format, is used to specify requests
+ * for a specific color format on a connector through the DRM "color format"
+ * property. The difference is that it has an "AUTO" value to specify that
+ * no specific choice has been made.
+ */
+enum drm_connector_color_format {
+	/**
+	 * @DRM_CONNECTOR_COLOR_FORMAT_AUTO: The driver or display protocol
+	 * helpers should pick a suitable color format. All implementations of a
+	 * specific display protocol must behave the same way with "AUTO", but
+	 * different display protocols do not necessarily have the same "AUTO"
+	 * semantics.
+	 *
+	 * For HDMI, "AUTO" picks RGB, but falls back to YCbCr 4:2:0 if the
+	 * bandwidth required for full-scale RGB is not available, or the mode
+	 * is YCbCr 4:2:0-only, as long as the mode and output both support
+	 * YCbCr 4:2:0.
+	 *
+	 * For display protocols other than HDMI, the recursive bridge chain
+	 * format selection picks the first chain of bridge formats that works,
+	 * as has already been the case before the introduction of the "color
+	 * format" property. Non-HDMI bridges should therefore either sort their
+	 * bus output formats by preference, or agree on a unified auto format
+	 * selection logic that's implemented in a common state helper (like
+	 * how HDMI does it).
+	 */
+	DRM_CONNECTOR_COLOR_FORMAT_AUTO = 0,
+
+	/**
+	 * @DRM_CONNECTOR_COLOR_FORMAT_RGB444: RGB output format. The
+	 * quantization range depends on the value of the "Broadcast RGB"
+	 * property if it is present on the connector.
+	 */
+	DRM_CONNECTOR_COLOR_FORMAT_RGB444,
+
+	/**
+	 * @DRM_CONNECTOR_COLOR_FORMAT_YCBCR444: YCbCr 4:4:4 output format (ie.
+	 * not subsampled). Quantization range is "Limited" by default.
+	 */
+	DRM_CONNECTOR_COLOR_FORMAT_YCBCR444,
+
+	/**
+	 * @DRM_CONNECTOR_COLOR_FORMAT_YCBCR422: YCbCr 4:2:2 output format (ie.
+	 * with horizontal subsampling). Quantization range is "Limited" by
+	 * default.
+	 */
+	DRM_CONNECTOR_COLOR_FORMAT_YCBCR422,
+
+	/**
+	 * @DRM_CONNECTOR_COLOR_FORMAT_YCBCR420: YCbCr 4:2:0 output format (ie.
+	 * with horizontal and vertical subsampling). Quantization range is
+	 * "Limited" by default.
+	 */
+	DRM_CONNECTOR_COLOR_FORMAT_YCBCR420,
+
+	/**
+	 * @DRM_CONNECTOR_COLOR_FORMAT_COUNT: Number of valid connector color
+	 * format values in this enum
+	 */
+	DRM_CONNECTOR_COLOR_FORMAT_COUNT,
+};
+
+/**
+ * drm_connector_color_format_valid - Validate drm_connector_color_format value
+ * @fmt: value to check against all values of &enum drm_connector_color_format
+ *
+ * Checks whether the passed in value of @fmt is one of the allowable values in
+ * &enum drm_connector_color_format.
+ *
+ * Returns: %true if it's a valid value for the enum, %false otherwise.
+ */
+static inline bool __pure
+drm_connector_color_format_valid(enum drm_connector_color_format fmt)
+{
+	switch (fmt) {
+	case DRM_CONNECTOR_COLOR_FORMAT_AUTO:
+	case DRM_CONNECTOR_COLOR_FORMAT_RGB444:
+	case DRM_CONNECTOR_COLOR_FORMAT_YCBCR444:
+	case DRM_CONNECTOR_COLOR_FORMAT_YCBCR422:
+	case DRM_CONNECTOR_COLOR_FORMAT_YCBCR420:
+		return true;
+	default:
+		return false;
+	}
+}
 
 const char *
 drm_hdmi_connector_get_output_format_name(enum drm_output_color_format fmt);
@@ -1166,6 +1258,13 @@ struct drm_connector_state {
 	 * to wider color gamuts like BT2020.
 	 */
 	enum drm_colorspace colorspace;
+
+	/**
+	 * @color_format: State variable for Connector property to request
+	 * color format change on Sink. This is most commonly used to switch
+	 * between RGB to YUV and vice-versa.
+	 */
+	enum drm_connector_color_format color_format;
 
 	/**
 	 * @writeback_job: Writeback job for writeback connectors
@@ -2166,6 +2265,12 @@ struct drm_connector {
 	struct drm_property *colorspace_property;
 
 	/**
+	 * @color_format_property: Connector property to set the suitable
+	 * color format supported by the sink.
+	 */
+	struct drm_property *color_format_property;
+
+	/**
 	 * @path_blob_ptr:
 	 *
 	 * DRM blob property data for the DP MST path property. This should only
@@ -2647,6 +2752,9 @@ void drm_connector_list_iter_end(struct drm_connector_list_iter *iter);
 bool drm_connector_has_possible_encoder(struct drm_connector *connector,
 					struct drm_encoder *encoder);
 const char *drm_get_colorspace_name(enum drm_colorspace colorspace);
+
+int drm_connector_attach_color_format_property(struct drm_connector *connector,
+					       unsigned long supported_color_formats);
 
 /**
  * drm_for_each_connector_iter - connector_list iterator macro
