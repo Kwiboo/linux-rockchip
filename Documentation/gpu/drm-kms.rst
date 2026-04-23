@@ -599,6 +599,12 @@ Color Management Properties
 .. kernel-doc:: drivers/gpu/drm/drm_color_mgmt.c
    :doc: overview
 
+Color Format Property
+---------------------
+
+.. kernel-doc:: drivers/gpu/drm/drm_connector.c
+   :doc: Color format
+
 Tile Group Property
 -------------------
 
