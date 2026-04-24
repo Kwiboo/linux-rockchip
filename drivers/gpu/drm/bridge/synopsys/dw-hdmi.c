@@ -1120,10 +1120,12 @@ static void dw_hdmi_update_csc_coeffs(struct dw_hdmi *hdmi)
 	const u16 (*csc_coeff)[3][4] = &csc_coeff_default;
 	bool is_input_rgb, is_output_rgb, is_limited_range = true;
 	unsigned i;
+	int depth;
 	u32 csc_scale = 1;
 
 	is_input_rgb = hdmi_bus_fmt_is_rgb(hdmi->hdmi_data.enc_in_bus_format);
 	is_output_rgb = hdmi_bus_fmt_is_rgb(hdmi->hdmi_data.enc_out_bus_format);
+	depth = hdmi_bus_fmt_color_depth(hdmi->hdmi_data.enc_out_bus_format);
 
 	if (!is_input_rgb && is_output_rgb) {
 		if (hdmi->hdmi_data.enc_out_encoding == V4L2_YCBCR_ENC_601)
@@ -1150,6 +1152,13 @@ static void dw_hdmi_update_csc_coeffs(struct dw_hdmi *hdmi)
 		u16 coeff_a = (*csc_coeff)[0][i];
 		u16 coeff_b = (*csc_coeff)[1][i];
 		u16 coeff_c = (*csc_coeff)[2][i];
+
+		/* Scale CSC coeffs to match output color depth */
+		if (i == 3 && depth > 8) {
+			coeff_a <<= depth - 8;
+			coeff_b <<= depth - 8;
+			coeff_c <<= depth - 8;
+		}
 
 		hdmi_writeb(hdmi, coeff_a & 0xff, HDMI_CSC_COEF_A1_LSB + i * 2);
 		hdmi_writeb(hdmi, coeff_a >> 8, HDMI_CSC_COEF_A1_MSB + i * 2);
