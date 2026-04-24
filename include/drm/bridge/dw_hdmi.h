@@ -132,7 +132,6 @@ struct dw_hdmi_plat_data {
 	 */
 	unsigned int output_port;
 
-	unsigned long input_bus_encoding;
 	bool use_drm_infoframe;
 	/* Supported encoder output formats: bitmask of @drm_output_color_format */
 	unsigned int supported_formats;
