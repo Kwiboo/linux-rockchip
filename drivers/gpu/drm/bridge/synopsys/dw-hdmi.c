@@ -2331,6 +2331,8 @@ static u32 *dw_hdmi_bridge_atomic_get_input_bus_fmts(struct drm_bridge *bridge,
 					u32 output_fmt,
 					unsigned int *num_input_fmts)
 {
+	struct dw_hdmi *hdmi = bridge->driver_private;
+	unsigned int supported_formats;
 	u32 *input_fmts;
 	unsigned int i = 0;
 
@@ -2341,6 +2343,12 @@ static u32 *dw_hdmi_bridge_atomic_get_input_bus_fmts(struct drm_bridge *bridge,
 	if (!input_fmts)
 		return NULL;
 
+	supported_formats = hdmi->plat_data->supported_formats;
+
+	/* The default supported format from the encoders is full range RGB */
+	if (!supported_formats)
+		supported_formats = BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444);
+
 	switch (output_fmt) {
 	/* If MEDIA_BUS_FMT_FIXED is tested, return default bus format */
 	case MEDIA_BUS_FMT_FIXED:
@@ -2348,63 +2356,94 @@ static u32 *dw_hdmi_bridge_atomic_get_input_bus_fmts(struct drm_bridge *bridge,
 		break;
 	/* 8bit */
 	case MEDIA_BUS_FMT_RGB888_1X24:
-		input_fmts[i++] = MEDIA_BUS_FMT_RGB888_1X24;
-		input_fmts[i++] = MEDIA_BUS_FMT_YUV8_1X24;
-		input_fmts[i++] = MEDIA_BUS_FMT_UYVY8_1X16;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444))
+			input_fmts[i++] = MEDIA_BUS_FMT_RGB888_1X24;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
+			input_fmts[i++] = MEDIA_BUS_FMT_YUV8_1X24;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422))
+			input_fmts[i++] = MEDIA_BUS_FMT_UYVY8_1X16;
 		break;
 	case MEDIA_BUS_FMT_YUV8_1X24:
-		input_fmts[i++] = MEDIA_BUS_FMT_YUV8_1X24;
-		input_fmts[i++] = MEDIA_BUS_FMT_UYVY8_1X16;
-		input_fmts[i++] = MEDIA_BUS_FMT_RGB888_1X24;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
+			input_fmts[i++] = MEDIA_BUS_FMT_YUV8_1X24;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422))
+			input_fmts[i++] = MEDIA_BUS_FMT_UYVY8_1X16;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444))
+			input_fmts[i++] = MEDIA_BUS_FMT_RGB888_1X24;
 		break;
 	case MEDIA_BUS_FMT_UYVY8_1X16:
-		input_fmts[i++] = MEDIA_BUS_FMT_UYVY8_1X16;
-		input_fmts[i++] = MEDIA_BUS_FMT_YUV8_1X24;
-		input_fmts[i++] = MEDIA_BUS_FMT_RGB888_1X24;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422))
+			input_fmts[i++] = MEDIA_BUS_FMT_UYVY8_1X16;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
+			input_fmts[i++] = MEDIA_BUS_FMT_YUV8_1X24;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444))
+			input_fmts[i++] = MEDIA_BUS_FMT_RGB888_1X24;
 		break;
 
 	/* 10bit */
 	case MEDIA_BUS_FMT_RGB101010_1X30:
-		input_fmts[i++] = MEDIA_BUS_FMT_RGB101010_1X30;
-		input_fmts[i++] = MEDIA_BUS_FMT_YUV10_1X30;
-		input_fmts[i++] = MEDIA_BUS_FMT_UYVY10_1X20;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444))
+			input_fmts[i++] = MEDIA_BUS_FMT_RGB101010_1X30;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
+			input_fmts[i++] = MEDIA_BUS_FMT_YUV10_1X30;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422))
+			input_fmts[i++] = MEDIA_BUS_FMT_UYVY10_1X20;
 		break;
 	case MEDIA_BUS_FMT_YUV10_1X30:
-		input_fmts[i++] = MEDIA_BUS_FMT_YUV10_1X30;
-		input_fmts[i++] = MEDIA_BUS_FMT_UYVY10_1X20;
-		input_fmts[i++] = MEDIA_BUS_FMT_RGB101010_1X30;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
+			input_fmts[i++] = MEDIA_BUS_FMT_YUV10_1X30;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422))
+			input_fmts[i++] = MEDIA_BUS_FMT_UYVY10_1X20;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444))
+			input_fmts[i++] = MEDIA_BUS_FMT_RGB101010_1X30;
 		break;
 	case MEDIA_BUS_FMT_UYVY10_1X20:
-		input_fmts[i++] = MEDIA_BUS_FMT_UYVY10_1X20;
-		input_fmts[i++] = MEDIA_BUS_FMT_YUV10_1X30;
-		input_fmts[i++] = MEDIA_BUS_FMT_RGB101010_1X30;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422))
+			input_fmts[i++] = MEDIA_BUS_FMT_UYVY10_1X20;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
+			input_fmts[i++] = MEDIA_BUS_FMT_YUV10_1X30;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444))
+			input_fmts[i++] = MEDIA_BUS_FMT_RGB101010_1X30;
 		break;
 
 	/* 12bit */
 	case MEDIA_BUS_FMT_RGB121212_1X36:
-		input_fmts[i++] = MEDIA_BUS_FMT_RGB121212_1X36;
-		input_fmts[i++] = MEDIA_BUS_FMT_YUV12_1X36;
-		input_fmts[i++] = MEDIA_BUS_FMT_UYVY12_1X24;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444))
+			input_fmts[i++] = MEDIA_BUS_FMT_RGB121212_1X36;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
+			input_fmts[i++] = MEDIA_BUS_FMT_YUV12_1X36;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422))
+			input_fmts[i++] = MEDIA_BUS_FMT_UYVY12_1X24;
 		break;
 	case MEDIA_BUS_FMT_YUV12_1X36:
-		input_fmts[i++] = MEDIA_BUS_FMT_YUV12_1X36;
-		input_fmts[i++] = MEDIA_BUS_FMT_UYVY12_1X24;
-		input_fmts[i++] = MEDIA_BUS_FMT_RGB121212_1X36;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
+			input_fmts[i++] = MEDIA_BUS_FMT_YUV12_1X36;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422))
+			input_fmts[i++] = MEDIA_BUS_FMT_UYVY12_1X24;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444))
+			input_fmts[i++] = MEDIA_BUS_FMT_RGB121212_1X36;
 		break;
 	case MEDIA_BUS_FMT_UYVY12_1X24:
-		input_fmts[i++] = MEDIA_BUS_FMT_UYVY12_1X24;
-		input_fmts[i++] = MEDIA_BUS_FMT_YUV12_1X36;
-		input_fmts[i++] = MEDIA_BUS_FMT_RGB121212_1X36;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422))
+			input_fmts[i++] = MEDIA_BUS_FMT_UYVY12_1X24;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
+			input_fmts[i++] = MEDIA_BUS_FMT_YUV12_1X36;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444))
+			input_fmts[i++] = MEDIA_BUS_FMT_RGB121212_1X36;
 		break;
 
 	/* 16bit */
 	case MEDIA_BUS_FMT_RGB161616_1X48:
-		input_fmts[i++] = MEDIA_BUS_FMT_RGB161616_1X48;
-		input_fmts[i++] = MEDIA_BUS_FMT_YUV16_1X48;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444))
+			input_fmts[i++] = MEDIA_BUS_FMT_RGB161616_1X48;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
+			input_fmts[i++] = MEDIA_BUS_FMT_YUV16_1X48;
 		break;
 	case MEDIA_BUS_FMT_YUV16_1X48:
-		input_fmts[i++] = MEDIA_BUS_FMT_YUV16_1X48;
-		input_fmts[i++] = MEDIA_BUS_FMT_RGB161616_1X48;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
+			input_fmts[i++] = MEDIA_BUS_FMT_YUV16_1X48;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444))
+			input_fmts[i++] = MEDIA_BUS_FMT_RGB161616_1X48;
 		break;
 
 	/*YUV 4:2:0 */
@@ -2412,7 +2451,8 @@ static u32 *dw_hdmi_bridge_atomic_get_input_bus_fmts(struct drm_bridge *bridge,
 	case MEDIA_BUS_FMT_UYYVYY10_0_5X30:
 	case MEDIA_BUS_FMT_UYYVYY12_0_5X36:
 	case MEDIA_BUS_FMT_UYYVYY16_0_5X48:
-		input_fmts[i++] = output_fmt;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR420))
+			input_fmts[i++] = output_fmt;
 		break;
 	}
 
@@ -3003,12 +3043,9 @@ struct dw_hdmi *dw_hdmi_probe(struct platform_device *pdev,
 	hdmi->bridge.vendor = "Synopsys";
 	hdmi->bridge.product = "DW HDMI TX";
 
-	if (hdmi->version >= 0x200a && plat_data->use_drm_infoframe) {
+	if (hdmi->version >= 0x200a && plat_data->use_drm_infoframe)
 		hdmi->bridge.ops |= DRM_BRIDGE_OP_HDMI_HDR_DRM_INFOFRAME;
-		hdmi->bridge.max_bpc = 8;
-	} else {
-		hdmi->bridge.max_bpc = 8;
-	}
+	hdmi->bridge.max_bpc = max(plat_data->max_bpc, 8);
 
 	if (hdmi->version >= 0x200a)
 		hdmi->bridge.ycbcr_420_allowed = plat_data->ycbcr_420_allowed;
@@ -3090,6 +3127,11 @@ struct dw_hdmi *dw_hdmi_probe(struct platform_device *pdev,
 		hdmi->bridge.hdmi_cec_dev = hdmi->dev;
 		hdmi->bridge.ops |= DRM_BRIDGE_OP_HDMI_CEC_NOTIFIER;
 	}
+
+	/* The CSC block can convert RGB444 to/from YCBCR444/422 */
+	if (config0 & HDMI_CONFIG0_CSC)
+		hdmi->bridge.supported_formats |= BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444) |
+						  BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422);
 
 	drm_bridge_add(&hdmi->bridge);
 

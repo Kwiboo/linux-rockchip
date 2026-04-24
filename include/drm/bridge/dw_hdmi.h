@@ -129,6 +129,10 @@ struct dw_hdmi_plat_data {
 	unsigned long input_bus_encoding;
 	bool use_drm_infoframe;
 	bool ycbcr_420_allowed;
+	/* Supported encoder output formats: bitmask of @drm_output_color_format */
+	unsigned int supported_formats;
+	/* Maximum bits per color channel: 8, 10 or 12 */
+	unsigned int max_bpc;
 
 	/*
 	 * Private data passed to the .tmds_char_rate_valid() and .configure_phy()
