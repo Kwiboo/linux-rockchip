@@ -245,6 +245,7 @@ struct inno_hdmi_phy {
 	struct clk *phyclk;
 	unsigned long pixclock;
 	unsigned long tmdsclock;
+	struct phy_configure_opts_hdmi hdmi_cfg;
 };
 
 struct pre_pll_config {
@@ -554,19 +555,10 @@ static inline void inno_update_bits(struct inno_hdmi_phy *inno, u8 reg,
 static unsigned long inno_hdmi_phy_get_tmdsclk(struct inno_hdmi_phy *inno,
 					       unsigned long rate)
 {
-	int bus_width = phy_get_bus_width(inno->phy);
+	if (inno->hdmi_cfg.tmds_char_rate)
+		return inno->hdmi_cfg.tmds_char_rate;
 
-	switch (bus_width) {
-	case 4:
-	case 5:
-	case 6:
-	case 10:
-	case 12:
-	case 16:
-		return (u64)rate * bus_width / 8;
-	default:
-		return rate;
-	}
+	return rate;
 }
 
 static irqreturn_t inno_hdmi_phy_rk3328_hardirq(int irq, void *dev_id)
@@ -600,6 +592,16 @@ static irqreturn_t inno_hdmi_phy_rk3328_irq(int irq, void *dev_id)
 	inno_update_bits(inno, 0x02, RK3328_PDATA_EN, RK3328_PDATA_EN);
 
 	return IRQ_HANDLED;
+}
+
+static int inno_hdmi_phy_configure(struct phy *phy,
+				   union phy_configure_opts *opts)
+{
+	struct inno_hdmi_phy *inno = phy_get_drvdata(phy);
+
+	inno->hdmi_cfg = opts->hdmi;
+
+	return 0;
 }
 
 static int inno_hdmi_phy_power_on(struct phy *phy)
@@ -668,6 +670,7 @@ static int inno_hdmi_phy_power_off(struct phy *phy)
 
 static const struct phy_ops inno_hdmi_phy_ops = {
 	.owner = THIS_MODULE,
+	.configure = inno_hdmi_phy_configure,
 	.power_on = inno_hdmi_phy_power_on,
 	.power_off = inno_hdmi_phy_power_off,
 };
@@ -1392,7 +1395,6 @@ static int inno_hdmi_phy_probe(struct platform_device *pdev)
 	}
 
 	phy_set_drvdata(inno->phy, inno);
-	phy_set_bus_width(inno->phy, 8);
 
 	if (inno->plat_data->ops->init) {
 		ret = inno->plat_data->ops->init(inno);
