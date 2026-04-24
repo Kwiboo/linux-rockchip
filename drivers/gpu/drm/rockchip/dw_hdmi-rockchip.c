@@ -463,6 +463,7 @@ static const struct dw_hdmi_plat_data rk3399_hdmi_drv_data = {
 	.phy_data = &rk3399_chip_data,
 	.supported_formats = BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444),
 	.use_drm_infoframe = true,
+	.max_bpc = 10,
 };
 
 static struct rockchip_hdmi_chip_data rk3568_chip_data = {
