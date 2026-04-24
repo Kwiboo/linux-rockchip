@@ -481,6 +481,10 @@ static const struct dw_hdmi_plat_data rk3228_hdmi_drv_data = {
 	.phy_ops = &rk3228_hdmi_phy_ops,
 	.phy_name = "inno_dw_hdmi_phy2",
 	.phy_force_vendor = true,
+	.supported_formats = BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444) |
+			     BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444) |
+			     BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR420),
+	.max_bpc = 10,
 };
 
 static struct rockchip_hdmi_chip_data rk3288_chip_data = {
@@ -517,7 +521,11 @@ static const struct dw_hdmi_plat_data rk3328_hdmi_drv_data = {
 	.phy_ops = &rk3328_hdmi_phy_ops,
 	.phy_name = "inno_dw_hdmi_phy2",
 	.phy_force_vendor = true,
+	.supported_formats = BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444) |
+			     BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444) |
+			     BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR420),
 	.use_drm_infoframe = true,
+	.max_bpc = 10,
 };
 
 static struct rockchip_hdmi_chip_data rk3368_chip_data = {
