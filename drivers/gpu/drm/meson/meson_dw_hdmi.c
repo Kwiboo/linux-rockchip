@@ -719,7 +719,6 @@ static int meson_dw_hdmi_bind(struct device *dev, struct device *master,
 	dw_plat_data->phy_ops = &meson_dw_hdmi_phy_ops;
 	dw_plat_data->phy_name = "meson_dw_hdmi_phy";
 	dw_plat_data->phy_data = meson_dw_hdmi;
-	dw_plat_data->input_bus_encoding = V4L2_YCBCR_ENC_709;
 	dw_plat_data->supported_formats = BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444) |
 					  BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422) |
 					  BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR420);

@@ -127,7 +127,6 @@ struct hdmi_vmode {
 struct hdmi_data_info {
 	unsigned int enc_in_bus_format;
 	unsigned int enc_out_bus_format;
-	unsigned int enc_in_encoding;
 	unsigned int enc_out_encoding;
 	unsigned int pix_repet_factor;
 	unsigned int hdcp_enable;
@@ -2260,13 +2259,6 @@ static int dw_hdmi_poweron(struct dw_hdmi *hdmi,
 
 	if (hdmi->hdmi_data.enc_in_bus_format == MEDIA_BUS_FMT_FIXED)
 		hdmi->hdmi_data.enc_in_bus_format = MEDIA_BUS_FMT_RGB888_1X24;
-
-	/* TOFIX: Get input encoding from plat data or fallback to none */
-	if (hdmi->plat_data->input_bus_encoding)
-		hdmi->hdmi_data.enc_in_encoding =
-			hdmi->plat_data->input_bus_encoding;
-	else
-		hdmi->hdmi_data.enc_in_encoding = V4L2_YCBCR_ENC_DEFAULT;
 
 	if (hdmi->hdmi_data.enc_out_bus_format == MEDIA_BUS_FMT_FIXED)
 		hdmi->hdmi_data.enc_out_bus_format = MEDIA_BUS_FMT_RGB888_1X24;
