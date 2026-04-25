@@ -950,6 +950,8 @@ static const struct vop_common rk3399_common = {
 	.dsp_data_swap = VOP_REG(RK3399_DSP_CTRL0, 0x1f, 12),
 	.dsp_out_yuv = VOP_REG(RK3288_POST_SCL_CTRL, 0x1, 2),
 	.dsp_background = VOP_REG(RK3288_DSP_BG, 0xffffffff, 0),
+
+	.bcsh_r2y_en = VOP_REG(RK3399_BCSH_CTRL, 0x1, 4),
 };
 
 static const struct vop_yuv2yuv_phy rk3399_yuv2yuv_win01_data = {
