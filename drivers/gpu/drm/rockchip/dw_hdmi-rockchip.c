@@ -573,8 +573,12 @@ static const struct dw_hdmi_plat_data rk3568_hdmi_drv_data = {
 	.cur_ctr    = rockchip_cur_ctr,
 	.phy_config = rockchip_phy_config,
 	.phy_data = &rk3568_chip_data,
+	.supported_formats = BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444) |
+			     BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444) |
+			     BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR420),
 	.use_drm_infoframe = true,
 	.output_port = 1,
+	.max_bpc = 10,
 };
 
 static const struct of_device_id dw_hdmi_rockchip_dt_ids[] = {
