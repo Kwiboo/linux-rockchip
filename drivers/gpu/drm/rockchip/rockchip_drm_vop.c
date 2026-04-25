@@ -1495,6 +1495,8 @@ static void vop_crtc_atomic_enable(struct drm_crtc *crtc,
 	VOP_REG_SET(vop, common, overlay_mode, yuv_output);
 	VOP_REG_SET(vop, common, dsp_out_yuv, yuv_output);
 
+	VOP_REG_SET(vop, common, bcsh_r2y_en, yuv_output);
+
 	/*
 	 * Background color is 10bit depth if vop version >= 3.5
 	 */

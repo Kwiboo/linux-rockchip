@@ -131,6 +131,8 @@ struct vop_common {
 	struct vop_reg dsp_data_swap;
 	struct vop_reg dsp_out_yuv;
 	struct vop_reg dsp_background;
+
+	struct vop_reg bcsh_r2y_en;
 };
 
 struct vop_misc {
