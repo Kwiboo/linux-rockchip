@@ -3473,9 +3473,19 @@ struct dw_hdmi *dw_hdmi_probe(struct platform_device *pdev,
 	hdmi->bridge.ddc = hdmi->ddc;
 	hdmi->bridge.of_node = pdev->dev.of_node;
 	hdmi->bridge.type = DRM_MODE_CONNECTOR_HDMIA;
+	hdmi->bridge.vendor = "Synopsys";
+	hdmi->bridge.product = "DW HDMI TX";
+	hdmi->bridge.max_bpc = max(plat_data->max_bpc, 8);
+
+	/* Encoder formats can bypass the CSC block and be output as-is */
+	hdmi->bridge.supported_formats = plat_data->supported_formats;
+
+	/* Default format expected from encoder is full range RGB */
+	if (!hdmi->bridge.supported_formats)
+		hdmi->bridge.supported_formats = BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444);
 
 	if (hdmi->version >= 0x200a &&
-	    plat_data->supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR420))
+	    hdmi->bridge.supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR420))
 		hdmi->bridge.ycbcr_420_allowed = true;
 
 	memset(&pdevinfo, 0, sizeof(pdevinfo));
