@@ -69,22 +69,34 @@ static const u16 csc_coeff_rgb_out_eitu709[3][4] = {
 	{ 0x2000, 0x0000, 0x3b61, 0x7e25 }
 };
 
-static const u16 csc_coeff_rgb_in_eitu601[3][4] = {
+static const u16 csc_coeff_rgb_full_to_eitu601_full[3][4] = {
 	{ 0x2591, 0x1322, 0x074b, 0x0000 },
 	{ 0x6535, 0x2000, 0x7acc, 0x0200 },
 	{ 0x6acd, 0x7534, 0x2000, 0x0200 }
 };
 
-static const u16 csc_coeff_rgb_in_eitu709[3][4] = {
+static const u16 csc_coeff_rgb_full_to_eitu601_limited[3][4] = {
+	{ 0x2023, 0x105e, 0x063d, 0x0040 },
+	{ 0x688e, 0x1c00, 0x7b73, 0x0200 },
+	{ 0x6d73, 0x768e, 0x1c00, 0x0200 }
+};
+
+static const u16 csc_coeff_rgb_full_to_eitu709_full[3][4] = {
 	{ 0x2dc5, 0x0d9b, 0x049e, 0x0000 },
 	{ 0x62f0, 0x2000, 0x7d11, 0x0200 },
 	{ 0x6756, 0x78ab, 0x2000, 0x0200 }
 };
 
+static const u16 csc_coeff_rgb_full_to_eitu709_limited[3][4] = {
+	{ 0x2727, 0x0ba4, 0x03f3, 0x0040 },
+	{ 0x6692, 0x1c00, 0x7d6f, 0x0200 },
+	{ 0x6a6b, 0x7996, 0x1c00, 0x0200 }
+};
+
 static const u16 csc_coeff_rgb_full_to_rgb_limited[3][4] = {
-	{ 0x1b7c, 0x0000, 0x0000, 0x0020 },
-	{ 0x0000, 0x1b7c, 0x0000, 0x0020 },
-	{ 0x0000, 0x0000, 0x1b7c, 0x0020 }
+	{ 0x1b80, 0x0000, 0x0000, 0x0020 },
+	{ 0x0000, 0x1b80, 0x0000, 0x0020 },
+	{ 0x0000, 0x0000, 0x1b80, 0x0020 }
 };
 
 struct hdmi_vmode {
@@ -1106,7 +1118,7 @@ static bool is_csc_needed(struct dw_hdmi *hdmi)
 static void dw_hdmi_update_csc_coeffs(struct dw_hdmi *hdmi)
 {
 	const u16 (*csc_coeff)[3][4] = &csc_coeff_default;
-	bool is_input_rgb, is_output_rgb;
+	bool is_input_rgb, is_output_rgb, is_limited_range = true;
 	unsigned i;
 	u32 csc_scale = 1;
 
@@ -1120,9 +1132,13 @@ static void dw_hdmi_update_csc_coeffs(struct dw_hdmi *hdmi)
 			csc_coeff = &csc_coeff_rgb_out_eitu709;
 	} else if (is_input_rgb && !is_output_rgb) {
 		if (hdmi->hdmi_data.enc_out_encoding == V4L2_YCBCR_ENC_601)
-			csc_coeff = &csc_coeff_rgb_in_eitu601;
+			csc_coeff = is_limited_range ?
+				    &csc_coeff_rgb_full_to_eitu601_limited :
+				    &csc_coeff_rgb_full_to_eitu601_full;
 		else
-			csc_coeff = &csc_coeff_rgb_in_eitu709;
+			csc_coeff = is_limited_range ?
+				    &csc_coeff_rgb_full_to_eitu709_limited :
+				    &csc_coeff_rgb_full_to_eitu709_full;
 		csc_scale = 0;
 	} else if (is_input_rgb && is_output_rgb &&
 		   hdmi->hdmi_data.rgb_limited_range) {
