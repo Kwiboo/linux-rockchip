@@ -99,6 +99,18 @@ static const u16 csc_coeff_rgb_full_to_eitu709_limited[3][4] = {
 	{ 0x6a6b, 0x7996, 0x1c00, 0x0200 }
 };
 
+static const u16 csc_coeff_rgb_full_to_bt2020_full[3][4] = {
+	{ 0x2b64, 0x10d0, 0x03cb, 0x0000 },
+	{ 0x6293, 0x2000, 0x7d6e, 0x0200 },
+	{ 0x78f0, 0x7711, 0x2000, 0x0200 }
+};
+
+static const u16 csc_coeff_rgb_full_to_bt2020_limited[3][4] = {
+	{ 0x251e, 0x0e62, 0x033f, 0x0040 },
+	{ 0x6641, 0x2000, 0x7dc0, 0x0200 },
+	{ 0x6bd2, 0x782f, 0x2000, 0x0200 }
+};
+
 static const u16 csc_coeff_rgb_full_to_rgb_limited[3][4] = {
 	{ 0x1b80, 0x0000, 0x0000, 0x0020 },
 	{ 0x0000, 0x1b80, 0x0000, 0x0020 },
@@ -1140,6 +1152,10 @@ static void dw_hdmi_update_csc_coeffs(struct dw_hdmi *hdmi)
 			csc_coeff = is_limited_range ?
 				    &csc_coeff_rgb_full_to_eitu601_limited :
 				    &csc_coeff_rgb_full_to_eitu601_full;
+		else if (hdmi->hdmi_data.enc_out_encoding == V4L2_YCBCR_ENC_BT2020)
+			csc_coeff = is_limited_range ?
+				    &csc_coeff_rgb_full_to_bt2020_limited :
+				    &csc_coeff_rgb_full_to_bt2020_full;
 		else
 			csc_coeff = is_limited_range ?
 				    &csc_coeff_rgb_full_to_eitu709_limited :
