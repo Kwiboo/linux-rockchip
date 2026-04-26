@@ -2623,6 +2623,7 @@ static u32 *dw_hdmi_bridge_atomic_get_output_bus_fmts(struct drm_bridge *bridge,
 	u8 max_bpc = conn_state->max_requested_bpc;
 	bool is_hdmi2_sink = info->hdmi.scdc.supported ||
 			     (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR420));
+	unsigned int supported_formats = bridge->supported_formats;
 	u32 *output_fmts;
 	unsigned int i = 0;
 
@@ -2678,39 +2679,50 @@ static u32 *dw_hdmi_bridge_atomic_get_output_bus_fmts(struct drm_bridge *bridge,
 	 */
 
 	/* Default 8bit RGB fallback */
-	output_fmts[i++] = MEDIA_BUS_FMT_RGB888_1X24;
+	if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444))
+		output_fmts[i++] = MEDIA_BUS_FMT_RGB888_1X24;
 
 	if (max_bpc >= 16 && info->bpc == 16) {
-		if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
+		if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444) &&
+		    supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
 			output_fmts[i++] = MEDIA_BUS_FMT_YUV16_1X48;
 
-		output_fmts[i++] = MEDIA_BUS_FMT_RGB161616_1X48;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444))
+			output_fmts[i++] = MEDIA_BUS_FMT_RGB161616_1X48;
 	}
 
 	if (max_bpc >= 12 && info->bpc >= 12) {
-		if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422))
+		if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422) &&
+		    supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422))
 			output_fmts[i++] = MEDIA_BUS_FMT_UYVY12_1X24;
 
-		if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
+		if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444) &&
+		    supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
 			output_fmts[i++] = MEDIA_BUS_FMT_YUV12_1X36;
 
-		output_fmts[i++] = MEDIA_BUS_FMT_RGB121212_1X36;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444))
+			output_fmts[i++] = MEDIA_BUS_FMT_RGB121212_1X36;
 	}
 
 	if (max_bpc >= 10 && info->bpc >= 10) {
-		if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422))
+		if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422) &&
+		    supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422))
 			output_fmts[i++] = MEDIA_BUS_FMT_UYVY10_1X20;
 
-		if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
+		if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444) &&
+		    supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
 			output_fmts[i++] = MEDIA_BUS_FMT_YUV10_1X30;
 
-		output_fmts[i++] = MEDIA_BUS_FMT_RGB101010_1X30;
+		if (supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444))
+			output_fmts[i++] = MEDIA_BUS_FMT_RGB101010_1X30;
 	}
 
-	if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422))
+	if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422) &&
+	    supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422))
 		output_fmts[i++] = MEDIA_BUS_FMT_UYVY8_1X16;
 
-	if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
+	if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444) &&
+	    supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
 		output_fmts[i++] = MEDIA_BUS_FMT_YUV8_1X24;
 
 	*num_output_fmts = i;
