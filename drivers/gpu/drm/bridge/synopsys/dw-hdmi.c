@@ -52,6 +52,11 @@
 
 #define HOTPLUG_DEBOUNCE_MS	1100
 
+/* The CSC block supports converting RGB444 to/from YCBCR444/422 */
+#define CSC_FORMATS		(BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444) | \
+				 BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444) | \
+				 BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422))
+
 static const u16 csc_coeff_default[3][4] = {
 	{ 0x2000, 0x0000, 0x0000, 0x0000 },
 	{ 0x0000, 0x2000, 0x0000, 0x0000 },
@@ -3550,6 +3555,11 @@ struct dw_hdmi *dw_hdmi_probe(struct platform_device *pdev,
 		hdmi->bridge.ops |= DRM_BRIDGE_OP_HDMI_CEC_NOTIFIER;
 		hdmi->bridge.hdmi_cec_dev = hdmi->dev;
 	}
+
+	/* Extend supported formats if CSC block is available */
+	if (config0 & HDMI_CONFIG0_CSC &&
+	    hdmi->bridge.supported_formats & CSC_FORMATS)
+		hdmi->bridge.supported_formats |= CSC_FORMATS;
 
 	drm_bridge_add(&hdmi->bridge);
 
