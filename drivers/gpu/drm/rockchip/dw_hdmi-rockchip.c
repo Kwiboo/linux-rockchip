@@ -303,6 +303,7 @@ dw_hdmi_rockchip_encoder_atomic_check(struct drm_encoder *encoder,
 {
 	struct rockchip_crtc_state *s = to_rockchip_crtc_state(crtc_state);
 	struct rockchip_hdmi *hdmi = to_rockchip_hdmi(encoder);
+	union phy_configure_opts phy_cfg = {};
 	u32 bus_format;
 
 	bus_format = dw_hdmi_rockchip_get_bus_format(encoder, conn_state);
@@ -327,7 +328,13 @@ dw_hdmi_rockchip_encoder_atomic_check(struct drm_encoder *encoder,
 	s->output_type = DRM_MODE_CONNECTOR_HDMIA;
 	s->bus_format = bus_format;
 
-	return 0;
+	if (!hdmi->phy)
+		return 0;
+
+	phy_cfg.hdmi.bpc = conn_state->hdmi.output_bpc;
+	phy_cfg.hdmi.tmds_char_rate = conn_state->hdmi.tmds_char_rate;
+
+	return phy_configure(hdmi->phy, &phy_cfg);
 }
 
 static const struct drm_encoder_helper_funcs dw_hdmi_rockchip_encoder_helper_funcs = {
