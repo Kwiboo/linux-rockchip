@@ -2634,15 +2634,6 @@ static u32 *dw_hdmi_bridge_atomic_get_output_bus_fmts(struct drm_bridge *bridge,
 	if (!output_fmts)
 		return NULL;
 
-	/* If dw-hdmi is the first or only bridge, avoid negociating with ourselves */
-	if (list_is_singular(&bridge->encoder->bridge_chain) ||
-	    list_is_first(&bridge->chain_node, &bridge->encoder->bridge_chain)) {
-		*num_output_fmts = 1;
-		output_fmts[0] = MEDIA_BUS_FMT_FIXED;
-
-		return output_fmts;
-	}
-
 	/*
 	 * If the current mode enforces 4:2:0, force the output bus format
 	 * to 4:2:0 and do not add the YUV422/444/RGB formats
