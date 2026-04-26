@@ -2573,7 +2573,8 @@ static int dw_hdmi_connector_create(struct dw_hdmi *hdmi)
 	 */
 	drm_atomic_helper_connector_reset(connector);
 
-	drm_connector_attach_max_bpc_property(connector, 8, 16);
+	drm_connector_attach_max_bpc_property(connector, 8,
+					      max(hdmi->plat_data->max_bpc, 8));
 
 	if (hdmi->version >= 0x200a && hdmi->plat_data->use_drm_infoframe)
 		drm_connector_attach_hdr_output_metadata_property(connector);
