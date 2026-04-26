@@ -2547,9 +2547,9 @@ static int dw_hdmi_connector_create(struct dw_hdmi *hdmi)
 	struct drm_connector *connector = &hdmi->connector;
 	int ret;
 
-	if (hdmi->version >= 0x200a)
-		connector->ycbcr_420_allowed =
-			hdmi->plat_data->ycbcr_420_allowed;
+	if (hdmi->version >= 0x200a &&
+	    hdmi->plat_data->supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR420))
+		connector->ycbcr_420_allowed = true;
 	else
 		connector->ycbcr_420_allowed = false;
 
@@ -3433,8 +3433,9 @@ struct dw_hdmi *dw_hdmi_probe(struct platform_device *pdev,
 	hdmi->bridge.of_node = pdev->dev.of_node;
 	hdmi->bridge.type = DRM_MODE_CONNECTOR_HDMIA;
 
-	if (hdmi->version >= 0x200a)
-		hdmi->bridge.ycbcr_420_allowed = plat_data->ycbcr_420_allowed;
+	if (hdmi->version >= 0x200a &&
+	    plat_data->supported_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR420))
+		hdmi->bridge.ycbcr_420_allowed = true;
 
 	memset(&pdevinfo, 0, sizeof(pdevinfo));
 	pdevinfo.parent = dev;
