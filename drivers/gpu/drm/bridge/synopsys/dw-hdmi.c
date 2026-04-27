@@ -2642,6 +2642,9 @@ dw_hdmi_bridge_tmds_char_rate_valid(const struct drm_bridge *bridge,
 	else if (tmds_rate > HDMI_1_3_TMDS_CHAR_RATE_MAX_HZ &&
 		 hdmi->version < 0x200a)
 		return MODE_CLOCK_HIGH;
+	else if (pdata->tmds_char_rate_valid)
+		return pdata->tmds_char_rate_valid(hdmi, pdata->priv_data,
+						   mode, tmds_rate);
 	else if (pdata->mode_valid)
 		return pdata->mode_valid(hdmi, pdata->priv_data, NULL, mode);
 
