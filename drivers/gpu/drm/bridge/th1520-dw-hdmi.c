@@ -55,15 +55,15 @@ struct th1520_hdmi {
 };
 
 static enum drm_mode_status
-th1520_hdmi_mode_valid(struct dw_hdmi *hdmi, void *data,
-		       const struct drm_display_info *info,
-		       const struct drm_display_mode *mode)
+th1520_hdmi_tmds_char_rate_valid(struct dw_hdmi *hdmi, void *data,
+				 const struct drm_display_mode *mode,
+				 unsigned long long tmds_rate)
 {
 	/*
 	 * The maximum supported clock frequency is 594 MHz, as shown in the PHY
 	 * parameters table.
 	 */
-	if (mode->clock > 594000)
+	if (tmds_rate > 594000000)
 		return MODE_CLOCK_HIGH;
 
 	return MODE_OK;
@@ -131,7 +131,7 @@ static int th1520_dw_hdmi_probe(struct platform_device *pdev)
 				     "Unable to get apb reset\n");
 
 	plat_data->output_port = 1;
-	plat_data->mode_valid = th1520_hdmi_mode_valid;
+	plat_data->tmds_char_rate_valid = th1520_hdmi_tmds_char_rate_valid;
 	plat_data->configure_phy = th1520_hdmi_phy_configure;
 	plat_data->priv_data = hdmi;
 
