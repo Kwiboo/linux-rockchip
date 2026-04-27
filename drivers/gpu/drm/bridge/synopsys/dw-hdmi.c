@@ -2350,7 +2350,7 @@ static int dw_hdmi_connector_create(struct dw_hdmi *hdmi)
 	if (IS_ERR(connector))
 		return PTR_ERR(connector);
 
-	return 0;
+	return drm_connector_attach_broadcast_rgb_property(connector);
 }
 
 /* -----------------------------------------------------------------------------
