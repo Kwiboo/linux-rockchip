@@ -136,28 +136,28 @@ static const struct drm_encoder_helper_funcs dw_hdmi_imx_encoder_helper_funcs = 
 };
 
 static enum drm_mode_status
-imx6q_hdmi_mode_valid(struct dw_hdmi *hdmi, void *data,
-		      const struct drm_display_info *info,
-		      const struct drm_display_mode *mode)
+imx6q_hdmi_tmds_char_rate_valid(struct dw_hdmi *hdmi, void *data,
+				const struct drm_display_mode *mode,
+				unsigned long long tmds_rate)
 {
-	if (mode->clock < 13500)
+	if (tmds_rate < 13500000)
 		return MODE_CLOCK_LOW;
 	/* FIXME: Hardware is capable of 266MHz, but setup data is missing. */
-	if (mode->clock > 216000)
+	if (tmds_rate > 216000000)
 		return MODE_CLOCK_HIGH;
 
 	return MODE_OK;
 }
 
 static enum drm_mode_status
-imx6dl_hdmi_mode_valid(struct dw_hdmi *hdmi, void *data,
-		       const struct drm_display_info *info,
-		       const struct drm_display_mode *mode)
+imx6dl_hdmi_tmds_char_rate_valid(struct dw_hdmi *hdmi, void *data,
+				 const struct drm_display_mode *mode,
+				 unsigned long long tmds_rate)
 {
-	if (mode->clock < 13500)
+	if (tmds_rate < 13500000)
 		return MODE_CLOCK_LOW;
 	/* FIXME: Hardware is capable of 270MHz, but setup data is missing. */
-	if (mode->clock > 216000)
+	if (tmds_rate > 216000000)
 		return MODE_CLOCK_HIGH;
 
 	return MODE_OK;
@@ -167,14 +167,14 @@ static struct dw_hdmi_plat_data imx6q_hdmi_drv_data = {
 	.mpll_cfg   = imx_mpll_cfg,
 	.cur_ctr    = imx_cur_ctr,
 	.phy_config = imx_phy_config,
-	.mode_valid = imx6q_hdmi_mode_valid,
+	.tmds_char_rate_valid = imx6q_hdmi_tmds_char_rate_valid,
 };
 
 static struct dw_hdmi_plat_data imx6dl_hdmi_drv_data = {
 	.mpll_cfg = imx_mpll_cfg,
 	.cur_ctr  = imx_cur_ctr,
 	.phy_config = imx_phy_config,
-	.mode_valid = imx6dl_hdmi_mode_valid,
+	.tmds_char_rate_valid = imx6dl_hdmi_tmds_char_rate_valid,
 };
 
 static const struct of_device_id dw_hdmi_imx_dt_ids[] = {
