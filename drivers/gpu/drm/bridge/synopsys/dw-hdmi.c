@@ -2343,12 +2343,17 @@ static int dw_hdmi_connector_create(struct dw_hdmi *hdmi)
 {
 	struct drm_encoder *encoder = hdmi->bridge.encoder;
 	struct drm_connector *connector;
+	int ret;
 
 	connector = drm_bridge_connector_init(hdmi->bridge.dev, encoder);
 	if (IS_ERR(connector))
 		return PTR_ERR(connector);
 
-	return drm_connector_attach_encoder(connector, encoder);
+	ret = drm_connector_attach_encoder(connector, encoder);
+	if (ret)
+		return ret;
+
+	return drm_connector_attach_broadcast_rgb_property(connector);
 }
 
 /* -----------------------------------------------------------------------------
