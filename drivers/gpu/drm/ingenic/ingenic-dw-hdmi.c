@@ -44,14 +44,14 @@ static const struct dw_hdmi_phy_config ingenic_phy_config[] = {
 };
 
 static enum drm_mode_status
-ingenic_dw_hdmi_mode_valid(struct dw_hdmi *hdmi, void *data,
-			   const struct drm_display_info *info,
-			   const struct drm_display_mode *mode)
+ingenic_dw_hdmi_tmds_char_rate_valid(struct dw_hdmi *hdmi, void *data,
+				     const struct drm_display_mode *mode,
+				     unsigned long long tmds_rate)
 {
-	if (mode->clock < 13500)
+	if (tmds_rate < 13500000)
 		return MODE_CLOCK_LOW;
 	/* FIXME: Hardware is capable of 270MHz, but setup data is missing. */
-	if (mode->clock > 216000)
+	if (tmds_rate > 216000000)
 		return MODE_CLOCK_HIGH;
 
 	return MODE_OK;
@@ -61,7 +61,7 @@ static struct dw_hdmi_plat_data ingenic_dw_hdmi_plat_data = {
 	.mpll_cfg   = ingenic_mpll_cfg,
 	.cur_ctr    = ingenic_cur_ctr,
 	.phy_config = ingenic_phy_config,
-	.mode_valid = ingenic_dw_hdmi_mode_valid,
+	.tmds_char_rate_valid = ingenic_dw_hdmi_tmds_char_rate_valid,
 	.output_port	= 1,
 };
 
