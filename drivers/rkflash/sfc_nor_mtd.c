@@ -50,7 +50,7 @@ static int sfc_erase_mtd(struct mtd_info *mtd, struct erase_info *instr)
 
 	mutex_lock(p_dev->lock);
 
-	if (len == p_dev->mtd.size) {
+	if (!IS_ENABLED(CONFIG_RK_SPI_FLASH_AUTO_MERGE) && len == p_dev->mtd.size) {
 		ret = snor_erase(p_dev->snor, 0, ERASE_CHIP);
 		if (ret) {
 			rkflash_print_error("snor_erase CHIP 0x%x ret=%d\n",
@@ -189,7 +189,11 @@ int sfc_nor_mtd_init(struct SFNOR_DEV *p_dev, struct mutex *lock)
 	}
 
 	priv_dev->snor = p_dev;
+#ifdef CONFIG_RK_SPI_FLASH_AUTO_MERGE
+	capacity = p_dev->capacity_total;
+#else
 	capacity = p_dev->capacity;
+#endif
 	priv_dev->mtd.name = "sfc_nor";
 	priv_dev->mtd.type = MTD_NORFLASH;
 	priv_dev->mtd.writesize = 1;

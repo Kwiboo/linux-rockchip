@@ -145,6 +145,10 @@ int sfc_request(struct rk_sfc_op *op, u32 addr, void *data, u32 size)
 	/* shift in the data at negedge sclk_out */
 	op->sfctrl.d32 |= 0x2;
 	cmd.b.datasize = size;
+#ifdef CONFIG_RK_SPI_FLASH_AUTO_MERGE
+	sfc_set_delay_lines(s_cs_dll_cells[op->sfcmd.b.cs], op->sfcmd.b.cs);
+	cmd.b.cs = 0; /* Only CS0 is natively supported; other CS lines are expanded using GPIOs. */
+#endif
 
 	if (sfc_version >= SFC_VER_4)
 		writel(size, g_sfc_reg + SFC_LEN_EXT);

@@ -308,6 +308,12 @@ static int rksfc_probe(struct platform_device *pdev)
 		rksfc_delay_lines_tuning(0);
 	else if (sfc_get_version() >= SFC_VER_4)
 		sfc_set_delay_lines(0, 0);
+#ifdef CONFIG_RK_SPI_FLASH_AUTO_MERGE
+	if (sfc_get_version() >= SFC_VER_4 && g_sfc_info.clk_rate > RKSFC_DLL_THRESHOLD_RATE)
+		rksfc_delay_lines_tuning(1);
+	else if (sfc_get_version() >= SFC_VER_4)
+		sfc_set_delay_lines(0, 1);
+#endif
 
 #ifdef CONFIG_RK_SFC_NOR
 	dev_result = rkflash_dev_init(g_sfc_info.reg_base, FLASH_TYPE_SFC_NOR, &sfc_nor_ops);

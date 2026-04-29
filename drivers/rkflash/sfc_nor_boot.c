@@ -157,6 +157,12 @@ static unsigned int snor_capacity(void)
 
 static void snor_deinit(void)
 {
+#ifdef CONFIG_RK_SPI_FLASH_AUTO_MERGE
+	snor_set_cur_cs(1);
+	snor_disable_QE_cs1(sfnor_dev);
+	snor_reset_device();
+	snor_set_cur_cs(0);
+#endif
 	snor_disable_QE(sfnor_dev);
 	snor_reset_device();
 	kfree(sfnor_dev);

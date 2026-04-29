@@ -345,6 +345,62 @@ static int snor_write_status(u32 reg_index, u8 status)
 	return ret;
 }
 
+#ifdef CONFIG_RK_SPI_FLASH_AUTO_MERGE
+int snor_erase(struct SFNOR_DEV *p_dev,
+	       u32 addr,
+	       enum NOR_ERASE_TYPE erase_type)
+{
+	int ret;
+	struct rk_sfc_op op;
+	int timeout[] = {400, 2000, 40000};   /* ms */
+	u8 blk_erase_cmd, sec_erase_cmd, addr_mode;
+	u8 cur_cs;
+
+	cur_cs = (addr >= p_dev->capacity * 512) ? 1 : 0;
+	addr -= cur_cs * p_dev->capacity * 512;
+	snor_set_cur_cs(cur_cs);
+
+	if (cur_cs) {
+		blk_erase_cmd = p_dev->blk_erase_cmd_cs1;
+		sec_erase_cmd = p_dev->sec_erase_cmd_cs1;
+		addr_mode = p_dev->addr_mode_cs1;
+	} else {
+		blk_erase_cmd = p_dev->blk_erase_cmd;
+		sec_erase_cmd = p_dev->sec_erase_cmd;
+		addr_mode = p_dev->addr_mode;
+	}
+
+	rkflash_print_dio("%s %x %x\n", __func__, addr, erase_type);
+
+	if (erase_type >= ERASE_CHIP)
+		return SFC_PARAM_ERR;
+
+	op.sfcmd.d32 = 0;
+	if (erase_type == ERASE_BLOCK64K)
+		op.sfcmd.b.cmd = blk_erase_cmd;
+	else if (erase_type == ERASE_SECTOR)
+		op.sfcmd.b.cmd = sec_erase_cmd;
+	else
+		op.sfcmd.b.cmd = CMD_CHIP_ERASE;
+
+	op.sfcmd.b.addrbits = SFC_ADDR_24BITS;
+	if (addr_mode == ADDR_MODE_4BYTE)
+		op.sfcmd.b.addrbits = SFC_ADDR_32BITS;
+	op.sfcmd.b.rw = SFC_WRITE;
+	op.sfcmd.b.cs = cur_cs;
+
+	op.sfctrl.d32 = 0;
+
+	snor_write_en();
+
+	ret = sfc_request(&op, addr, NULL, 0);
+	if (ret != SFC_OK)
+		return ret;
+
+	ret = snor_wait_busy(timeout[erase_type] * 1000);
+	return ret;
+}
+#else
 int snor_erase(struct SFNOR_DEV *p_dev,
 	       u32 addr,
 	       enum NOR_ERASE_TYPE erase_type)
@@ -383,7 +439,62 @@ int snor_erase(struct SFNOR_DEV *p_dev,
 	ret = snor_wait_busy(timeout[erase_type] * 1000);
 	return ret;
 }
+#endif
 
+#ifdef CONFIG_RK_SPI_FLASH_AUTO_MERGE
+int snor_prog_page(struct SFNOR_DEV *p_dev,
+		   u32 addr,
+		   void *p_data,
+		   u32 size)
+{
+	int ret;
+	struct rk_sfc_op op;
+	u8 prog_cmd, prog_lines, prog_addr_lines, addr_mode;
+	u8 cur_cs;
+
+	cur_cs = (addr >= p_dev->capacity * 512) ? 1 : 0;
+	addr -= cur_cs * p_dev->capacity * 512;
+	snor_set_cur_cs(cur_cs);
+
+	if (cur_cs) {
+		prog_cmd = p_dev->prog_cmd_cs1;
+		prog_lines = p_dev->prog_lines_cs1;
+		prog_addr_lines = p_dev->prog_addr_lines_cs1;
+		addr_mode = p_dev->addr_mode_cs1;
+	} else {
+		prog_cmd = p_dev->prog_cmd;
+		prog_lines = p_dev->prog_lines;
+		prog_addr_lines = p_dev->prog_addr_lines;
+		addr_mode = p_dev->addr_mode;
+	}
+
+	rkflash_print_dio("%s %x %x\n", __func__, addr, *(u32 *)(p_data));
+
+	op.sfcmd.d32 = 0;
+	op.sfcmd.b.cmd = prog_cmd;
+	op.sfcmd.b.addrbits = SFC_ADDR_24BITS;
+	op.sfcmd.b.rw = SFC_WRITE;
+	op.sfcmd.b.cs = cur_cs;
+
+	op.sfctrl.d32 = 0;
+	op.sfctrl.b.datalines = prog_lines;
+	op.sfctrl.b.enbledma = 1;
+	op.sfctrl.b.addrlines = prog_addr_lines;
+
+	if (addr_mode == ADDR_MODE_4BYTE)
+		op.sfcmd.b.addrbits = SFC_ADDR_32BITS;
+
+	snor_write_en();
+
+	ret = sfc_request(&op, addr, p_data, size);
+	if (ret != SFC_OK)
+		return ret;
+
+	ret = snor_wait_busy(10000);
+
+	return ret;
+}
+#else
 int snor_prog_page(struct SFNOR_DEV *p_dev,
 		   u32 addr,
 		   void *p_data,
@@ -417,6 +528,7 @@ int snor_prog_page(struct SFNOR_DEV *p_dev,
 
 	return ret;
 }
+#endif
 
 static int snor_prog(struct SFNOR_DEV *p_dev, u32 addr, void *p_data, u32 size)
 {
@@ -481,6 +593,63 @@ int snor_disable_QE(struct SFNOR_DEV *p_dev)
 	return p_dev->write_status(reg_index, status);
 }
 
+#ifdef CONFIG_RK_SPI_FLASH_AUTO_MERGE
+int snor_read_data(struct SFNOR_DEV *p_dev,
+		   u32 addr,
+		   void *p_data,
+		   u32 size)
+{
+	int ret;
+	struct rk_sfc_op op;
+	u8 read_cmd, read_lines, addr_mode;
+	u8 cur_cs;
+
+	cur_cs = (addr >= p_dev->capacity * 512) ? 1 : 0;
+	addr -= cur_cs * p_dev->capacity * 512;
+	snor_set_cur_cs(cur_cs);
+
+	if (cur_cs) {
+		read_cmd = p_dev->read_cmd_cs1;
+		read_lines = p_dev->read_lines_cs1;
+		addr_mode = p_dev->addr_mode_cs1;
+	} else {
+		read_cmd = p_dev->read_cmd;
+		read_lines = p_dev->read_lines;
+		addr_mode = p_dev->addr_mode;
+	}
+
+	op.sfcmd.d32 = 0;
+	op.sfcmd.b.cmd = read_cmd;
+	op.sfcmd.b.addrbits = SFC_ADDR_24BITS;
+	op.sfcmd.b.cs = cur_cs;
+
+	op.sfctrl.d32 = 0;
+	op.sfctrl.b.datalines = read_lines;
+	if (!(size & 0x3) && size >= 4)
+		op.sfctrl.b.enbledma = 1;
+
+	if (read_cmd == CMD_FAST_READ_X1 ||
+	    read_cmd == CMD_PAGE_FASTREAD4B ||
+	    read_cmd == CMD_FAST_READ_X4 ||
+	    read_cmd == CMD_FAST_READ_X2 ||
+	    read_cmd == CMD_FAST_4READ_X4) {
+		op.sfcmd.b.dummybits = 8;
+	} else if (read_cmd == CMD_FAST_READ_A4) {
+		op.sfcmd.b.addrbits = SFC_ADDR_32BITS;
+		addr = (addr << 8) | 0xFF;
+		op.sfcmd.b.dummybits = 4;
+		op.sfctrl.b.addrlines = SFC_4BITS_LINE;
+	}
+
+	if (addr_mode == ADDR_MODE_4BYTE)
+		op.sfcmd.b.addrbits = SFC_ADDR_32BITS;
+
+	ret = sfc_request(&op, addr, p_data, size);
+	rkflash_print_dio("%s %x %x\n", __func__, addr, *(u32 *)(p_data));
+
+	return ret;
+}
+#else
 int snor_read_data(struct SFNOR_DEV *p_dev,
 		   u32 addr,
 		   void *p_data,
@@ -519,6 +688,7 @@ int snor_read_data(struct SFNOR_DEV *p_dev,
 
 	return ret;
 }
+#endif
 
 int snor_read(struct SFNOR_DEV *p_dev, u32 sec, u32 n_sec, void *p_data)
 {
@@ -528,13 +698,22 @@ int snor_read(struct SFNOR_DEV *p_dev, u32 sec, u32 n_sec, void *p_data)
 
 	rkflash_print_dio("%s %x %x\n", __func__, sec, n_sec);
 
+#ifdef CONFIG_RK_SPI_FLASH_AUTO_MERGE
+	if ((sec + n_sec) > p_dev->capacity_total)
+		return SFC_PARAM_ERR;
+#else
 	if ((sec + n_sec) > p_dev->capacity)
 		return SFC_PARAM_ERR;
+#endif
 
 	addr = sec << 9;
 	size = n_sec << 9;
 	while (size) {
 		len = size < p_dev->max_iosize ? size : p_dev->max_iosize;
+#ifdef CONFIG_RK_SPI_FLASH_AUTO_MERGE
+		if (addr < (p_dev->capacity << 9) && ((len + addr) > (p_dev->capacity << 9)))
+			len = (p_dev->capacity << 9) - addr;
+#endif
 		ret = snor_read_data(p_dev, addr, p_buf, len);
 		if (ret != SFC_OK) {
 			rkflash_print_error("snor_read_data %x ret= %x\n",
@@ -562,11 +741,20 @@ int snor_write(struct SFNOR_DEV *p_dev, u32 sec, u32 n_sec, void *p_data)
 
 	rkflash_print_dio("%s %x %x\n", __func__, sec, n_sec);
 
+#ifdef CONFIG_RK_SPI_FLASH_AUTO_MERGE
+	if ((sec + n_sec) > p_dev->capacity_total)
+		return SFC_PARAM_ERR;
+#else
 	if ((sec + n_sec) > p_dev->capacity)
 		return SFC_PARAM_ERR;
+#endif
 
 	while (n_sec) {
-		if (sec < 512 || sec >= p_dev->capacity  - 512)
+#ifdef CONFIG_RK_SPI_FLASH_AUTO_MERGE
+		if (sec < 512 || sec >= p_dev->capacity_total - 512)
+#else
+		if (sec < 512 || sec >= p_dev->capacity - 512)
+#endif
 			blk_size = 8;
 		else
 			blk_size = p_dev->blk_size;
@@ -633,7 +821,11 @@ static int snor_read_parameter(u32 addr, u8 *data)
 
 u32 snor_get_capacity(struct SFNOR_DEV *p_dev)
 {
+#ifdef CONFIG_RK_SPI_FLASH_AUTO_MERGE
+	return p_dev->capacity_total;
+#else
 	return p_dev->capacity;
+#endif
 }
 
 static struct flash_info *snor_get_flash_info(u8 *flash_id)
@@ -723,6 +915,143 @@ static int snor_parse_flash_table(struct SFNOR_DEV *p_dev,
 	return SFC_OK;
 }
 
+#ifdef CONFIG_RK_SPI_FLASH_AUTO_MERGE
+int snor_read_id_cs1(u8 *data)
+{
+	int ret;
+	struct rk_sfc_op op;
+
+	op.sfcmd.d32 = 0;
+	op.sfcmd.b.cmd = CMD_READ_JEDECID;
+	op.sfcmd.b.cs = 1;
+
+	op.sfctrl.d32 = 0;
+
+	ret = sfc_request(&op, 0, data, 3);
+
+	return ret;
+}
+
+static int snor_enable_QE_cs1(struct SFNOR_DEV *p_dev)
+{
+	int ret = SFC_OK;
+	int reg_index;
+	int bit_offset;
+	u8 status;
+
+	reg_index = p_dev->QE_bits_cs1 >> 3;
+	bit_offset = p_dev->QE_bits_cs1 & 0x7;
+	ret = snor_read_status(reg_index, &status);
+	if (ret != SFC_OK)
+		return ret;
+
+	if (status & (1 << bit_offset))   /* is QE bit set */
+		return SFC_OK;
+
+	status |= (1 << bit_offset);
+
+	return p_dev->write_status(reg_index, status);
+}
+
+int snor_disable_QE_cs1(struct SFNOR_DEV *p_dev)
+{
+	int ret = SFC_OK;
+	int reg_index;
+	int bit_offset;
+	u8 status;
+
+	reg_index = p_dev->QE_bits_cs1 >> 3;
+	bit_offset = p_dev->QE_bits_cs1 & 0x7;
+	ret = snor_read_status(reg_index, &status);
+	if (ret != SFC_OK)
+		return ret;
+
+	if (!(status & (1 << bit_offset)))
+		return SFC_OK;
+
+	status &= ~(1 << bit_offset);
+
+	return p_dev->write_status(reg_index, status);
+}
+
+static int snor_init_cs1(struct SFNOR_DEV *p_dev)
+{
+	u8 id_byte[5];
+	struct flash_info *spi_flash_info;
+	int ret;
+
+	snor_read_id_cs1(id_byte);
+	rkflash_print_error("sfc nor cs1 id: %x %x %x\n",
+			    id_byte[0], id_byte[1], id_byte[2]);
+	if (0xFF == id_byte[0] || 0x00 == id_byte[0] || 0xFF == id_byte[1] || 0x00 == id_byte[1]) {
+		p_dev->capacity_cs1 = 0;
+		rkflash_print_error("cs1 not exist\n");
+		return SFC_ERROR;
+	}
+
+	spi_flash_info = snor_get_flash_info(id_byte);
+	if (spi_flash_info) {
+		p_dev->manufacturer_cs1 = (spi_flash_info->id >> 16) & 0xFF;
+		p_dev->mem_type_cs1 = (spi_flash_info->id >> 8) & 0xFF;
+		p_dev->capacity_cs1 = 1 << spi_flash_info->density;
+		p_dev->read_cmd_cs1 = spi_flash_info->read_cmd;
+		p_dev->prog_cmd_cs1 = spi_flash_info->prog_cmd;
+		p_dev->sec_erase_cmd_cs1 = spi_flash_info->sector_erase_cmd;
+		p_dev->blk_erase_cmd_cs1 = spi_flash_info->block_erase_cmd;
+		p_dev->QE_bits_cs1 = spi_flash_info->QE_bits;
+		p_dev->prog_lines_cs1 = DATA_LINES_X1;
+		p_dev->prog_addr_lines_cs1 = DATA_LINES_X1;
+		p_dev->read_lines_cs1 = DATA_LINES_X1;
+		p_dev->addr_mode_cs1 = ADDR_MODE_3BYTE;
+
+		if (spi_flash_info->feature & FEA_4BIT_READ) {
+			ret = SFC_OK;
+			if (spi_flash_info->QE_bits)
+				ret = snor_enable_QE_cs1(p_dev);
+			if (ret == SFC_OK) {
+				p_dev->read_lines_cs1 = DATA_LINES_X4;
+				p_dev->read_cmd_cs1 = spi_flash_info->read_cmd_4;
+			}
+		}
+		if (spi_flash_info->feature & FEA_4BIT_PROG &&
+		    p_dev->read_lines_cs1 == DATA_LINES_X4) {
+			p_dev->prog_lines_cs1 = DATA_LINES_X4;
+			p_dev->prog_cmd_cs1 = spi_flash_info->prog_cmd_4;
+			if (p_dev->manufacturer_cs1 == MID_MACRONIX &&
+			    (p_dev->prog_cmd_cs1 == CMD_PAGE_PROG_A4 ||
+			     p_dev->prog_cmd_cs1 == CMD_PAGE_PROG_4PP))
+				p_dev->prog_addr_lines_cs1 = DATA_LINES_X4;
+		}
+
+		if (spi_flash_info->feature & FEA_4BYTE_ADDR)
+			p_dev->addr_mode_cs1 = ADDR_MODE_4BYTE;
+
+		if (spi_flash_info->feature & FEA_4BYTE_ADDR_MODE)
+			snor_enter_4byte_mode();
+	} else {
+		p_dev->manufacturer_cs1 = id_byte[0];
+		p_dev->mem_type_cs1 = id_byte[1];
+		p_dev->capacity_cs1 = 1 << (id_byte[2] - 9);
+		p_dev->QE_bits_cs1 = 0;
+		p_dev->read_cmd_cs1 = CMD_READ_DATA;
+		p_dev->prog_cmd_cs1 = CMD_PAGE_PROG;
+		p_dev->sec_erase_cmd_cs1 = CMD_SECTOR_ERASE;
+		p_dev->blk_erase_cmd_cs1 = CMD_BLOCK_ERASE;
+		p_dev->prog_lines_cs1 = DATA_LINES_X1;
+		p_dev->prog_addr_lines_cs1 = DATA_LINES_X1;
+		p_dev->read_lines_cs1 = DATA_LINES_X1;
+		p_dev->addr_mode_cs1 = ADDR_MODE_3BYTE;
+	}
+
+	rkflash_print_error("read_lines: %x\n", p_dev->read_lines_cs1);
+	rkflash_print_error("addr_mode_cs1: %x\n", p_dev->addr_mode_cs1);
+	rkflash_print_error("cs1 capacity: %x\n", p_dev->capacity_cs1);
+	rkflash_print_error("total capacity: %x\n", p_dev->capacity + p_dev->capacity_cs1);
+
+	return SFC_OK;
+}
+#endif
+
 int snor_init(struct SFNOR_DEV *p_dev)
 {
 	struct flash_info *g_spi_flash_info;
@@ -771,6 +1100,13 @@ int snor_init(struct SFNOR_DEV *p_dev)
 	rkflash_print_info("blk_erase_cmd: %x\n", p_dev->blk_erase_cmd);
 	rkflash_print_info("sec_erase_cmd: %x\n", p_dev->sec_erase_cmd);
 	rkflash_print_info("capacity: %x\n", p_dev->capacity);
+
+#ifdef CONFIG_RK_SPI_FLASH_AUTO_MERGE
+	snor_set_cur_cs(1);
+	snor_init_cs1(p_dev);
+	p_dev->capacity_total = p_dev->capacity + p_dev->capacity_cs1;
+	snor_set_cur_cs(0);
+#endif
 
 	return SFC_OK;
 }

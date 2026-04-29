@@ -115,6 +115,23 @@ struct SFNOR_DEV {
 
 	SNOR_WRITE_STATUS write_status;
 	u32 max_iosize;
+
+#ifdef CONFIG_RK_SPI_FLASH_AUTO_MERGE
+	u32	cur_cs;
+	u32	capacity_cs1;
+	u32	capacity_total;
+	u8	manufacturer_cs1;
+	u8	mem_type_cs1;
+	u8	read_cmd_cs1;
+	u8	prog_cmd_cs1;
+	u8	sec_erase_cmd_cs1;
+	u8	blk_erase_cmd_cs1;
+	u8	QE_bits_cs1;
+	enum SFC_DATA_LINES read_lines_cs1;
+	enum SFC_DATA_LINES prog_lines_cs1;
+	enum SFC_DATA_LINES prog_addr_lines_cs1;
+	enum SNOR_ADDR_MODE addr_mode_cs1;
+#endif
 };
 
 struct flash_info {
@@ -175,4 +192,7 @@ int snor_reset_device(void);
 int snor_disable_QE(struct SFNOR_DEV *p_dev);
 int snor_reinit_from_table_packet(struct SFNOR_DEV *p_dev,
 				  struct snor_info_packet *packet);
+#ifdef CONFIG_RK_SPI_FLASH_AUTO_MERGE
+int snor_disable_QE_cs1(struct SFNOR_DEV *p_dev);
+#endif
 #endif
