@@ -5,6 +5,7 @@
 #include <asm/cacheflush.h>
 #include <linux/clk.h>
 #include <linux/dma-mapping.h>
+#include <linux/gpio/consumer.h>
 #include <linux/interrupt.h>
 #include <linux/iopoll.h>
 #include <linux/irq.h>
@@ -32,11 +33,58 @@ struct rksfc_info {
 	struct clk	*clk;		/* sfc clk*/
 	struct clk	*ahb_clk;	/* ahb clk gate*/
 	u16	dll_cells;
+	struct gpio_desc **cs_gpiods;
+	int num_cs_gpios;
 };
 
 static struct rksfc_info g_sfc_info;
 static struct device *g_sfc_dev;
 static struct completion sfc_irq_complete;
+
+void rksfc_set_cs_gpio(u8 cs, bool enable)
+{
+	if (g_sfc_info.cs_gpiods && cs < g_sfc_info.num_cs_gpios) {
+		if (g_sfc_info.cs_gpiods[cs])
+			gpiod_set_value_cansleep(g_sfc_info.cs_gpiods[cs], enable);
+	}
+}
+
+static int rksfc_get_gpio_descs(struct device *dev)
+{
+	int nb, i;
+	struct gpio_desc **cs;
+
+	nb = gpiod_count(dev, "sfc-cs");
+	if (nb == 0 || nb == -ENOENT)
+		return 0;
+	else if (nb < 0)
+		return nb;
+
+	cs = devm_kcalloc(dev, nb, sizeof(*cs), GFP_KERNEL);
+	if (!cs)
+		return -ENOMEM;
+	g_sfc_info.cs_gpiods = cs;
+	g_sfc_info.num_cs_gpios = nb;
+
+	for (i = 0; i < nb; i++) {
+		cs[i] = devm_gpiod_get_index_optional(dev, "sfc-cs", i, GPIOD_OUT_HIGH);
+		if (IS_ERR(cs[i]))
+			return PTR_ERR(cs[i]);
+
+		if (cs[i]) {
+			char *gpioname;
+
+			gpioname = devm_kasprintf(dev, GFP_KERNEL, "%s CS%d",
+						  dev_name(dev), i);
+			if (!gpioname)
+				return -ENOMEM;
+			gpiod_set_consumer_name(cs[i], gpioname);
+			rksfc_set_cs_gpio(i, false);
+		}
+	}
+
+	return 0;
+}
 
 unsigned long rksfc_dma_map_single(unsigned long ptr, int size, int dir)
 {
@@ -171,6 +219,7 @@ static void rksfc_delay_lines_tuning(void)
 static int rksfc_probe(struct platform_device *pdev)
 {
 	int irq;
+	int ret;
 	struct resource	*mem;
 	void __iomem	*membase;
 	int dev_result = -1;
@@ -219,6 +268,12 @@ static int rksfc_probe(struct platform_device *pdev)
 			       500 * USEC_PER_MSEC))
 		dev_err(g_sfc_dev, "Wait for SFC idle timeout!\n");
 #endif
+
+	ret = rksfc_get_gpio_descs(&pdev->dev);
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to get gpio descs\n");
+		return ret;
+	}
 
 	sfc_init(g_sfc_info.reg_base);
 	if (sfc_get_version() >= SFC_VER_4 && g_sfc_info.clk_rate > RKSFC_DLL_THRESHOLD_RATE)

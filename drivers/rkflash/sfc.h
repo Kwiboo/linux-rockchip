@@ -226,4 +226,5 @@ void rksfc_dma_unmap_single(unsigned long ptr, int size, int dir);
 void rksfc_irq_flag_init(void);
 void rksfc_wait_for_irq_completed(void);
 u32 sfc_get_max_dll_cells(void);
+void rksfc_set_cs_gpio(u8 cs, bool enable);
 #endif
