@@ -2,6 +2,7 @@
 /*
  * Copyright (C) 2020 Rockchip Electronics Co., Ltd.
  */
+#include <linux/clk.h>
 #include <linux/iopoll.h>
 #include <linux/kernel.h>
 #include <linux/kthread.h>
@@ -31,6 +32,8 @@ static int rk_tb_sfc_thread(void *p)
 	void __iomem *regs;
 	struct resource *res;
 	struct device *dev = &pdev->dev;
+	struct clk_bulk_data *clk_bulks;
+	int clk_num;
 	u32 status;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -44,12 +47,24 @@ static int rk_tb_sfc_thread(void *p)
 	print_hex_dump(KERN_WARNING, "tb_sfc", DUMP_PREFIX_OFFSET, 4, 4, regs, 0x60, 0);
 #endif
 
+	clk_num = clk_bulk_get_all(&pdev->dev, &clk_bulks);
+	if (clk_num >= 0) {
+		ret = clk_bulk_prepare_enable(clk_num, clk_bulks);
+		if (ret) {
+			dev_err(&pdev->dev, "failed to enable clocks\n");
+			clk_bulk_put_all(clk_num, clk_bulks);
+			goto out;
+		}
+	} else {
+		dev_dbg(&pdev->dev, "failed to get clks property\n");
+	}
+
 	ret = readl_poll_timeout(regs + SFC_SR, status,
 				 !(status & SFC_BUSY), 100,
 				 5000 * USEC_PER_MSEC);
 	if (ret) {
 		dev_err(dev, "Wait for SFC idle timeout!\n");
-		goto out;
+		goto out_clk;
 	} else {
 		if (likely(readl(regs + SFC_RAWISR) & DMA_INT))
 			dev_info(dev, "DMA finished!\n");
@@ -61,6 +76,11 @@ static int rk_tb_sfc_thread(void *p)
 	rk_tb_ramdisk_compress_done();
 	rk_tb_prepare_ramdisk_decompress(dev);
 
+out_clk:
+	if (clk_num >= 0) {
+		clk_bulk_disable_unprepare(clk_num, clk_bulks);
+		clk_bulk_put_all(clk_num, clk_bulks);
+	}
 out:
 	iounmap(regs);
 
