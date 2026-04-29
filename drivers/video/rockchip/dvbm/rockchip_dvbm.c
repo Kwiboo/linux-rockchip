@@ -39,7 +39,7 @@ static struct dvbm_ctx *g_ctx;
 
 #define UPDATE_LINE_CNT 0
 
-#define DVBM_CHANNEL_NUM (3)
+#define DVBM_CHANNEL_NUM (4)
 
 struct dvbm_ctx {
 	struct device *dev;
