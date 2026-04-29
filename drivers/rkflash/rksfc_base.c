@@ -29,17 +29,34 @@
 struct rksfc_info {
 	void __iomem	*reg_base;
 	int	irq;
-	int	clk_rate;
+	unsigned long	clk_rate;
 	struct clk	*clk;		/* sfc clk*/
 	struct clk	*ahb_clk;	/* ahb clk gate*/
 	u16	dll_cells;
 	struct gpio_desc **cs_gpiods;
 	int num_cs_gpios;
+	bool sclk_x2_bypass;
 };
 
 static struct rksfc_info g_sfc_info;
 static struct device *g_sfc_dev;
 static struct completion sfc_irq_complete;
+
+static int rksfc_clk_set_rate(struct rksfc_info *sfc, unsigned long speed)
+{
+	if (sfc_get_version() < SFC_VER_8 || sfc->sclk_x2_bypass)
+		return clk_set_rate(sfc->clk, speed);
+	else
+		return clk_set_rate(sfc->clk, speed * 2);
+}
+
+static unsigned long rksfc_clk_get_rate(struct rksfc_info *sfc)
+{
+	if (sfc_get_version() < SFC_VER_8 || sfc->sclk_x2_bypass)
+		return clk_get_rate(sfc->clk);
+	else
+		return clk_get_rate(sfc->clk) / 2;
+}
 
 void rksfc_set_cs_gpio(u8 cs, bool enable)
 {
@@ -155,17 +172,16 @@ static void rksfc_delay_lines_tuning(void)
 	op.sfcmd.b.cmd = 0x9F;
 	op.sfctrl.d32 = 0;
 
-	clk_set_rate(g_sfc_info.clk, RKSFC_DLL_THRESHOLD_RATE);
+	rksfc_clk_set_rate(&g_sfc_info, RKSFC_DLL_THRESHOLD_RATE);
 	sfc_request(&op, 0, id, 3);
 	if ((0xFF == id[0] && 0xFF == id[1]) ||
 	    (0x00 == id[0] && 0x00 == id[1])) {
 		dev_dbg(g_sfc_dev, "no dev, dll by pass\n");
-		clk_set_rate(g_sfc_info.clk, g_sfc_info.clk_rate);
 
 		return;
 	}
 
-	clk_set_rate(g_sfc_info.clk, g_sfc_info.clk_rate);
+	rksfc_clk_set_rate(&g_sfc_info, g_sfc_info.clk_rate);
 	for (right = 0; right <= cell_max; right += step) {
 		int ret;
 
@@ -203,16 +219,16 @@ static void rksfc_delay_lines_tuning(void)
 	}
 
 	if (g_sfc_info.dll_cells) {
-		dev_dbg(g_sfc_dev, "%d %d %d dll training success in %dMHz max_cells=%u sfc_ver=%d\n",
-			left, right, g_sfc_info.dll_cells, g_sfc_info.clk_rate,
-			sfc_get_max_dll_cells(), sfc_get_version());
+		dev_info(g_sfc_dev, "%d %d %d dll training success in %luHz max_cells=%u sfc_ver=%d\n",
+			 left, right, g_sfc_info.dll_cells, g_sfc_info.clk_rate,
+			 sfc_get_max_dll_cells(), sfc_get_version());
 		sfc_set_delay_lines((u16)g_sfc_info.dll_cells);
 	} else {
-		dev_err(g_sfc_dev, "%d %d dll training failed in %dMHz, reduce the frequency\n",
+		dev_err(g_sfc_dev, "%d %d dll training failed in %luHz, reduce the frequency\n",
 			left, right, g_sfc_info.clk_rate);
 		sfc_set_delay_lines(0);
-		clk_set_rate(g_sfc_info.clk, RKSFC_DLL_THRESHOLD_RATE);
-		g_sfc_info.clk_rate = clk_get_rate(g_sfc_info.clk);
+		rksfc_clk_set_rate(&g_sfc_info, RKSFC_DLL_THRESHOLD_RATE);
+		g_sfc_info.clk_rate = rksfc_clk_get_rate(&g_sfc_info);
 	}
 }
 
@@ -223,6 +239,7 @@ static int rksfc_probe(struct platform_device *pdev)
 	struct resource	*mem;
 	void __iomem	*membase;
 	int dev_result = -1;
+	u32 val;
 #ifdef CONFIG_ROCKCHIP_THUNDER_BOOT
 	u32 status;
 #endif
@@ -250,18 +267,15 @@ static int rksfc_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "%s get clk error\n", __func__);
 		return -1;
 	}
+
+	g_sfc_info.sclk_x2_bypass = of_property_read_bool(pdev->dev.of_node, "rockchip,sclk-x2-bypass");
+
+	if (!of_property_read_u32(pdev->dev.of_node, "spi-max-frequency", &val))
+		g_sfc_info.clk_rate = val;
+
 	clk_prepare_enable(g_sfc_info.ahb_clk);
-	g_sfc_info.clk_rate = clk_get_rate(g_sfc_info.clk);
-	if (g_sfc_info.clk_rate > RKSFC_CLK_MAX_RATE) {
-		clk_set_rate(g_sfc_info.clk, RKSFC_CLK_MAX_RATE);
-		g_sfc_info.clk_rate = clk_get_rate(g_sfc_info.clk);
-	}
 	clk_prepare_enable(g_sfc_info.clk);
-	dev_info(&pdev->dev,
-		 "%s clk rate = %d\n",
-		 __func__,
-		 g_sfc_info.clk_rate);
-	rksfc_irq_init();
+
 #ifdef CONFIG_ROCKCHIP_THUNDER_BOOT
 	if (readl_poll_timeout(membase + SFC_SR, status,
 			       !(status & SFC_BUSY), 10,
@@ -276,6 +290,19 @@ static int rksfc_probe(struct platform_device *pdev)
 	}
 
 	sfc_init(g_sfc_info.reg_base);
+	rksfc_irq_init();
+
+	if (!g_sfc_info.clk_rate)
+		g_sfc_info.clk_rate = rksfc_clk_get_rate(&g_sfc_info);
+	else if (g_sfc_info.clk_rate > RKSFC_CLK_MAX_RATE)
+		g_sfc_info.clk_rate = RKSFC_CLK_MAX_RATE;
+	ret = rksfc_clk_set_rate(&g_sfc_info, g_sfc_info.clk_rate);
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to set clk rate\n");
+		return ret;
+	}
+	g_sfc_info.clk_rate = rksfc_clk_get_rate(&g_sfc_info);
+	dev_info(&pdev->dev, "clk rate = %luHz\n", g_sfc_info.clk_rate);
 	if (sfc_get_version() >= SFC_VER_4 && g_sfc_info.clk_rate > RKSFC_DLL_THRESHOLD_RATE)
 		rksfc_delay_lines_tuning();
 	else if (sfc_get_version() >= SFC_VER_4)
