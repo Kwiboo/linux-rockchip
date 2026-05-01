@@ -3108,11 +3108,7 @@ static void dw_hdmi_hpd_work(struct work_struct *work)
 		return;
 
 	drm_helper_hpd_irq_event(hdmi->bridge.dev);
-
-	mutex_lock(&hdmi->mutex);
-	status = hdmi->last_connector_result;
-	mutex_unlock(&hdmi->mutex);
-
+	status = dw_hdmi_phy_read_hpd(hdmi, hdmi->phy.data);
 	drm_bridge_hpd_notify(&hdmi->bridge, status);
 }
 
