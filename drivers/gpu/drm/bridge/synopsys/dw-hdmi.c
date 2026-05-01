@@ -3099,19 +3099,6 @@ void dw_hdmi_setup_rx_sense(struct dw_hdmi *hdmi, bool hpd, bool rx_sense)
 }
 EXPORT_SYMBOL_GPL(dw_hdmi_setup_rx_sense);
 
-static void dw_hdmi_hpd_work(struct work_struct *work)
-{
-	struct dw_hdmi *hdmi = container_of(work, struct dw_hdmi, hpd_work.work);
-	enum drm_connector_status status;
-
-	if (WARN_ON(!hdmi->bridge.dev))
-		return;
-
-	drm_helper_hpd_irq_event(hdmi->bridge.dev);
-	status = dw_hdmi_phy_read_hpd(hdmi, hdmi->phy.data);
-	drm_bridge_hpd_notify(&hdmi->bridge, status);
-}
-
 static irqreturn_t dw_hdmi_irq(int irq, void *dev_id)
 {
 	struct dw_hdmi *hdmi = dev_id;
@@ -3172,6 +3159,19 @@ static irqreturn_t dw_hdmi_irq(int irq, void *dev_id)
 		    HDMI_IH_MUTE_PHY_STAT0);
 
 	return IRQ_HANDLED;
+}
+
+static void dw_hdmi_hpd_work(struct work_struct *work)
+{
+	struct dw_hdmi *hdmi = container_of(work, struct dw_hdmi, hpd_work.work);
+	enum drm_connector_status status;
+
+	if (WARN_ON(!hdmi->bridge.dev))
+		return;
+
+	drm_helper_hpd_irq_event(hdmi->bridge.dev);
+	status = dw_hdmi_phy_read_hpd(hdmi, hdmi->phy.data);
+	drm_bridge_hpd_notify(&hdmi->bridge, status);
 }
 
 static const struct dw_hdmi_phy_data dw_hdmi_phys[] = {
