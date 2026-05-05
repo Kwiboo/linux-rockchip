@@ -7,37 +7,6 @@
 #include <drv_types.h>
 #include <hal_data.h>
 
-void rtw_hal_chip_configure(struct adapter *padapter)
-{
-	rtl8723bs_interface_configure(padapter);
-}
-
-void rtw_hal_read_chip_info(struct adapter *padapter)
-{
-	ReadAdapterInfo8723BS(padapter);
-}
-
-void rtw_hal_read_chip_version(struct adapter *padapter)
-{
-	rtl8723b_read_chip_version(padapter);
-}
-
-void rtw_hal_def_value_init(struct adapter *padapter)
-{
-	rtl8723bs_init_default_value(padapter);
-}
-
-void rtw_hal_free_data(struct adapter *padapter)
-{
-	/* free HAL Data */
-	rtw_hal_data_deinit(padapter);
-}
-
-void rtw_hal_dm_init(struct adapter *padapter)
-{
-	rtl8723b_init_dm_priv(padapter);
-}
-
 static void rtw_hal_init_opmode(struct adapter *padapter)
 {
 	enum ndis_802_11_network_infrastructure networkType = Ndis802_11InfrastructureMax;
@@ -123,11 +92,6 @@ u8 rtw_hal_get_def_var(struct adapter *padapter, enum hal_def_variable eVariable
 void rtw_hal_set_odm_var(struct adapter *padapter, enum hal_odm_variable eVariable, void *pValue1, bool bSet)
 {
 	SetHalODMVar(padapter, eVariable, pValue1, bSet);
-}
-
-void rtw_hal_enable_interrupt(struct adapter *padapter)
-{
-	EnableInterrupt8723BSdio(padapter);
 }
 
 void rtw_hal_disable_interrupt(struct adapter *padapter)
