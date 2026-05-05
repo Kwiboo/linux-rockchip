@@ -101,6 +101,7 @@ enum scx_ent_flags {
 	SCX_TASK_DEQD_FOR_SLEEP	= 1 << 3, /* last dequeue was for SLEEP */
 	SCX_TASK_SUB_INIT	= 1 << 4, /* task being initialized for a sub sched */
 	SCX_TASK_IMMED		= 1 << 5, /* task is on local DSQ with %SCX_ENQ_IMMED */
+	SCX_TASK_OFF_TASKS	= 1 << 6, /* removed from scx_tasks by sched_ext_dead() */
 
 	/*
 	 * Bits 8 and 9 are used to carry task state:
@@ -202,6 +203,15 @@ struct sched_ext_entity {
 #ifdef CONFIG_SCHED_CORE
 	u64			core_sched_at;	/* see scx_prio_less() */
 #endif
+
+	/*
+	 * Unique non-zero task ID assigned at fork. Persists across exec and
+	 * is never reused. Lets BPF schedulers identify tasks without storing
+	 * kernel pointers - arena-backed schedulers being one example. See
+	 * scx_bpf_tid_to_task().
+	 */
+	u64			tid;
+	struct rhash_head	tid_hash_node;	/* see SCX_OPS_TID_TO_TASK */
 
 	/* BPF scheduler modifiable fields */
 
