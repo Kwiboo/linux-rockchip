@@ -29,6 +29,8 @@ static void drm_connector_hdmi_cec_notifier_unregister(struct drm_device *dev, v
 {
 	struct drm_connector *connector = res;
 
+	dev_info(dev->dev, "%s()\n", __func__);
+
 	cec_notifier_conn_unregister(connector->cec.data);
 	connector->cec.data = NULL;
 }
@@ -44,6 +46,8 @@ int drmm_connector_hdmi_cec_notifier_register(struct drm_connector *connector,
 {
 	struct cec_connector_info conn_info;
 	struct cec_notifier *notifier;
+
+	dev_info(dev, "%s()\n", __func__);
 
 	cec_fill_conn_info_from_drm(&conn_info, connector);
 

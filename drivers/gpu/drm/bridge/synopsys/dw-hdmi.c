@@ -2486,7 +2486,12 @@ static void dw_hdmi_connector_destroy(struct drm_connector *connector)
 {
 	struct dw_hdmi *hdmi = container_of(connector, struct dw_hdmi, connector);
 
+	dev_info(hdmi->dev, "%s(): START\n", __func__);
+
 	drm_connector_cleanup(connector);
+
+	dev_info(hdmi->dev, "%s(): END\n", __func__);
+
 	drm_bridge_put(&hdmi->bridge);
 }
 
@@ -2511,6 +2516,8 @@ static int dw_hdmi_connector_create(struct dw_hdmi *hdmi)
 {
 	struct drm_connector *connector = &hdmi->connector;
 	int ret;
+
+	dev_info(hdmi->dev, "%s(): START\n", __func__);
 
 	if (hdmi->version >= 0x200a)
 		connector->ycbcr_420_allowed =
@@ -2545,8 +2552,12 @@ static int dw_hdmi_connector_create(struct dw_hdmi *hdmi)
 
 	drm_connector_attach_encoder(connector, hdmi->bridge.encoder);
 
-	return drmm_connector_hdmi_cec_notifier_register(connector, NULL,
-							 hdmi->dev);
+	ret = drmm_connector_hdmi_cec_notifier_register(connector, NULL,
+							hdmi->dev);
+
+	dev_info(hdmi->dev, "%s(): END\n", __func__);
+
+	return ret;
 }
 
 /* -----------------------------------------------------------------------------
@@ -2832,6 +2843,8 @@ static int dw_hdmi_bridge_attach(struct drm_bridge *bridge,
 {
 	struct dw_hdmi *hdmi = bridge->driver_private;
 
+	dev_info(hdmi->dev, "%s(flags=%x)\n", __func__, flags);
+
 	/* DRM_BRIDGE_ATTACH_NO_CONNECTOR requires a remote-endpoint to the next bridge */
 	if (WARN_ON((flags & DRM_BRIDGE_ATTACH_NO_CONNECTOR) && !hdmi->plat_data->output_port))
 		return -EINVAL;
@@ -2856,6 +2869,9 @@ static int dw_hdmi_bridge_attach(struct drm_bridge *bridge,
 
 static void dw_hdmi_bridge_detach(struct drm_bridge *bridge)
 {
+	struct dw_hdmi *hdmi = bridge->driver_private;
+
+	dev_info(hdmi->dev, "%s()\n", __func__);
 }
 
 static enum drm_mode_status
@@ -2940,6 +2956,13 @@ static void dw_hdmi_bridge_hpd_disable(struct drm_bridge *bridge)
 	disable_delayed_work(&hdmi->hpd_work);
 }
 
+static void dw_hdmi_bridge_destroy(struct drm_bridge *bridge)
+{
+	struct dw_hdmi *hdmi = bridge->driver_private;
+
+	dev_info(hdmi->dev, "%s()\n", __func__);
+}
+
 static const struct drm_bridge_funcs dw_hdmi_bridge_funcs = {
 	.atomic_duplicate_state = drm_atomic_helper_bridge_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_bridge_destroy_state,
@@ -2956,6 +2979,7 @@ static const struct drm_bridge_funcs dw_hdmi_bridge_funcs = {
 	.edid_read = dw_hdmi_bridge_edid_read,
 	.hpd_enable = dw_hdmi_bridge_hpd_enable,
 	.hpd_disable = dw_hdmi_bridge_hpd_disable,
+	.destroy = dw_hdmi_bridge_destroy,
 };
 
 /* -----------------------------------------------------------------------------
@@ -3174,6 +3198,13 @@ bool dw_hdmi_bus_fmt_is_420(struct dw_hdmi *hdmi)
 }
 EXPORT_SYMBOL_GPL(dw_hdmi_bus_fmt_is_420);
 
+static void dw_hdmi_unwind_probe(void *arg)
+{
+	struct device *dev = arg;
+
+	dev_info(dev, "%s()\n", __func__);
+}
+
 struct dw_hdmi *dw_hdmi_probe(struct platform_device *pdev,
 			      const struct dw_hdmi_plat_data *plat_data)
 {
@@ -3192,6 +3223,12 @@ struct dw_hdmi *dw_hdmi_probe(struct platform_device *pdev,
 	u8 prod_id1;
 	u8 config0;
 	u8 config3;
+
+	dev_info(dev, "%s(): START\n", __func__);
+
+	ret = devm_add_action_or_reset(dev, dw_hdmi_unwind_probe, dev);
+	if (ret)
+		return ERR_PTR(ret);
 
 	hdmi = devm_drm_bridge_alloc(dev, struct dw_hdmi, bridge, &dw_hdmi_bridge_funcs);
 	if (IS_ERR(hdmi))
@@ -3430,7 +3467,11 @@ struct dw_hdmi *dw_hdmi_probe(struct platform_device *pdev,
 		hdmi->cec = platform_device_register_full(&pdevinfo);
 	}
 
+	dev_info(hdmi->dev, "%s(): NEAR END\n", __func__);
+
 	drm_bridge_add(&hdmi->bridge);
+
+	dev_info(hdmi->dev, "%s(): END\n", __func__);
 
 	return hdmi;
 
@@ -3443,9 +3484,13 @@ EXPORT_SYMBOL_GPL(dw_hdmi_probe);
 
 void dw_hdmi_remove(struct dw_hdmi *hdmi)
 {
+	dev_info(hdmi->dev, "%s(): START\n", __func__);
+
 	disable_delayed_work_sync(&hdmi->hpd_work);
 
 	drm_bridge_remove(&hdmi->bridge);
+
+	dev_info(hdmi->dev, "%s(): MIDDLE\n", __func__);
 
 	if (hdmi->audio && !IS_ERR(hdmi->audio))
 		platform_device_unregister(hdmi->audio);
@@ -3459,6 +3504,8 @@ void dw_hdmi_remove(struct dw_hdmi *hdmi)
 		i2c_del_adapter(&hdmi->i2c->adap);
 	else
 		i2c_put_adapter(hdmi->ddc);
+
+	dev_info(hdmi->dev, "%s(): END\n", __func__);
 }
 EXPORT_SYMBOL_GPL(dw_hdmi_remove);
 
@@ -3472,9 +3519,13 @@ struct dw_hdmi *dw_hdmi_bind(struct platform_device *pdev,
 	struct dw_hdmi *hdmi;
 	int ret;
 
+	dev_info(&pdev->dev, "%s(): START\n", __func__);
+
 	hdmi = dw_hdmi_probe(pdev, plat_data);
 	if (IS_ERR(hdmi))
 		return hdmi;
+
+	dev_info(&pdev->dev, "%s(): MIDDLE\n", __func__);
 
 	ret = drm_bridge_attach(encoder, &hdmi->bridge, NULL, 0);
 	if (ret) {
@@ -3482,12 +3533,16 @@ struct dw_hdmi *dw_hdmi_bind(struct platform_device *pdev,
 		return ERR_PTR(ret);
 	}
 
+	dev_info(hdmi->dev, "%s(): END\n", __func__);
+
 	return hdmi;
 }
 EXPORT_SYMBOL_GPL(dw_hdmi_bind);
 
 void dw_hdmi_unbind(struct dw_hdmi *hdmi)
 {
+	dev_info(hdmi->dev, "%s()\n", __func__);
+
 	dw_hdmi_remove(hdmi);
 }
 EXPORT_SYMBOL_GPL(dw_hdmi_unbind);
