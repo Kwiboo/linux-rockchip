@@ -767,8 +767,8 @@ static void meson_dw_hdmi_unbind(struct device *dev, struct device *master,
 	int irq = platform_get_irq(pdev, 0);
 
 	devm_free_irq(dev, irq, meson_dw_hdmi);
-	dw_hdmi_unbind(meson_dw_hdmi->hdmi);
 	drm_bridge_put(meson_dw_hdmi->bridge);
+	dw_hdmi_remove(meson_dw_hdmi->hdmi);
 }
 
 static const struct component_ops meson_dw_hdmi_ops = {
