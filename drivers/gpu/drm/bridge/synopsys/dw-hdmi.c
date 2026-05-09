@@ -3313,6 +3313,9 @@ struct dw_hdmi *dw_hdmi_probe(struct platform_device *pdev,
 		pdevinfo.dma_mask = 0;
 
 		hdmi->cec = platform_device_register_full(&pdevinfo);
+
+		hdmi->bridge.hdmi_cec_dev = hdmi->dev;
+		hdmi->bridge.ops |= DRM_BRIDGE_OP_HDMI_CEC_NOTIFIER;
 	}
 
 	/* Extend supported formats if CSC block is available */
