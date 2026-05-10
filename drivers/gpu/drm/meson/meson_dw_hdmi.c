@@ -145,7 +145,6 @@ struct meson_dw_hdmi {
 	struct reset_control *hdmitx_apb;
 	struct reset_control *hdmitx_ctrl;
 	struct reset_control *hdmitx_phy;
-	u32 irq_stat;
 	struct dw_hdmi *hdmi;
 	struct drm_bridge *bridge;
 };
@@ -498,10 +497,10 @@ static irqreturn_t dw_hdmi_top_irq(int irq, void *dev_id)
 	stat = dw_hdmi->data->top_read(dw_hdmi, HDMITX_TOP_INTR_STAT);
 	dw_hdmi->data->top_write(dw_hdmi, HDMITX_TOP_INTR_STAT_CLR, stat);
 
-	/* HPD Events, handle in the threaded interrupt handler */
+	/* HPD Events, handle in delayed work */
 	if (stat & (HDMITX_TOP_INTR_HPD_RISE | HDMITX_TOP_INTR_HPD_FALL)) {
-		dw_hdmi->irq_stat = stat;
-		return IRQ_WAKE_THREAD;
+		dw_hdmi_schedule_hpd_work(dw_hdmi->hdmi);
+		return IRQ_HANDLED;
 	}
 
 	/* HDMI Controller Interrupt */
@@ -509,20 +508,6 @@ static irqreturn_t dw_hdmi_top_irq(int irq, void *dev_id)
 		return IRQ_NONE;
 
 	/* TOFIX Handle HDCP Interrupts */
-
-	return IRQ_HANDLED;
-}
-
-/* Threaded interrupt handler to manage HPD events */
-static irqreturn_t dw_hdmi_top_thread_irq(int irq, void *dev_id)
-{
-	struct meson_dw_hdmi *dw_hdmi = dev_id;
-	u32 stat = dw_hdmi->irq_stat;
-
-	/* HPD Events */
-	if (stat & (HDMITX_TOP_INTR_HPD_RISE | HDMITX_TOP_INTR_HPD_FALL) &&
-	    dw_hdmi->bridge)
-		drm_helper_hpd_irq_event(dw_hdmi->bridge->dev);
 
 	return IRQ_HANDLED;
 }
@@ -715,9 +700,8 @@ static int meson_dw_hdmi_bind(struct device *dev, struct device *master,
 	if (irq < 0)
 		return irq;
 
-	ret = devm_request_threaded_irq(dev, irq, dw_hdmi_top_irq,
-					dw_hdmi_top_thread_irq, IRQF_SHARED,
-					"dw_hdmi_top_irq", meson_dw_hdmi);
+	ret = devm_request_irq(dev, irq, dw_hdmi_top_irq, IRQF_SHARED,
+			       "dw_hdmi_top_irq", meson_dw_hdmi);
 	if (ret)
 		return dev_err_probe(dev, ret,
 				     "Failed to request hdmi top irq\n");
