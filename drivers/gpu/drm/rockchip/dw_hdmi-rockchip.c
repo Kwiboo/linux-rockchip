@@ -196,41 +196,6 @@ static const struct dw_hdmi_phy_config rockchip_phy_config[] = {
 	{ ~0UL,	     0x0000, 0x0000, 0x0000}
 };
 
-static int rockchip_hdmi_parse_dt(struct rockchip_hdmi *hdmi)
-{
-	struct device_node *np = hdmi->dev->of_node;
-	int ret;
-
-	hdmi->regmap = syscon_regmap_lookup_by_phandle(np, "rockchip,grf");
-	if (IS_ERR(hdmi->regmap)) {
-		dev_err(hdmi->dev, "Unable to get rockchip,grf\n");
-		return PTR_ERR(hdmi->regmap);
-	}
-
-	hdmi->ref_clk = devm_clk_get_optional_enabled(hdmi->dev, "ref");
-	if (!hdmi->ref_clk)
-		hdmi->ref_clk = devm_clk_get_optional_enabled(hdmi->dev, "vpll");
-
-	if (IS_ERR(hdmi->ref_clk)) {
-		ret = PTR_ERR(hdmi->ref_clk);
-		return dev_err_probe(hdmi->dev, ret, "failed to get reference clock\n");
-	}
-
-	hdmi->grf_clk = devm_clk_get_optional(hdmi->dev, "grf");
-	if (IS_ERR(hdmi->grf_clk)) {
-		ret = PTR_ERR(hdmi->grf_clk);
-		return dev_err_probe(hdmi->dev, ret, "failed to get grf clock\n");
-	}
-
-	ret = devm_regulator_get_enable(hdmi->dev, "avdd-0v9");
-	if (ret)
-		return ret;
-
-	ret = devm_regulator_get_enable(hdmi->dev, "avdd-1v8");
-
-	return ret;
-}
-
 static enum drm_mode_status
 dw_hdmi_rockchip_mode_valid(struct dw_hdmi *dw_hdmi, void *data,
 			    const struct drm_display_info *info,
@@ -578,18 +543,39 @@ static int dw_hdmi_rockchip_bind(struct device *dev, struct device *master,
 	 * the required CRTC is added later.
 	 */
 	if (encoder->possible_crtcs == 0)
-		return -EPROBE_DEFER;
+		return dev_err_probe(dev, -EPROBE_DEFER,
+				     "failed to find possible crtcs\n");
 
-	ret = rockchip_hdmi_parse_dt(hdmi);
-	if (ret) {
-		return dev_err_probe(dev, ret, "Unable to parse OF data\n");
-	}
+	hdmi->regmap = syscon_regmap_lookup_by_phandle(np, "rockchip,grf");
+	if (IS_ERR(hdmi->regmap))
+		return dev_err_probe(dev, PTR_ERR(hdmi->regmap),
+				     "failed to get rockchip,grf\n");
+
+	hdmi->ref_clk = devm_clk_get_optional_enabled(dev, "ref");
+	if (!hdmi->ref_clk)
+		hdmi->ref_clk = devm_clk_get_optional_enabled(dev, "vpll");
+
+	if (IS_ERR(hdmi->ref_clk))
+		return dev_err_probe(dev, PTR_ERR(hdmi->ref_clk),
+				     "failed to get reference clock\n");
+
+	hdmi->grf_clk = devm_clk_get_optional(dev, "grf");
+	if (IS_ERR(hdmi->grf_clk))
+		return dev_err_probe(dev, PTR_ERR(hdmi->grf_clk),
+				     "failed to get grf clock\n");
+
+	ret = devm_regulator_get_enable(dev, "avdd-0v9");
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to enable avdd-0v9\n");
+
+	ret = devm_regulator_get_enable(dev, "avdd-1v8");
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to enable avdd-1v8\n");
 
 	hdmi->phy = devm_phy_optional_get(dev, "hdmi");
-	if (IS_ERR(hdmi->phy)) {
-		ret = PTR_ERR(hdmi->phy);
-		return dev_err_probe(dev, ret, "failed to get phy\n");
-	}
+	if (IS_ERR(hdmi->phy))
+		return dev_err_probe(dev, PTR_ERR(hdmi->phy),
+				     "failed to get phy\n");
 
 	index = of_property_match_string(np, "phy-names", "hdmi");
 	if (index >= 0) {
