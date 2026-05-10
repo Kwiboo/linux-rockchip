@@ -3019,14 +3019,28 @@ static irqreturn_t dw_hdmi_hardirq(int irq, void *dev_id)
 static void dw_hdmi_hpd_work(struct work_struct *work)
 {
 	struct dw_hdmi *hdmi = container_of(work, struct dw_hdmi, hpd_work.work);
-	enum drm_connector_status status;
 
 	if (WARN_ON(!hdmi->bridge.dev))
 		return;
 
+	/*
+	 * Notify the DRM core of the HPD event using drm_helper_hpd_irq_event()
+	 * instead of drm_bridge_hpd_notify(). This will cause the DRM function
+	 * check_connector_changed() to be called, which in turn calls the
+	 * connector detect()/force() funcs to detect any connection status or
+	 * epoch changes. Something that also triggers EDID and CEC phys address
+	 * updates.
+	 *
+	 * If we were to instead call drm_bridge_hpd_notify() here, we would
+	 * have to implement a very similar change detection logic or fully
+	 * relay on userspace to react on a hotplug uevent to ensure EDID and
+	 * CEC phys address are updated.
+	 *
+	 * The bridge connector detect() func also ensures that hpd_notify()
+	 * funcs are called for all bridges in the chain.
+	 */
+
 	drm_helper_hpd_irq_event(hdmi->bridge.dev);
-	status = dw_hdmi_phy_read_hpd(hdmi, hdmi->phy.data);
-	drm_bridge_hpd_notify(&hdmi->bridge, status);
 }
 
 static const struct dw_hdmi_phy_data dw_hdmi_phys[] = {
