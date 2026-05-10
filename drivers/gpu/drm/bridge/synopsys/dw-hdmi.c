@@ -2711,8 +2711,7 @@ static irqreturn_t dw_hdmi_hardirq(int irq, void *dev_id)
 			status == connector_status_connected ?
 			"plugin" : "plugout");
 
-		mod_delayed_work(system_percpu_wq, &hdmi->hpd_work,
-				 msecs_to_jiffies(HOTPLUG_DEBOUNCE_MS));
+		dw_hdmi_schedule_hpd_work(hdmi);
 
 		hdmi_writeb(hdmi, intr_stat, HDMI_IH_PHY_STAT0);
 		hdmi_writeb(hdmi, ~HDMI_IH_PHY_STAT0_HPD, HDMI_IH_MUTE_PHY_STAT0);
@@ -2721,6 +2720,16 @@ static irqreturn_t dw_hdmi_hardirq(int irq, void *dev_id)
 
 	return ret;
 }
+
+void dw_hdmi_schedule_hpd_work(struct dw_hdmi *hdmi)
+{
+	if (!hdmi)
+		return;
+
+	mod_delayed_work(system_percpu_wq, &hdmi->hpd_work,
+			 msecs_to_jiffies(HOTPLUG_DEBOUNCE_MS));
+}
+EXPORT_SYMBOL_GPL(dw_hdmi_schedule_hpd_work);
 
 static void dw_hdmi_hpd_work(struct work_struct *work)
 {
