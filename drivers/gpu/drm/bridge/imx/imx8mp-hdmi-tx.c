@@ -176,6 +176,10 @@ static void imx8mp_dw_hdmi_remove(struct platform_device *pdev)
 
 static int imx8mp_dw_hdmi_pm_suspend(struct device *dev)
 {
+	struct imx8mp_hdmi *hdmi = dev_get_drvdata(dev);
+
+	dw_hdmi_suspend(hdmi->dw_hdmi);
+
 	return 0;
 }
 
