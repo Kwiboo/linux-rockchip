@@ -386,7 +386,7 @@ static int inlinecrypt_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	dun_bytes = DIV_ROUND_UP(fls64(ctx->max_dun), 8);
 
 	err = blk_crypto_init_key(&ctx->key, raw_key, ctx->key_size,
-				  BLK_CRYPTO_KEY_TYPE_RAW,
+				  BLK_CRYPTO_KEY_TYPE_HW_WRAPPED,
 				  cipher->mode_num, dun_bytes,
 				  ctx->sector_size);
 	if (err) {
