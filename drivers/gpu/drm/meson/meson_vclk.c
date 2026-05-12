@@ -707,8 +707,8 @@ static bool meson_hdmi_pll_find_params(struct meson_drm *priv,
 			continue;
 		*frac = meson_hdmi_pll_get_frac(priv, *m, freq * *od);
 
-		DRM_DEBUG_DRIVER("PLL params for %lluHz: m=%x frac=%x od=%d\n",
-				 freq, *m, *frac, *od);
+		//DRM_DEBUG_DRIVER("PLL params for %lluHz: m=%x frac=%x od=%d\n",
+		//		 freq, *m, *frac, *od);
 
 		if (meson_hdmi_pll_validate_params(priv, *m, *frac))
 			return true;
@@ -757,8 +757,8 @@ static void meson_hdmi_pll_generic_set(struct meson_drm *priv,
 			od1 = od / od2;
 		}
 
-		DRM_DEBUG_DRIVER("PLL params for %lluHz: m=%x frac=%x od=%d/%d/%d\n",
-				 pll_freq, m, frac, od1, od2, od3);
+		//DRM_DEBUG_DRIVER("PLL params for %lluHz: m=%x frac=%x od=%d/%d/%d\n",
+		//		 pll_freq, m, frac, od1, od2, od3);
 
 		meson_hdmi_pll_set_params(priv, m, frac, od1, od2, od3);
 
@@ -773,12 +773,12 @@ static bool meson_vclk_freqs_are_matching_param(unsigned int idx,
 						unsigned long long phy_freq,
 						unsigned long long vclk_freq)
 {
-	DRM_DEBUG_DRIVER("i = %d vclk_freq = %lluHz alt = %lluHz\n",
-			 idx, params[idx].vclk_freq,
-			 FREQ_1000_1001(params[idx].vclk_freq));
-	DRM_DEBUG_DRIVER("i = %d phy_freq = %lluHz alt = %lluHz\n",
-			 idx, params[idx].phy_freq,
-			 FREQ_1000_1001(params[idx].phy_freq));
+	//DRM_DEBUG_DRIVER("i = %d vclk_freq = %lluHz alt = %lluHz\n",
+	//		 idx, params[idx].vclk_freq,
+	//		 FREQ_1000_1001(params[idx].vclk_freq));
+	//DRM_DEBUG_DRIVER("i = %d phy_freq = %lluHz alt = %lluHz\n",
+	//		 idx, params[idx].phy_freq,
+	//		 FREQ_1000_1001(params[idx].phy_freq));
 
 	/* Match strict frequency */
 	if (phy_freq == params[idx].phy_freq &&
@@ -806,8 +806,8 @@ meson_vclk_vic_supported_freq(struct meson_drm *priv,
 {
 	int i;
 
-	DRM_DEBUG_DRIVER("phy_freq = %lluHz vclk_freq = %lluHz\n",
-			 phy_freq, vclk_freq);
+	//DRM_DEBUG_DRIVER("phy_freq = %lluHz vclk_freq = %lluHz\n",
+	//		 phy_freq, vclk_freq);
 
 	/* Check against soc revision/package limits */
 	if (priv->limits) {
