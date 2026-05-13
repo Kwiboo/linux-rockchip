@@ -1222,13 +1222,8 @@ static int lm90_update_alarms_locked(struct lm90_data *data, bool force)
 
 static int lm90_update_alarms(struct lm90_data *data, bool force)
 {
-	int err;
-
-	hwmon_lock(data->hwmon_dev);
-	err = lm90_update_alarms_locked(data, force);
-	hwmon_unlock(data->hwmon_dev);
-
-	return err;
+	guard(hwmon_lock)(data->hwmon_dev);
+	return lm90_update_alarms_locked(data, force);
 }
 
 static void lm90_alert_work(struct work_struct *__work)
