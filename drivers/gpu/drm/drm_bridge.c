@@ -1737,6 +1737,10 @@ static void drm_bridge_debugfs_show_bridge(struct drm_printer *p,
 		drm_puts(p, " modes");
 	if (bridge->ops & DRM_BRIDGE_OP_HDMI)
 		drm_puts(p, " hdmi");
+	if (bridge->ops & (DRM_BRIDGE_OP_HDMI_AUDIO|DRM_BRIDGE_OP_DP_AUDIO))
+		drm_puts(p, " audio");
+	if (bridge->ops & (DRM_BRIDGE_OP_HDMI_CEC_NOTIFIER|DRM_BRIDGE_OP_HDMI_CEC_ADAPTER))
+		drm_puts(p, " cec");
 	drm_puts(p, "\n");
 }
 
