@@ -696,6 +696,8 @@ static int meson_dw_hdmi_bind(struct device *dev, struct device *master,
 	if (IS_ERR(dw_plat_data->regm))
 		return PTR_ERR(dw_plat_data->regm);
 
+	meson_dw_hdmi_init(meson_dw_hdmi);
+
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0)
 		return irq;
@@ -705,8 +707,6 @@ static int meson_dw_hdmi_bind(struct device *dev, struct device *master,
 	if (ret)
 		return dev_err_probe(dev, ret,
 				     "Failed to request hdmi top irq\n");
-
-	meson_dw_hdmi_init(meson_dw_hdmi);
 
 	/* Bridge / Connector */
 
@@ -763,7 +763,7 @@ static const struct component_ops meson_dw_hdmi_ops = {
 	.unbind	= meson_dw_hdmi_unbind,
 };
 
-static int __maybe_unused meson_dw_hdmi_pm_suspend(struct device *dev)
+static int __maybe_unused meson_dw_hdmi_pm_suspend_late(struct device *dev)
 {
 	struct meson_dw_hdmi *meson_dw_hdmi = dev_get_drvdata(dev);
 
@@ -777,7 +777,19 @@ static int __maybe_unused meson_dw_hdmi_pm_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused meson_dw_hdmi_pm_resume(struct device *dev)
+static int __maybe_unused meson_dw_hdmi_pm_resume_early(struct device *dev)
+{
+	struct meson_dw_hdmi *meson_dw_hdmi = dev_get_drvdata(dev);
+
+	if (!meson_dw_hdmi)
+		return 0;
+
+	dw_hdmi_resume(meson_dw_hdmi->hdmi);
+
+	return 0;
+}
+
+static int __maybe_unused meson_dw_hdmi_pm_resume_noirq(struct device *dev)
 {
 	struct meson_dw_hdmi *meson_dw_hdmi = dev_get_drvdata(dev);
 
@@ -785,8 +797,6 @@ static int __maybe_unused meson_dw_hdmi_pm_resume(struct device *dev)
 		return 0;
 
 	meson_dw_hdmi_init(meson_dw_hdmi);
-
-	dw_hdmi_resume(meson_dw_hdmi->hdmi);
 
 	return 0;
 }
@@ -802,8 +812,9 @@ static void meson_dw_hdmi_remove(struct platform_device *pdev)
 }
 
 static const struct dev_pm_ops meson_dw_hdmi_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(meson_dw_hdmi_pm_suspend,
-				meson_dw_hdmi_pm_resume)
+	SET_LATE_SYSTEM_SLEEP_PM_OPS(meson_dw_hdmi_pm_suspend_late,
+				     meson_dw_hdmi_pm_resume_early)
+	SET_NOIRQ_SYSTEM_SLEEP_PM_OPS(NULL, meson_dw_hdmi_pm_resume_noirq)
 };
 
 static const struct of_device_id meson_dw_hdmi_of_table[] = {
