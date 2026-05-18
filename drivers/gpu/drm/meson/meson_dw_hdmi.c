@@ -775,10 +775,17 @@ static int meson_dw_hdmi_bind(struct device *dev, struct device *master,
 	platform_set_drvdata(pdev, meson_dw_hdmi);
 
 	meson_dw_hdmi->hdmi = dw_hdmi_probe(pdev, &meson_dw_hdmi->dw_plat_data);
-	if (IS_ERR(meson_dw_hdmi->hdmi))
+	if (IS_ERR(meson_dw_hdmi->hdmi)) {
+		devm_free_irq(dev, irq, meson_dw_hdmi);
 		return PTR_ERR(meson_dw_hdmi->hdmi);
+	}
 
 	meson_dw_hdmi->bridge = of_drm_find_and_get_bridge(pdev->dev.of_node);
+	if (!meson_dw_hdmi->bridge) {
+		devm_free_irq(dev, irq, meson_dw_hdmi);
+		dw_hdmi_remove(meson_dw_hdmi->hdmi);
+		return -ENODEV;
+	}
 
 	DRM_DEBUG_DRIVER("HDMI controller initialized\n");
 
@@ -793,8 +800,8 @@ static void meson_dw_hdmi_unbind(struct device *dev, struct device *master,
 	int irq = platform_get_irq(pdev, 0);
 
 	devm_free_irq(dev, irq, meson_dw_hdmi);
-	dw_hdmi_unbind(meson_dw_hdmi->hdmi);
 	drm_bridge_put(meson_dw_hdmi->bridge);
+	dw_hdmi_remove(meson_dw_hdmi->hdmi);
 }
 
 static const struct component_ops meson_dw_hdmi_ops = {
