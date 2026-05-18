@@ -457,9 +457,11 @@ static enum drm_connector_status dw_hdmi_read_hpd(struct dw_hdmi *hdmi,
 			     void *data)
 {
 	struct meson_dw_hdmi *dw_hdmi = (struct meson_dw_hdmi *)data;
+	unsigned int stat;
 
-	return !!dw_hdmi->data->top_read(dw_hdmi, HDMITX_TOP_STAT0) ?
-		connector_status_connected : connector_status_disconnected;
+	stat = dw_hdmi->data->top_read(dw_hdmi, HDMITX_TOP_STAT0);
+	return stat & HDMITX_TOP_STAT0_HPD ? connector_status_connected :
+					     connector_status_disconnected;
 }
 
 static void dw_hdmi_setup_hpd(struct dw_hdmi *hdmi,
