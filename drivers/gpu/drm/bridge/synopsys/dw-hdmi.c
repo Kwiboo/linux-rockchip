@@ -48,6 +48,9 @@
 /* DW-HDMI Controller >= 0x200a are at least compliant with SCDC version 1 */
 #define SCDC_MIN_SOURCE_VERSION	0x1
 
+#define HOTPLUG_CONNECTED_DEBOUNCE_MS		150
+#define HOTPLUG_DISCONNECTED_DEBOUNCE_MS	1100
+
 static const u16 csc_coeff_default[3][4] = {
 	{ 0x2000, 0x0000, 0x0000, 0x0000 },
 	{ 0x0000, 0x2000, 0x0000, 0x0000 },
@@ -183,6 +186,7 @@ struct dw_hdmi {
 	hdmi_codec_plugged_cb plugged_cb;
 	struct device *codec_dev;
 	enum drm_connector_status last_connector_result;
+	struct delayed_work hpd_work;
 };
 
 const struct dw_hdmi_plat_data *dw_hdmi_to_plat_data(struct dw_hdmi *hdmi)
@@ -2515,6 +2519,20 @@ static void dw_hdmi_connector_force(struct drm_connector *connector)
 	dw_hdmi_connector_status_update(hdmi, connector, connector->status);
 }
 
+static void dw_hdmi_connector_enable_hpd(struct drm_connector *connector)
+{
+	struct dw_hdmi *hdmi = container_of(connector, struct dw_hdmi, connector);
+
+	enable_delayed_work(&hdmi->hpd_work);
+}
+
+static void dw_hdmi_connector_disable_hpd(struct drm_connector *connector)
+{
+	struct dw_hdmi *hdmi = container_of(connector, struct dw_hdmi, connector);
+
+	disable_delayed_work_sync(&hdmi->hpd_work);
+}
+
 static void dw_hdmi_connector_destroy(struct drm_connector *connector)
 {
 	struct dw_hdmi *hdmi = container_of(connector, struct dw_hdmi, connector);
@@ -2536,6 +2554,8 @@ static const struct drm_connector_funcs dw_hdmi_connector_funcs = {
 static const struct drm_connector_helper_funcs dw_hdmi_connector_helper_funcs = {
 	.get_modes = dw_hdmi_connector_get_modes,
 	.atomic_check = dw_hdmi_connector_atomic_check,
+	.enable_hpd = dw_hdmi_connector_enable_hpd,
+	.disable_hpd = dw_hdmi_connector_disable_hpd,
 };
 
 static int dw_hdmi_connector_create(struct dw_hdmi *hdmi)
@@ -2966,6 +2986,20 @@ static const struct drm_edid *dw_hdmi_bridge_edid_read(struct drm_bridge *bridge
 	return dw_hdmi_edid_read(hdmi, connector);
 }
 
+static void dw_hdmi_bridge_hpd_enable(struct drm_bridge *bridge)
+{
+	struct dw_hdmi *hdmi = bridge->driver_private;
+
+	enable_delayed_work(&hdmi->hpd_work);
+}
+
+static void dw_hdmi_bridge_hpd_disable(struct drm_bridge *bridge)
+{
+	struct dw_hdmi *hdmi = bridge->driver_private;
+
+	disable_delayed_work_sync(&hdmi->hpd_work);
+}
+
 static const struct drm_bridge_funcs dw_hdmi_bridge_funcs = {
 	.atomic_duplicate_state = drm_atomic_helper_bridge_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_bridge_destroy_state,
@@ -2979,6 +3013,8 @@ static const struct drm_bridge_funcs dw_hdmi_bridge_funcs = {
 	.mode_valid = dw_hdmi_bridge_mode_valid,
 	.detect = dw_hdmi_bridge_detect,
 	.edid_read = dw_hdmi_bridge_edid_read,
+	.hpd_enable = dw_hdmi_bridge_hpd_enable,
+	.hpd_disable = dw_hdmi_bridge_hpd_disable,
 };
 
 /* -----------------------------------------------------------------------------
@@ -3099,8 +3135,7 @@ static irqreturn_t dw_hdmi_irq(int irq, void *dev_id)
 			status == connector_status_connected ?
 			"plugin" : "plugout");
 
-		if (hdmi->bridge.dev)
-			drm_helper_hpd_irq_event(hdmi->bridge.dev);
+		dw_hdmi_schedule_hpd_work(hdmi, status);
 	}
 
 	hdmi_writeb(hdmi, intr_stat, HDMI_IH_PHY_STAT0);
@@ -3108,6 +3143,52 @@ static irqreturn_t dw_hdmi_irq(int irq, void *dev_id)
 		    HDMI_IH_MUTE_PHY_STAT0);
 
 	return IRQ_HANDLED;
+}
+
+void dw_hdmi_schedule_hpd_work(struct dw_hdmi *hdmi,
+			       enum drm_connector_status status)
+{
+	unsigned int delay;
+
+	if (IS_ERR_OR_NULL(hdmi))
+		return;
+
+	delay = status == connector_status_connected ?
+			  HOTPLUG_CONNECTED_DEBOUNCE_MS :
+			  HOTPLUG_DISCONNECTED_DEBOUNCE_MS;
+	mod_delayed_work(system_percpu_wq, &hdmi->hpd_work,
+			 msecs_to_jiffies(delay));
+}
+EXPORT_SYMBOL_GPL(dw_hdmi_schedule_hpd_work);
+
+static void dw_hdmi_hpd_work(struct work_struct *work)
+{
+	struct dw_hdmi *hdmi = container_of(work, struct dw_hdmi, hpd_work.work);
+	struct drm_connector *connector;
+	struct drm_device *dev;
+
+	mutex_lock(&hdmi->mutex);
+	connector = hdmi->curr_conn;
+	if (connector)
+		drm_connector_get(connector);
+	else
+		dev = hdmi->bridge.dev;
+	mutex_unlock(&hdmi->mutex);
+
+	/*
+	 * Notify the DRM core of the HPD event using helper_hpd_irq_event()
+	 * instead of drm_bridge_hpd_notify(). This ensures the DRM function
+	 * check_connector_changed() is called, which in turn calls the
+	 * connector detect()/force() funcs to detect any connection status or
+	 * epoch changes. The bridge connector detect() func ensures that any
+	 * hpd_notify() funcs are called for all bridges in the chain.
+	 */
+	if (connector) {
+		drm_connector_helper_hpd_irq_event(connector);
+		drm_connector_put(connector);
+	} else if (dev) {
+		drm_helper_hpd_irq_event(dev);
+	}
 }
 
 static const struct dw_hdmi_phy_data dw_hdmi_phys[] = {
@@ -3394,6 +3475,9 @@ struct dw_hdmi *dw_hdmi_probe(struct platform_device *pdev,
 		goto err_res;
 	}
 
+	INIT_DELAYED_WORK(&hdmi->hpd_work, dw_hdmi_hpd_work);
+	disable_delayed_work(&hdmi->hpd_work);
+
 	ret = devm_request_threaded_irq(dev, irq, dw_hdmi_hardirq,
 					dw_hdmi_irq, IRQF_SHARED,
 					dev_name(dev), hdmi);
@@ -3530,15 +3614,24 @@ EXPORT_SYMBOL_GPL(dw_hdmi_probe);
 
 void dw_hdmi_remove(struct dw_hdmi *hdmi)
 {
+	struct platform_device *pdev = to_platform_device(hdmi->dev);
+	int irq = platform_get_irq(pdev, 0);
+
+	/* Free, mute and clear phy interrupts */
+	devm_free_irq(hdmi->dev, irq, hdmi);
+	hdmi_writeb(hdmi, ~0, HDMI_IH_MUTE_PHY_STAT0);
+	hdmi_writeb(hdmi, HDMI_IH_PHY_STAT0_HPD | HDMI_IH_PHY_STAT0_RX_SENSE,
+		    HDMI_IH_PHY_STAT0);
+
+	/* Cancel any pending hot plug work */
+	cancel_delayed_work_sync(&hdmi->hpd_work);
+
 	drm_bridge_remove(&hdmi->bridge);
 
 	if (hdmi->audio && !IS_ERR(hdmi->audio))
 		platform_device_unregister(hdmi->audio);
 	if (!IS_ERR(hdmi->cec))
 		platform_device_unregister(hdmi->cec);
-
-	/* Disable all interrupts */
-	hdmi_writeb(hdmi, ~0, HDMI_IH_MUTE_PHY_STAT0);
 
 	if (hdmi->i2c)
 		i2c_del_adapter(&hdmi->i2c->adap);
