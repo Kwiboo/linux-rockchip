@@ -387,16 +387,16 @@ static void cifs_put_swn_reg(struct cifs_swn_reg *swnreg)
 	mutex_unlock(&cifs_swnreg_idr_mutex);
 }
 
-static int cifs_swn_resource_state_changed(struct cifs_swn_reg *swnreg, const char *name, int state)
+static int cifs_swn_resource_state_changed(struct cifs_tcon *tcon, const char *name, int state)
 {
 	switch (state) {
 	case CIFS_SWN_RESOURCE_STATE_UNAVAILABLE:
 		cifs_dbg(FYI, "%s: resource name '%s' become unavailable\n", __func__, name);
-		cifs_signal_cifsd_for_reconnect(swnreg->tcon->ses->server, true);
+		cifs_signal_cifsd_for_reconnect(tcon->ses->server, true);
 		break;
 	case CIFS_SWN_RESOURCE_STATE_AVAILABLE:
 		cifs_dbg(FYI, "%s: resource name '%s' become available\n", __func__, name);
-		cifs_signal_cifsd_for_reconnect(swnreg->tcon->ses->server, true);
+		cifs_signal_cifsd_for_reconnect(tcon->ses->server, true);
 		break;
 	case CIFS_SWN_RESOURCE_STATE_UNKNOWN:
 		cifs_dbg(FYI, "%s: resource name '%s' changed to unknown state\n", __func__, name);
@@ -502,7 +502,7 @@ unlock:
 	return ret;
 }
 
-static int cifs_swn_client_move(struct cifs_swn_reg *swnreg, struct sockaddr_storage *addr)
+static int cifs_swn_client_move(struct cifs_tcon *tcon, struct sockaddr_storage *addr)
 {
 	struct sockaddr_in *ipv4 = (struct sockaddr_in *)addr;
 	struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)addr;
@@ -512,14 +512,16 @@ static int cifs_swn_client_move(struct cifs_swn_reg *swnreg, struct sockaddr_sto
 	else if (addr->ss_family == AF_INET6)
 		cifs_dbg(FYI, "%s: move to %pI6\n", __func__, &ipv6->sin6_addr);
 
-	return cifs_swn_reconnect(swnreg->tcon, addr);
+	return cifs_swn_reconnect(tcon, addr);
 }
 
 int cifs_swn_notify(struct sk_buff *skb, struct genl_info *info)
 {
 	struct cifs_swn_reg *swnreg;
+	struct cifs_tcon *tcon = NULL;
 	char name[256];
 	int type;
+	int ret = 0;
 
 	if (info->attrs[CIFS_GENL_ATTR_SWN_REGISTRATION_ID]) {
 		int swnreg_id;
@@ -527,8 +529,36 @@ int cifs_swn_notify(struct sk_buff *skb, struct genl_info *info)
 		swnreg_id = nla_get_u32(info->attrs[CIFS_GENL_ATTR_SWN_REGISTRATION_ID]);
 		mutex_lock(&cifs_swnreg_idr_mutex);
 		swnreg = idr_find(&cifs_swnreg_idr, swnreg_id);
+		if (swnreg) {
+			/*
+			 * Pin the backing tcon across the mutex drop so a
+			 * concurrent unmount or smb2_reconnect_server worker
+			 * cannot free it before we are done.  Refuse to
+			 * resurrect a tcon already marked TID_EXITING; that
+			 * mirrors cifs_find_tcon() discipline and lets
+			 * teardown make forward progress.
+			 *
+			 * Do NOT take a kref on swnreg here.  The handler
+			 * never dereferences swnreg again after the mutex
+			 * drop; pinning it would block cifs_swn_unregister()
+			 * from running on this id, which is the wire-protocol
+			 * unregister sent by cifs.witness on the CLIENT_MOVE
+			 * reconnect path below.
+			 */
+			spin_lock(&swnreg->tcon->tc_lock);
+			if (swnreg->tcon->status == TID_EXITING) {
+				spin_unlock(&swnreg->tcon->tc_lock);
+			} else {
+				tcon = swnreg->tcon;
+				++tcon->tc_count;
+				trace_smb3_tcon_ref(tcon->debug_id,
+						    tcon->tc_count,
+						    netfs_trace_tcon_ref_get_swn_notify);
+				spin_unlock(&tcon->tc_lock);
+			}
+		}
 		mutex_unlock(&cifs_swnreg_idr_mutex);
-		if (swnreg == NULL) {
+		if (!tcon) {
 			cifs_dbg(FYI, "%s: registration id %d not found\n", __func__, swnreg_id);
 			return -EINVAL;
 		}
@@ -541,7 +571,8 @@ int cifs_swn_notify(struct sk_buff *skb, struct genl_info *info)
 		type = nla_get_u32(info->attrs[CIFS_GENL_ATTR_SWN_NOTIFICATION_TYPE]);
 	} else {
 		cifs_dbg(FYI, "%s: missing notification type attribute\n", __func__);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto out;
 	}
 
 	switch (type) {
@@ -553,15 +584,18 @@ int cifs_swn_notify(struct sk_buff *skb, struct genl_info *info)
 					sizeof(name));
 		} else {
 			cifs_dbg(FYI, "%s: missing resource name attribute\n", __func__);
-			return -EINVAL;
+			ret = -EINVAL;
+			goto out;
 		}
 		if (info->attrs[CIFS_GENL_ATTR_SWN_RESOURCE_STATE]) {
 			state = nla_get_u32(info->attrs[CIFS_GENL_ATTR_SWN_RESOURCE_STATE]);
 		} else {
 			cifs_dbg(FYI, "%s: missing resource state attribute\n", __func__);
-			return -EINVAL;
+			ret = -EINVAL;
+			goto out;
 		}
-		return cifs_swn_resource_state_changed(swnreg, name, state);
+		ret = cifs_swn_resource_state_changed(tcon, name, state);
+		break;
 	}
 	case CIFS_SWN_NOTIFICATION_CLIENT_MOVE: {
 		struct sockaddr_storage addr;
@@ -570,16 +604,20 @@ int cifs_swn_notify(struct sk_buff *skb, struct genl_info *info)
 			nla_memcpy(&addr, info->attrs[CIFS_GENL_ATTR_SWN_IP], sizeof(addr));
 		} else {
 			cifs_dbg(FYI, "%s: missing IP address attribute\n", __func__);
-			return -EINVAL;
+			ret = -EINVAL;
+			goto out;
 		}
-		return cifs_swn_client_move(swnreg, &addr);
+		ret = cifs_swn_client_move(tcon, &addr);
+		break;
 	}
 	default:
 		cifs_dbg(FYI, "%s: unknown notification type %d\n", __func__, type);
 		break;
 	}
 
-	return 0;
+out:
+	cifs_put_tcon(tcon, netfs_trace_tcon_ref_put_swn_notify);
+	return ret;
 }
 
 int cifs_swn_register(struct cifs_tcon *tcon)
