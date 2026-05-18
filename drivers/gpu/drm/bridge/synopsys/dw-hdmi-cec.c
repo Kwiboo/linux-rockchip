@@ -309,6 +309,7 @@ static void dw_hdmi_cec_remove(struct platform_device *pdev)
 	struct dw_hdmi_cec *cec = platform_get_drvdata(pdev);
 
 	cec_notifier_cec_adap_unregister(cec->notify, cec->adap);
+	devm_free_irq(&pdev->dev, cec->irq, cec->adap);
 	cec_unregister_adapter(cec->adap);
 }
 
