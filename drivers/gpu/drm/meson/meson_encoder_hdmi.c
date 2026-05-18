@@ -16,8 +16,6 @@
 #include <linux/regulator/consumer.h>
 #include <linux/reset.h>
 
-#include <media/cec-notifier.h>
-
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_bridge.h>
 #include <drm/drm_bridge_connector.h>
@@ -41,7 +39,6 @@ struct meson_encoder_hdmi {
 	struct drm_connector *connector;
 	struct meson_drm *priv;
 	unsigned long output_bus_fmt;
-	struct cec_notifier *cec_notifier;
 };
 
 #define bridge_to_meson_encoder_hdmi(x) \
@@ -55,14 +52,6 @@ static int meson_encoder_hdmi_attach(struct drm_bridge *bridge,
 
 	return drm_bridge_attach(encoder, encoder_hdmi->bridge.next_bridge,
 				 &encoder_hdmi->bridge, flags);
-}
-
-static void meson_encoder_hdmi_detach(struct drm_bridge *bridge)
-{
-	struct meson_encoder_hdmi *encoder_hdmi = bridge_to_meson_encoder_hdmi(bridge);
-
-	cec_notifier_conn_unregister(encoder_hdmi->cec_notifier);
-	encoder_hdmi->cec_notifier = NULL;
 }
 
 static void meson_encoder_hdmi_set_vclk(struct meson_encoder_hdmi *encoder_hdmi,
@@ -321,27 +310,9 @@ static int meson_encoder_hdmi_atomic_check(struct drm_bridge *bridge,
 	return 0;
 }
 
-static void meson_encoder_hdmi_hpd_notify(struct drm_bridge *bridge,
-					  struct drm_connector *connector,
-					  enum drm_connector_status status)
-{
-	struct meson_encoder_hdmi *encoder_hdmi = bridge_to_meson_encoder_hdmi(bridge);
-
-	if (!encoder_hdmi->cec_notifier)
-		return;
-
-	if (status == connector_status_connected)
-		cec_notifier_set_phys_addr(encoder_hdmi->cec_notifier,
-					   connector->display_info.source_physical_address);
-	else
-		cec_notifier_phys_addr_invalidate(encoder_hdmi->cec_notifier);
-}
-
 static const struct drm_bridge_funcs meson_encoder_hdmi_bridge_funcs = {
 	.attach = meson_encoder_hdmi_attach,
-	.detach = meson_encoder_hdmi_detach,
 	.mode_valid = meson_encoder_hdmi_mode_valid,
-	.hpd_notify = meson_encoder_hdmi_hpd_notify,
 	.atomic_enable = meson_encoder_hdmi_atomic_enable,
 	.atomic_disable = meson_encoder_hdmi_atomic_disable,
 	.atomic_get_input_bus_fmts = meson_encoder_hdmi_get_inp_bus_fmts,
@@ -374,15 +345,22 @@ int meson_encoder_hdmi_probe(struct meson_drm *priv)
 
 	meson_encoder_hdmi->bridge.next_bridge = of_drm_find_and_get_bridge(remote);
 	if (!meson_encoder_hdmi->bridge.next_bridge) {
-		ret = dev_err_probe(priv->dev, -EPROBE_DEFER,
-				    "Failed to find HDMI transceiver bridge\n");
-		goto err_put_node;
+		of_node_put(remote);
+		return dev_err_probe(priv->dev, -EPROBE_DEFER,
+				     "Failed to find HDMI transceiver bridge\n");
 	}
 
 	/* HDMI Encoder Bridge */
 	meson_encoder_hdmi->bridge.of_node = priv->dev->of_node;
 	meson_encoder_hdmi->bridge.type = DRM_MODE_CONNECTOR_HDMIA;
 	meson_encoder_hdmi->bridge.interlace_allowed = true;
+
+	pdev = of_find_device_by_node(remote);
+	of_node_put(remote);
+	if (pdev) {
+		meson_encoder_hdmi->bridge.ops |= DRM_BRIDGE_OP_HDMI_CEC_NOTIFIER;
+		meson_encoder_hdmi->bridge.hdmi_cec_dev = &pdev->dev;
+	}
 
 	drm_bridge_add(&meson_encoder_hdmi->bridge);
 
@@ -391,30 +369,24 @@ int meson_encoder_hdmi_probe(struct meson_drm *priv)
 	/* Encoder */
 	ret = drm_simple_encoder_init(priv->drm, &meson_encoder_hdmi->encoder,
 				      DRM_MODE_ENCODER_TMDS);
-	if (ret) {
-		dev_err_probe(priv->dev, ret, "Failed to init HDMI encoder\n");
-		goto err_put_node;
-	}
+	if (ret)
+		return dev_err_probe(priv->dev, ret, "Failed to init HDMI encoder\n");
 
 	meson_encoder_hdmi->encoder.possible_crtcs = BIT(0);
 
 	/* Attach HDMI Encoder Bridge to Encoder */
 	ret = drm_bridge_attach(&meson_encoder_hdmi->encoder, &meson_encoder_hdmi->bridge, NULL,
 				DRM_BRIDGE_ATTACH_NO_CONNECTOR);
-	if (ret) {
-		dev_err_probe(priv->dev, ret, "Failed to attach bridge\n");
-		goto err_put_node;
-	}
+	if (ret)
+		return dev_err_probe(priv->dev, ret, "Failed to attach bridge\n");
 
 	/* Initialize & attach Bridge Connector */
 	meson_encoder_hdmi->connector = drm_bridge_connector_init(priv->drm,
 							&meson_encoder_hdmi->encoder);
-	if (IS_ERR(meson_encoder_hdmi->connector)) {
-		ret = dev_err_probe(priv->dev,
-				    PTR_ERR(meson_encoder_hdmi->connector),
-				    "Unable to create HDMI bridge connector\n");
-		goto err_put_node;
-	}
+	if (IS_ERR(meson_encoder_hdmi->connector))
+		return dev_err_probe(priv->dev,
+				     PTR_ERR(meson_encoder_hdmi->connector),
+				     "Unable to create HDMI bridge connector\n");
 
 	/*
 	 * We should have now in place:
@@ -437,32 +409,11 @@ int meson_encoder_hdmi_probe(struct meson_drm *priv)
 	/* Handle this here until handled by drm_bridge_connector_init() */
 	meson_encoder_hdmi->connector->ycbcr_420_allowed = true;
 
-	pdev = of_find_device_by_node(remote);
-	of_node_put(remote);
-	if (pdev) {
-		struct cec_connector_info conn_info;
-		struct cec_notifier *notifier;
-
-		cec_fill_conn_info_from_drm(&conn_info, meson_encoder_hdmi->connector);
-
-		notifier = cec_notifier_conn_register(&pdev->dev, NULL, &conn_info);
-		if (!notifier) {
-			put_device(&pdev->dev);
-			return -ENOMEM;
-		}
-
-		meson_encoder_hdmi->cec_notifier = notifier;
-	}
-
 	priv->encoders[MESON_ENC_HDMI] = meson_encoder_hdmi;
 
 	dev_dbg(priv->dev, "HDMI encoder initialized\n");
 
 	return 0;
-
-err_put_node:
-	of_node_put(remote);
-	return ret;
 }
 
 void meson_encoder_hdmi_remove(struct meson_drm *priv)
