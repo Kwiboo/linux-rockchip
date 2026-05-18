@@ -93,7 +93,7 @@
 #endif
 
 #ifndef O_EMPTYPATH
-#define O_EMPTYPATH	(1 << 26)	/* allow empty path */
+#define O_EMPTYPATH	0100000000	/* allow empty path */
 #endif
 
 /* a horrid kludge trying to make sure that this will fail on old kernels */
