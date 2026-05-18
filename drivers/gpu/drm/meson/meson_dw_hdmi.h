@@ -157,4 +157,7 @@
  */
 #define HDMITX_TOP_STAT0                        (0x00E)
 
+#define HDMITX_TOP_STAT0_HPD		BIT(0)
+#define HDMITX_TOP_STAT0_RXSENSE	BIT(1)
+
 #endif /* __MESON_DW_HDMI_H */
