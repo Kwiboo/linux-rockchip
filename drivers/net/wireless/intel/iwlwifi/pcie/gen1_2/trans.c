@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
- * Copyright (C) 2007-2015, 2018-2024 Intel Corporation
+ * Copyright (C) 2007-2015, 2018-2024, 2026 Intel Corporation
  * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
  * Copyright (C) 2016-2017 Intel Deutschland GmbH
  */
@@ -141,10 +141,10 @@ static void iwl_pcie_alloc_fw_monitor_block(struct iwl_trans *trans,
 		return;
 
 	if (power != max_power)
-		IWL_ERR(trans,
-			"Sorry - debug buffer is only %luK while you requested %luK\n",
-			(unsigned long)BIT(power - 10),
-			(unsigned long)BIT(max_power - 10));
+		IWL_INFO(trans,
+			 "Sorry - debug buffer is only %luK while you requested %luK\n",
+			 (unsigned long)BIT(power - 10),
+			 (unsigned long)BIT(max_power - 10));
 
 	fw_mon->block = block;
 	fw_mon->physical = physical;
@@ -2044,7 +2044,7 @@ iwl_trans_pcie_call_prod_reset_dsm(struct pci_dev *pdev, u16 cmd, u16 value)
 						 0xDD, 0x26, 0xB5, 0xFD);
 
 	if (!acpi_check_dsm(ACPI_HANDLE(&pdev->dev), &dsm_guid, ACPI_DSM_REV,
-			    DSM_INTERNAL_FUNC_PRODUCT_RESET))
+			    BIT(DSM_INTERNAL_FUNC_PRODUCT_RESET)))
 		return ERR_PTR(-ENODEV);
 
 	return iwl_acpi_get_dsm_object(&pdev->dev, ACPI_DSM_REV,
@@ -3201,8 +3201,7 @@ static ssize_t iwl_dbgfs_reset_write(struct file *file,
 				return -EINVAL;
 			trans->request_top_reset = 1;
 		}
-		iwl_op_mode_nic_error(trans->op_mode, IWL_ERR_TYPE_DEBUGFS);
-		iwl_trans_schedule_reset(trans, IWL_ERR_TYPE_DEBUGFS);
+		iwl_trans_fw_error(trans, IWL_ERR_TYPE_DEBUGFS);
 		return count;
 	}
 
@@ -3999,6 +3998,30 @@ static void get_crf_id(struct iwl_trans *iwl_trans,
 		sd_reg_ver_addr = SD_REG_VER_GEN2;
 	else
 		sd_reg_ver_addr = SD_REG_VER;
+
+	/* wait until the device is ready to access the prph registers */
+	if (iwl_trans->mac_cfg->device_family == IWL_DEVICE_FAMILY_DR ||
+	    iwl_trans->mac_cfg->device_family == IWL_DEVICE_FAMILY_SC) {
+		u32 req = iwl_read_umac_prph_no_grab(iwl_trans,
+						     WFPM_RSRCS_4PHS_REQ_STTS);
+		int ret;
+
+		if (!(req & RSRC_REQ_CNVR_TOP)) {
+			IWL_ERR(iwl_trans,
+				"WFPM_RSRCS_4PHS_REQ_STTS bit 6 is clear 0x%x\n",
+				req);
+			return;
+		}
+
+		ret = iwl_poll_umac_prph_bits_no_grab(iwl_trans,
+						      WFPM_RSRCS_4PHS_ACK_STTS,
+						      RSRC_ACK_CNVR_TOP,
+						      RSRC_ACK_CNVR_TOP,
+						      50 * 1000);
+		if (ret < 0)
+			IWL_ERR(iwl_trans,
+				"WFPM_RSRCS_4PHS_ACK_STTS bit 6 is clear\n");
+	}
 
 	/* Enable access to peripheral registers */
 	val = iwl_read_umac_prph_no_grab(iwl_trans, WFPM_CTRL_REG);
