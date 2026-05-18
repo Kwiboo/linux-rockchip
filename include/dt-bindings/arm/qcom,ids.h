@@ -299,11 +299,20 @@
 #define QCOM_ID_QCS615			680
 #define QCOM_ID_CQ7790M			731
 #define QCOM_ID_CQ7790S			732
+#define QCOM_ID_CQ2390M			756
+#define QCOM_ID_CQ2390S			758
+#define QCOM_ID_IQ2390S			759
 #define QCOM_ID_IPQ5200			765
 #define QCOM_ID_IPQ5210			766
 #define QCOM_ID_QCF2200			767
 #define QCOM_ID_QCF3200			768
 #define QCOM_ID_QCF3210			769
+#define QCOM_ID_IPQ9620			770
+#define QCOM_ID_IPQ9650			771
+#define QCOM_ID_IPQ9610			778
+#define QCOM_ID_IPQ9630			779
+#define QCOM_ID_IPQ9640			780
+#define QCOM_ID_IPQ9670			781
 
 /*
  * The board type and revision information, used by Qualcomm bootloaders and
