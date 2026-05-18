@@ -1223,6 +1223,12 @@ struct netdev_net_notifier {
  *	tx queues stopped. This allows the netdevice to perform queue
  *	management safely.
  *
+ *	NB: Returning -EOPNOTSUPP for whatever commands means "this qdisc
+ *	is not offloaded (anymore, offloading may have silently stopped)",
+ *	and the offloading flag is cleared. Notably, this is also true for
+ *	dump queries (e.g. TC_*_STATS commands). If the underlying device does
+ *	not report any statistics but is still offloading, return 0 instead.
+ *
  *	Fiber Channel over Ethernet (FCoE) offload functions.
  * int (*ndo_fcoe_enable)(struct net_device *dev);
  *	Called when the FCoE protocol stack wants to start using LLD for FCoE
@@ -3378,7 +3384,6 @@ static inline struct net_device *first_net_device(struct net *net)
 		net_device_entry(net->dev_base_head.next);
 }
 
-int netdev_boot_setup_check(struct net_device *dev);
 struct net_device *dev_getbyhwaddr(struct net *net, unsigned short type,
 				   const char *hwaddr);
 struct net_device *dev_getbyhwaddr_rcu(struct net *net, unsigned short type,
