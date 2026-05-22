@@ -1230,10 +1230,21 @@ static int spinand_init_flash(struct spinand_device *spinand)
 	return ret;
 }
 
+static int spinand_mtd_suspend(struct mtd_info *mtd)
+{
+	struct spinand_device *spinand = mtd_to_spinand(mtd);
+
+	mutex_lock(&spinand->lock);
+
+	return 0;
+}
+
 static void spinand_mtd_resume(struct mtd_info *mtd)
 {
 	struct spinand_device *spinand = mtd_to_spinand(mtd);
 	int ret;
+
+	mutex_unlock(&spinand->lock);
 
 	ret = spinand_reset_op(spinand);
 	if (ret)
@@ -1316,6 +1327,7 @@ static int spinand_init(struct spinand_device *spinand)
 	mtd->_erase = spinand_mtd_erase;
 	mtd->_max_bad_blocks = nanddev_mtd_max_bad_blocks;
 	mtd->_resume = spinand_mtd_resume;
+	mtd->_suspend = spinand_mtd_suspend;
 
 	if (spinand->eccinfo.ooblayout)
 		mtd_set_ooblayout(mtd, spinand->eccinfo.ooblayout);
