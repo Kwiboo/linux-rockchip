@@ -2759,7 +2759,7 @@ vop_crtc_mode_valid(struct drm_crtc *crtc, const struct drm_display_mode *mode)
 	    (VOP_MAJOR(vop->version) == 2 && VOP_MINOR(vop->version) >= 12 &&
 	     s->output_if & VOP_OUTPUT_IF_BT656))
 		request_clock *= 2;
-	clock = clk_round_rate(vop->dclk, request_clock * 1000) / 1000;
+	clock = rockchip_drm_dclk_round_rate(vop->version, vop->dclk, request_clock * 1000) / 1000;
 
 	/*
 	 * Hdmi or DisplayPort request a Accurate clock.
@@ -3096,7 +3096,7 @@ static bool vop_crtc_mode_fixup(struct drm_crtc *crtc,
 					(vop->mcu_timing.mcu_pix_total + 1);
 
 	adj_mode->crtc_clock =
-		DIV_ROUND_UP(clk_round_rate(vop->dclk, adj_mode->crtc_clock * 1000),
+		DIV_ROUND_UP(rockchip_drm_dclk_round_rate(vop->version, vop->dclk, adj_mode->crtc_clock * 1000),
 			     1000);
 
 	return true;
