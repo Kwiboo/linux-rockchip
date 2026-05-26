@@ -1486,7 +1486,7 @@ static int mi_frame_start(struct rkisp_stream *stream, u32 mis)
 							struct rkisp_buffer, queue);
 			list_del(&stream->next_buf->queue);
 			stream->ops->update_mi(stream);
-		} else if (dev->hw_dev->is_single &&
+		} else if (dev->hw_dev->is_single && !stream->is_async_cfg &&
 			   stream->next_buf && !stream->curr_buf) {
 			val = rkisp_read(dev, ISP3X_ISP_DEBUG2, true);
 			if (stream->ops->is_stream_stopped(stream) &&
@@ -1508,6 +1508,7 @@ static int mi_frame_start(struct rkisp_stream *stream, u32 mis)
 		/* check frame loss */
 		if (stream->ops->is_stream_stopped(stream))
 			stream->dbg.frameloss++;
+		stream->is_async_cfg = false;
 	}
 	spin_unlock_irqrestore(&stream->vbq_lock, lock_flags);
 
@@ -1949,15 +1950,13 @@ static int rkisp_stream_start(struct rkisp_stream *stream)
 {
 	struct rkisp_device *dev = stream->ispdev;
 	struct v4l2_device *v4l2_dev = &dev->v4l2_dev;
-	bool async = false;
+	bool async = (dev->isp_state & ISP_STOP) ? false : true;
 	int ret;
 
 	if (stream->id == RKISP_STREAM_MPDS || stream->id == RKISP_STREAM_BPDS)
 		goto end;
 
-	async = (dev->cap_dev.stream[RKISP_STREAM_MP].streaming ||
-		 dev->cap_dev.stream[RKISP_STREAM_SP].streaming ||
-		 dev->cap_dev.stream[RKISP_STREAM_BP].streaming);
+	stream->is_async_cfg = async;
 
 	/*
 	 * can't be async now, otherwise the latter started stream fails to

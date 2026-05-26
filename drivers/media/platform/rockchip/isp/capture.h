@@ -300,6 +300,7 @@ struct rkisp_stream {
 	bool is_using_resmem;
 	bool frame_early;
 	bool is_attach_info;
+	bool is_async_cfg;
 	wait_queue_head_t done;
 	unsigned int burst;
 	atomic_t sequence;
