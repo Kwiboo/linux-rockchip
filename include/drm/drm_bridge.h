@@ -657,6 +657,26 @@ struct drm_bridge_funcs {
 				     unsigned long long tmds_rate);
 
 	/**
+	 * @hdmi_scrambler_enable:
+	 *
+	 * Enable source-side HDMI 2.0 scrambling and high TMDS clock ratio.
+	 *
+	 * This callback is optional but it must be implemented by bridges that
+	 * set the DRM_BRIDGE_OP_HDMI_SCRAMBLER flag in their &drm_bridge->ops.
+	 */
+	int (*hdmi_scrambler_enable)(struct drm_bridge *bridge);
+
+	/**
+	 * @hdmi_scrambler_disable:
+	 *
+	 * Disable source-side HDMI 2.0 scrambling and high TMDS clock ratio.
+	 *
+	 * This callback is optional but it must be implemented by bridges that
+	 * set the DRM_BRIDGE_OP_HDMI_SCRAMBLER flag in their &drm_bridge->ops.
+	 */
+	int (*hdmi_scrambler_disable)(struct drm_bridge *bridge);
+
+	/**
 	 * @hdmi_clear_avi_infoframe:
 	 *
 	 * This callback clears the infoframes in the hardware during commit.
@@ -1081,6 +1101,12 @@ enum drm_bridge_ops {
 	 * &drm_bridge_funcs->hdmi_clear_spd_infoframe callbacks.
 	 */
 	DRM_BRIDGE_OP_HDMI_SPD_INFOFRAME = BIT(10),
+	/**
+	 * @DRM_BRIDGE_OP_HDMI_SCRAMBLER: The bridge supports
+	 * &drm_bridge_funcs->hdmi_scrambler_enable and
+	 * &drm_bridge_funcs->hdmi_scrambler_disable callbacks.
+	 */
+	DRM_BRIDGE_OP_HDMI_SCRAMBLER = BIT(11),
 };
 
 /**
