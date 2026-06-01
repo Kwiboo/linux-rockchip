@@ -589,6 +589,21 @@ hdmi_compute_clock(const struct drm_connector *connector,
 	if (status != MODE_OK)
 		return -EINVAL;
 
+	if (clock > HDMI_1_3_TMDS_CHAR_RATE_MAX_HZ) {
+		const struct drm_display_info *info = &connector->display_info;
+
+		/*
+		 * TODO: Reject unsupported HDMI 2.0 modes once all drivers
+		 *	 advertise their scrambler capability.
+		 */
+		conn_state->hdmi.scrambler_needed = connector->hdmi.scrambler_supported &&
+						    info->is_hdmi &&
+						    info->hdmi.scdc.supported &&
+						    info->hdmi.scdc.scrambling.supported;
+	} else {
+		conn_state->hdmi.scrambler_needed = false;
+	}
+
 	conn_state->hdmi.tmds_char_rate = clock;
 
 	return 0;
