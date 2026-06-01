@@ -21,15 +21,22 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+#include <linux/delay.h>
 #include <linux/export.h>
 #include <linux/i2c.h>
+#include <linux/minmax.h>
 #include <linux/slab.h>
-#include <linux/delay.h>
+
+#include <drm/drm_atomic.h>
+#include <drm/drm_atomic_helper.h>
+#include <drm/drm_bridge_helper.h>
+#include <drm/drm_connector.h>
+#include <drm/drm_crtc.h>
+#include <drm/drm_device.h>
+#include <drm/drm_modeset_lock.h>
+#include <drm/drm_print.h>
 
 #include <drm/display/drm_scdc_helper.h>
-#include <drm/drm_connector.h>
-#include <drm/drm_device.h>
-#include <drm/drm_print.h>
 
 /**
  * DOC: scdc helpers
@@ -50,10 +57,14 @@
  * has to track the connector status changes using interrupts and
  * restore the SCDC status. The typical solution for this is to trigger an
  * empty modeset in drm_connector_helper_funcs.detect_ctx(), like what vc4 does
- * in vc4_hdmi_reset_link().
+ * in vc4_hdmi_reset_link(). Alternatively, use the HDMI connector framework
+ * which ensures drm_scdc_sync_status() is called in the context of
+ * drm_atomic_helper_connector_hdmi_hotplug_ctx().
  */
 
-#define SCDC_I2C_SLAVE_ADDRESS 0x54
+#define SCDC_I2C_SLAVE_ADDRESS		0x54
+#define SCDC_MAX_SOURCE_VERSION		0x1
+#define SCDC_STATUS_POLL_DELAY_MS	1000
 
 #define drm_scdc_dbg(connector, fmt, ...)					\
 	drm_dbg_kms((connector)->dev, "[CONNECTOR:%d:%s] " fmt,			\
@@ -270,3 +281,225 @@ bool drm_scdc_set_high_tmds_clock_ratio(struct drm_connector *connector,
 	return true;
 }
 EXPORT_SYMBOL(drm_scdc_set_high_tmds_clock_ratio);
+
+static int drm_scdc_try_scrambling_setup(struct drm_connector *connector)
+{
+	bool done;
+
+	done = drm_scdc_set_high_tmds_clock_ratio(connector, true);
+	if (!done)
+		return -EIO;
+
+	done = drm_scdc_set_scrambling(connector, true);
+	if (!done)
+		return -EIO;
+
+	if (READ_ONCE(connector->hdmi.scrambler_enabled))
+		schedule_delayed_work(&connector->hdmi.scdc_work,
+				      msecs_to_jiffies(SCDC_STATUS_POLL_DELAY_MS));
+
+	return 0;
+}
+
+static void drm_scdc_monitor_scrambler(struct drm_connector *connector)
+{
+	if (READ_ONCE(connector->hdmi.scrambler_enabled) &&
+	    !drm_scdc_get_scrambling_status(connector))
+		drm_scdc_try_scrambling_setup(connector);
+}
+
+static int drm_scdc_reset_crtc(struct drm_connector *connector,
+			       struct drm_modeset_acquire_ctx *ctx)
+{
+	struct drm_device *dev = connector->dev;
+	struct drm_crtc *crtc;
+	u8 config;
+	int ret;
+
+	if (!ctx)
+		return 0;
+
+	/*
+	 * This is normally part of .detect_ctx() call path, which already holds
+	 * connection_mutex through @ctx.  However, re-acquiring it with the
+	 * same context is a no-op and makes the helper safe under any caller.
+	 */
+	ret = drm_modeset_lock(&dev->mode_config.connection_mutex, ctx);
+	if (ret)
+		return ret;
+
+	if (!connector->state)
+		return 0;
+
+	crtc = connector->state->crtc;
+	if (!crtc)
+		return 0;
+
+	ret = drm_scdc_readb(connector->ddc, SCDC_TMDS_CONFIG, &config);
+	if (ret) {
+		drm_scdc_dbg(connector, "Failed to read TMDS config: %d\n", ret);
+		return ret;
+	}
+
+	if ((config & SCDC_SCRAMBLING_ENABLE) &&
+	    (config & SCDC_TMDS_BIT_CLOCK_RATIO_BY_40))
+		return 0;
+
+	/*
+	 * Reset the CRTC to suspend TMDS transmission, conforming to HDMI 2.0
+	 * spec which requires scrambled data not to be sent before the sink is
+	 * configured, and TMDS clock to be suspended while changing the clock
+	 * ratio.  The disable/re-enable cycle triggered by the reset should
+	 * call drm_scdc_start_scrambling() during re-enable, properly
+	 * configuring the sink before data transmission resumes.
+	 */
+
+	drm_scdc_dbg(connector, "Resetting CRTC to restore SCDC status\n");
+
+	ret = drm_atomic_helper_reset_crtc(crtc, ctx);
+	if (ret && ret != -EDEADLK)
+		drm_scdc_dbg(connector, "Failed to reset CRTC: %d\n", ret);
+
+	return ret;
+}
+
+/**
+ * drm_scdc_start_scrambling - activate scrambling and monitor SCDC status
+ * @connector: connector
+ *
+ * Enables scrambling and high TMDS clock ratio on both source and sink sides.
+ * Additionally, use a delayed work item to monitor the scrambling status on
+ * the sink side and retry the operation, as some displays refuse to set the
+ * scrambling bit right away.
+ *
+ * Returns:
+ * Zero if scrambling is set successfully, an error code otherwise.
+ */
+int drm_scdc_start_scrambling(struct drm_connector *connector)
+{
+	struct drm_display_info *info = &connector->display_info;
+	struct drm_connector_hdmi *hdmi = &connector->hdmi;
+	int ret;
+	u8 ver;
+
+	if (!hdmi->scrambler_supported) {
+		drm_scdc_dbg(connector, "Scrambler not supported, bailing.\n");
+		return -EINVAL;
+	}
+
+	if (!info->is_hdmi ||
+	    !info->hdmi.scdc.supported ||
+	    !info->hdmi.scdc.scrambling.supported) {
+		drm_scdc_dbg(connector, "Sink doesn't support scrambling.\n");
+		return -EINVAL;
+	}
+
+	drm_scdc_dbg(connector, "Enabling scrambling\n");
+
+	ret = drm_scdc_readb(connector->ddc, SCDC_SINK_VERSION, &ver);
+	if (ret) {
+		drm_scdc_dbg(connector, "Failed to read SCDC_SINK_VERSION: %d\n", ret);
+		return ret;
+	}
+
+	ret = drm_scdc_writeb(connector->ddc, SCDC_SOURCE_VERSION,
+			      min_t(u8, ver, SCDC_MAX_SOURCE_VERSION));
+	if (ret) {
+		drm_scdc_dbg(connector, "Failed to write SCDC_SOURCE_VERSION: %d\n", ret);
+		return ret;
+	}
+
+	hdmi->scdc_cb = drm_scdc_monitor_scrambler;
+	WRITE_ONCE(hdmi->scrambler_enabled, true);
+
+	ret = drm_scdc_try_scrambling_setup(connector);
+	if (!ret)
+		ret = hdmi->funcs->scrambler_enable(connector);
+
+	if (ret) {
+		WRITE_ONCE(hdmi->scrambler_enabled, false);
+		cancel_delayed_work_sync(&hdmi->scdc_work);
+		hdmi->scdc_cb = NULL;
+
+		drm_scdc_set_scrambling(connector, false);
+		drm_scdc_set_high_tmds_clock_ratio(connector, false);
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL(drm_scdc_start_scrambling);
+
+/**
+ * drm_scdc_stop_scrambling - deactivate scrambling and SCDC status monitor
+ * @connector: connector
+ *
+ * Disables scrambling and high TMDS clock ratio on both source and sink sides.
+ * Also cancels the SCDC status monitoring work item, if it is still pending.
+ *
+ * Returns:
+ * Zero if scrambling is reset successfully, an error code otherwise.
+ */
+int drm_scdc_stop_scrambling(struct drm_connector *connector)
+{
+	struct drm_display_info *info = &connector->display_info;
+	struct drm_connector_hdmi *hdmi = &connector->hdmi;
+
+	if (!hdmi->scrambler_supported) {
+		drm_scdc_dbg(connector, "Scrambler not supported, bailing.\n");
+		return -EINVAL;
+	}
+
+	if (!READ_ONCE(hdmi->scrambler_enabled))
+		return 0;
+
+	drm_scdc_dbg(connector, "Disabling scrambling\n");
+
+	WRITE_ONCE(hdmi->scrambler_enabled, false);
+	cancel_delayed_work_sync(&hdmi->scdc_work);
+	hdmi->scdc_cb = NULL;
+
+	if (connector->status == connector_status_connected &&
+	    info->is_hdmi && info->hdmi.scdc.supported &&
+	    info->hdmi.scdc.scrambling.supported) {
+		drm_scdc_set_scrambling(connector, false);
+		drm_scdc_set_high_tmds_clock_ratio(connector, false);
+	}
+
+	return hdmi->funcs->scrambler_disable(connector);
+}
+EXPORT_SYMBOL(drm_scdc_stop_scrambling);
+
+/**
+ * drm_scdc_sync_status - resync the sink-side SCDC upon reconnect
+ * @connector: connector
+ * @plugged: connector plugged status event
+ * @ctx: initialized lock acquisition context
+ *
+ * When receiving hotplug disconnect/reconnect event, while the display is
+ * still active (CRTC enabled), the SCDC status on the sink side is reset
+ * and must be explicitly restored.
+ *
+ * The typical solution for this is to trigger an empty modeset in
+ * drm_connector_helper_funcs.detect_ctx(), which is what this helper does
+ * by triggering a CRTC reset on reconnection.
+ *
+ * When making use of the HDMI connector framework, this is automatically
+ * triggered via drm_atomic_helper_connector_hdmi_hotplug_ctx().
+ *
+ * Returns:
+ * Zero on success, an error code otherwise, including -EDEADLK.
+ */
+int drm_scdc_sync_status(struct drm_connector *connector, bool plugged,
+			 struct drm_modeset_acquire_ctx *ctx)
+{
+	struct drm_connector_hdmi *hdmi = &connector->hdmi;
+
+	if (hdmi->scrambler_supported && plugged &&
+	    READ_ONCE(hdmi->scrambler_enabled))
+		return drm_scdc_reset_crtc(connector, ctx);
+
+	/* TODO: Also handle HDMI 2.1 FRL link training */
+
+	return 0;
+}
+EXPORT_SYMBOL(drm_scdc_sync_status);
