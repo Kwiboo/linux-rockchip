@@ -113,6 +113,7 @@ static int rkaiisp_register_irq(struct rkaiisp_hw_dev *hw_dev)
 			match_data->irqs[0].name, ret);
 		return ret;
 	}
+	hw_dev->irq = irq;
 
 	return 0;
 }
@@ -360,8 +361,11 @@ static int rkaiisp_hw_probe(struct platform_device *pdev)
 		hw_dev->is_dma_contig = false;
 	hw_dev->mem_ops = &vb2_cma_sg_memops;
 
+	ret = rkaiisp_register_irq(hw_dev);
+	if (ret)
+		goto err;
+
 	rkaiisp_hwdev = hw_dev;
-	rkaiisp_register_irq(hw_dev);
 	pm_runtime_enable(dev);
 
 	dev_info(dev, "probe end.\n");

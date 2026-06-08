@@ -49,6 +49,7 @@ struct rkaiisp_hw_dev {
 	const struct aiisp_match_data *match_data;
 	struct platform_device *pdev;
 	struct device *dev;
+	int irq;
 	struct regmap *grf;
 	void __iomem *base_addr;
 	struct clk *clks[RKAIISP_MAX_BUS_CLK];

@@ -1453,8 +1453,6 @@ static u32 rkaiisp_config_rdchannel(struct rkaiisp_device *aidev,
 			break;
 		case VICAP_BAYER_RAW_DOWN:
 			if (aidev->is_parthdl) {
-				width  = rmsbuf->image_width;
-				height = rmsbuf->image_height;
 				buffer_index = aidev->curr_idxbuf.airms_st.inbuf_idx;
 				dma_addr = aidev->rms_inbuf[buffer_index].dma_addr +
 					   rkaiisp_rms_down_plane_offs(aidev, rmsbuf);
@@ -1467,8 +1465,6 @@ static u32 rkaiisp_config_rdchannel(struct rkaiisp_device *aidev,
 				rkaiisp_rms_apply_rd_inplace(aidev, &dma_addr, &stride,
 							     stride, 1);
 			} else {
-				width  = rmsbuf->image_width;
-				height = rmsbuf->image_height;
 				buffer_index = aidev->curr_idxbuf.airms_st.inbuf_idx;
 				dma_addr = aidev->rms_inbuf[buffer_index].dma_addr +
 					   rkaiisp_rms_down_plane_offs(aidev, rmsbuf);
@@ -1504,12 +1500,13 @@ static u32 rkaiisp_config_rdchannel(struct rkaiisp_device *aidev,
 	return sig_width;
 }
 
-static void rkaiisp_run_cfg(struct rkaiisp_device *aidev, u32 run_idx)
+static int rkaiisp_run_cfg(struct rkaiisp_device *aidev, u32 run_idx)
 {
 	struct rkaiisp_ispbuf_info *ispbuf = &aidev->ispbuf;
 	struct rkaiisp_rmsbuf_info *rmsbuf = &aidev->rmsbuf;
 	struct rkaiisp_params *cur_params;
 	struct rkaiisp_model_cfg *model_cfg;
+	struct rkaiisp_buffer *param_buf;
 	int lastlv, lv_mode, out_chns, i;
 	u32 outbuf_idx, val;
 	u32 sw_lastlv_bypass = 0;
@@ -1517,6 +1514,7 @@ static void rkaiisp_run_cfg(struct rkaiisp_device *aidev, u32 run_idx)
 	u32 iir_stride;
 	u32 sig_width;
 	dma_addr_t dma_addr;
+	unsigned long flags;
 	int buffer_index;
 	int sequence = 0;
 
@@ -1530,7 +1528,27 @@ static void rkaiisp_run_cfg(struct rkaiisp_device *aidev, u32 run_idx)
 		sequence, run_idx, aidev->model_mode);
 
 	aidev->is_state_err = false;
-	cur_params = (struct rkaiisp_params *)aidev->cur_params->vaddr[0];
+
+	/*
+	 * config_lock serializes access to aidev->cur_params, but does not pin the
+	 * buffer after the lock is released. Ioctl-triggered runs are serialized
+	 * by apilock. During streamoff, streamon is cleared before synchronize_irq()
+	 * drains handlers that may already have selected this device; IRQ
+	 * continuation and rescheduling paths also check streamon before calling
+	 * run_cfg() again. The current parameter buffer is retained while waiting
+	 * for the in-flight hardware run to stop.
+	 */
+	spin_lock_irqsave(&aidev->config_lock, flags);
+	param_buf = aidev->cur_params;
+	spin_unlock_irqrestore(&aidev->config_lock, flags);
+	if (!param_buf || !param_buf->vaddr[0]) {
+		v4l2_err(&aidev->v4l2_dev,
+			 "missing aiisp params, streamon %d, hwstate %d, run_idx %u\n",
+			 aidev->streamon, aidev->hwstate, run_idx);
+		aidev->is_state_err = true;
+		return -EINVAL;
+	}
+	cur_params = (struct rkaiisp_params *)param_buf->vaddr[0];
 	model_cfg = &cur_params->model_cfg[run_idx];
 	lastlv = model_cfg->sw_aiisp_level_num - 1;
 	lv_mode = model_cfg->sw_aiisp_lv_mode[lastlv];
@@ -1659,8 +1677,7 @@ static void rkaiisp_run_cfg(struct rkaiisp_device *aidev, u32 run_idx)
 		}
 	}
 
-	cur_params = (struct rkaiisp_params *)aidev->cur_params->vaddr[0];
-	val = aidev->cur_params->buff_addr[0] + cur_params->kwt_cfg.kwt_offet[run_idx];
+	val = param_buf->buff_addr[0] + cur_params->kwt_cfg.kwt_offet[run_idx];
 	rkaiisp_write(aidev, AIISP_MI_RD_KWT_BASE, val, false);
 	rkaiisp_write(aidev, AIISP_MI_RD_KWT_WIDTH,
 		      cur_params->kwt_cfg.kwt_size[run_idx], false);
@@ -1701,6 +1718,14 @@ static void rkaiisp_run_cfg(struct rkaiisp_device *aidev, u32 run_idx)
 	rkaiisp_write(aidev, AIISP_CORE_OUT_CTRL, val, false);
 
 	/* rkaiisp_dump_list_reg(aidev); */
+
+	if (aidev->is_state_err) {
+		v4l2_err(&aidev->v4l2_dev, "aiisp status is error!\n");
+		rkaiisp_dump_list_reg(aidev);
+		return -EINVAL;
+	}
+
+	return 0;
 }
 
 static int rkaiisp_update_buf(struct rkaiisp_device *aidev)
@@ -1736,13 +1761,6 @@ static int rkaiisp_update_buf(struct rkaiisp_device *aidev)
 static void rkaiisp_run_start(struct rkaiisp_device *aidev)
 {
 	struct rkaiisp_hw_dev *hw_dev = aidev->hw_dev;
-
-	if (aidev->is_state_err) {
-		v4l2_err(&aidev->v4l2_dev,
-			"aiisp status is error!\n");
-		rkaiisp_dump_list_reg(aidev);
-		return;
-	}
 
 	rkaiisp_write(aidev, AIISP_MI_IMSC, AIISP_MI_ISR_ALL, false);
 	rkaiisp_write(aidev, AIISP_MI_WR_INIT, AIISP_MI_CHN0SELF_FORCE_UPD, false);
@@ -1797,11 +1815,11 @@ static int rkaiisp_get_new_iqparam(struct rkaiisp_device *aidev)
 		aidev->cur_params = cur_buf;
 	}
 
-	if (done_buf) {
+	if (done_buf)
 		done_buf->vb.sequence = cur_frame_id;
-		vb2_buffer_done(&done_buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
-	}
 	spin_unlock_irqrestore(&aidev->config_lock, flags);
+	if (done_buf)
+		vb2_buffer_done(&done_buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
 
 	// configure other params
 	if (aidev->cur_params) {
@@ -1832,9 +1850,26 @@ static int rkaiisp_clear_iqparams(struct rkaiisp_device *aidev)
 	return 0;
 }
 
+static void rkaiisp_set_hwstate_stop(struct rkaiisp_device *aidev)
+{
+	struct rkaiisp_hw_dev *hw_dev = aidev->hw_dev;
+	unsigned long flags;
+	bool streamon;
+
+	spin_lock_irqsave(&hw_dev->hw_lock, flags);
+	aidev->hwstate = HW_STOP;
+	streamon = aidev->streamon;
+	spin_unlock_irqrestore(&hw_dev->hw_lock, flags);
+
+	if (!streamon)
+		wake_up(&aidev->sync_onoff);
+}
+
 void rkaiisp_trigger(struct rkaiisp_device *aidev)
 {
+	struct rkaiisp_hw_dev *hw_dev = aidev->hw_dev;
 	struct rkaiisp_ispbuf_info *ispbuf = &aidev->ispbuf;
+	unsigned long flags;
 	int sequence = 0;
 
 	if (aidev->exealgo == AIRMS)
@@ -1851,8 +1886,17 @@ void rkaiisp_trigger(struct rkaiisp_device *aidev)
 		rkaiisp_get_new_iqparam(aidev);
 		rkaiisp_calc_outbuf_size(aidev, ispbuf->iir_height, ispbuf->iir_width);
 		rkaiisp_set_lastout_buf(aidev);
-		rkaiisp_run_cfg(aidev, aidev->run_idx);
+		if (rkaiisp_run_cfg(aidev, aidev->run_idx)) {
+			rkaiisp_set_hwstate_stop(aidev);
+
+			spin_lock_irqsave(&hw_dev->hw_lock, flags);
+			hw_dev->is_idle = true;
+			spin_unlock_irqrestore(&hw_dev->hw_lock, flags);
+			return;
+		}
+		spin_lock_irqsave(&hw_dev->hw_lock, flags);
 		aidev->hwstate = HW_RUNNING;
+		spin_unlock_irqrestore(&hw_dev->hw_lock, flags);
 		rkaiisp_run_start(aidev);
 	}
 }
@@ -1891,8 +1935,10 @@ int rkaiisp_get_idxbuf_len(struct rkaiisp_device *aidev)
 
 enum rkaiisp_irqhdl_ret rkaiisp_irq_hdl(struct rkaiisp_device *aidev, u32 mi_mis)
 {
+	struct rkaiisp_hw_dev *hw_dev = aidev->hw_dev;
 	union rkaiisp_queue_buf *idxbuf = NULL;
 	u64 frm_hdntim = 0;
+	bool streamon;
 
 	v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev,
 		"irq val: 0x%x, run_idx %d, model_runcnt %d, parthdl %d, %d\n",
@@ -1910,15 +1956,28 @@ enum rkaiisp_irqhdl_ret rkaiisp_irq_hdl(struct rkaiisp_device *aidev, u32 mi_mis
 	rkaiisp_write(aidev, AIISP_MI_ICR, AIISP_MI_ISR_WREND, true);
 	aidev->isr_wrend_cnt++;
 
+	spin_lock(&hw_dev->hw_lock);
+	streamon = aidev->streamon;
+	spin_unlock(&hw_dev->hw_lock);
+	if (!streamon) {
+		/*
+		 * Drop the in-flight frame during streamoff. Its index buffer has
+		 * already been consumed, so skip the completion event and timing.
+		 */
+		goto stop;
+	}
+
 	if (aidev->run_idx + 1 < aidev->model_runcnt) {
 		aidev->run_idx++;
-		rkaiisp_run_cfg(aidev, aidev->run_idx);
+		if (rkaiisp_run_cfg(aidev, aidev->run_idx))
+			goto stop;
 		rkaiisp_run_start(aidev);
 		return CONTINUE_RUN;
 	} else if (aidev->is_parthdl && (aidev->parthdl_idx + 1 < aidev->parthdl_num)) {
 		aidev->parthdl_idx++;
 		aidev->run_idx = 0;
-		rkaiisp_run_cfg(aidev, aidev->run_idx);
+		if (rkaiisp_run_cfg(aidev, aidev->run_idx))
+			goto stop;
 		rkaiisp_run_start(aidev);
 		return CONTINUE_RUN;
 	}
@@ -1935,10 +1994,8 @@ enum rkaiisp_irqhdl_ret rkaiisp_irq_hdl(struct rkaiisp_device *aidev, u32 mi_mis
 	if (idxbuf)
 		rkaiisp_event_queue(aidev, idxbuf);
 
-	aidev->hwstate = HW_STOP;
-	if (!aidev->streamon)
-		wake_up(&aidev->sync_onoff);
-
+stop:
+	rkaiisp_set_hwstate_stop(aidev);
 	return RUN_COMPLETE;
 }
 
@@ -2184,15 +2241,21 @@ static void rkaiisp_vb2_stop_streaming(struct vb2_queue *vq)
 {
 	struct rkaiisp_device *aidev = vq->drv_priv;
 	struct rkaiisp_hw_dev *hw_dev = aidev->hw_dev;
-	struct rkaiisp_buffer *parabuf;
+	struct rkaiisp_buffer *parabuf, *tmp;
+	struct rkaiisp_buffer *cur_params;
+	LIST_HEAD(done_list);
 	unsigned long flags;
-	int i, ret;
+	int ret;
 
 	/* stop params input firstly */
 	spin_lock_irqsave(&hw_dev->hw_lock, flags);
 	if (aidev->streamon) {
 		aidev->streamon = false;
 		spin_unlock_irqrestore(&hw_dev->hw_lock, flags);
+
+		/* Drain any IRQ that may already have selected this device. */
+		synchronize_irq(hw_dev->irq);
+
 		if (aidev->hwstate == HW_RUNNING) {
 			ret = wait_event_timeout(aidev->sync_onoff,
 					aidev->hwstate == HW_STOP, msecs_to_jiffies(200));
@@ -2205,23 +2268,18 @@ static void rkaiisp_vb2_stop_streaming(struct vb2_queue *vq)
 	}
 
 	spin_lock_irqsave(&aidev->config_lock, flags);
-	for (i = 0; i < RKAIISP_REQ_BUFS_MAX; i++) {
-		if (!list_empty(&aidev->params)) {
-			parabuf = list_first_entry(&aidev->params,
-						   struct rkaiisp_buffer, queue);
-			list_del(&parabuf->queue);
-			vb2_buffer_done(&parabuf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
-		} else {
-			break;
-		}
-	}
+	list_splice_init(&aidev->params, &done_list);
+	cur_params = aidev->cur_params;
+	aidev->cur_params = NULL;
 	spin_unlock_irqrestore(&aidev->config_lock, flags);
 
-	if (aidev->cur_params) {
-		parabuf = aidev->cur_params;
+	list_for_each_entry_safe(parabuf, tmp, &done_list, queue) {
+		list_del_init(&parabuf->queue);
 		vb2_buffer_done(&parabuf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
-		aidev->cur_params = NULL;
 	}
+
+	if (cur_params)
+		vb2_buffer_done(&cur_params->vb.vb2_buf, VB2_BUF_STATE_ERROR);
 
 	pm_runtime_put_sync(aidev->dev);
 	atomic_dec(&hw_dev->refcnt);
