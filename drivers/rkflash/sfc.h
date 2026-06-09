@@ -106,6 +106,8 @@
 #define SFC_ADDR	0x104
 #define SFC_DATA	0x108
 
+#define SFC_MAX_CHIP_SELECT_NUM 2
+
 union SFCFSR_DATA {
 	u32 d32;
 	struct {
@@ -219,7 +221,7 @@ int sfc_request(struct rk_sfc_op *op, u32 addr, void *data, u32 size);
 u16 sfc_get_version(void);
 void sfc_clean_irq(void);
 u32 sfc_get_max_iosize(void);
-void sfc_set_delay_lines(u16 cells);
+void sfc_set_delay_lines(u16 cells, u8 cs);
 void sfc_handle_irq(void);
 unsigned long rksfc_dma_map_single(unsigned long ptr, int size, int dir);
 void rksfc_dma_unmap_single(unsigned long ptr, int size, int dir);

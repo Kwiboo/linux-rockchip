@@ -161,6 +161,7 @@ struct snor_info_packet {
 };
 
 int snor_init(struct SFNOR_DEV *p_dev);
+void snor_set_cur_cs(u8 cs);
 u32 snor_get_capacity(struct SFNOR_DEV *p_dev);
 int snor_read(struct SFNOR_DEV *p_dev, u32 sec, u32 n_sec, void *p_data);
 int snor_write(struct SFNOR_DEV *p_dev, u32 sec, u32 n_sec, void *p_data);

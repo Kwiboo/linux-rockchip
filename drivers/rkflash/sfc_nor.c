@@ -155,6 +155,13 @@ static struct flash_info spi_flash_tbl[] = {
 	{ 0x1c4018, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0C, 15, 9, 0 },
 };
 
+static u8 s_cur_cs;
+
+void snor_set_cur_cs(u8 cs)
+{
+	s_cur_cs = cs;
+}
+
 static int snor_write_en(void)
 {
 	int ret;
@@ -162,6 +169,7 @@ static int snor_write_en(void)
 
 	op.sfcmd.d32 = 0;
 	op.sfcmd.b.cmd = CMD_WRITE_EN;
+	op.sfcmd.b.cs = s_cur_cs;
 
 	op.sfctrl.d32 = 0;
 
@@ -176,6 +184,7 @@ int snor_reset_device(void)
 
 	op.sfcmd.d32 = 0;
 	op.sfcmd.b.cmd = CMD_ENABLE_RESER;
+	op.sfcmd.b.cs = s_cur_cs;
 
 	op.sfctrl.d32 = 0;
 	sfc_request(&op, 0, NULL, 0);
@@ -198,6 +207,7 @@ static int snor_enter_4byte_mode(void)
 
 	op.sfcmd.d32 = 0;
 	op.sfcmd.b.cmd = CMD_ENTER_4BYTE_MODE;
+	op.sfcmd.b.cs = s_cur_cs;
 
 	op.sfctrl.d32 = 0;
 
@@ -213,6 +223,7 @@ static int snor_read_status(u32 reg_index, u8 *status)
 				CMD_READ_STATUS2, CMD_READ_STATUS3};
 	op.sfcmd.d32 = 0;
 	op.sfcmd.b.cmd = read_stat_cmd[reg_index];
+	op.sfcmd.b.cs = s_cur_cs;
 
 	op.sfctrl.d32 = 0;
 	ret = sfc_request(&op, 0, status, 1);
@@ -229,6 +240,7 @@ static int snor_wait_busy(int timeout)
 
 	op.sfcmd.d32 = 0;
 	op.sfcmd.b.cmd = CMD_READ_STATUS;
+	op.sfcmd.b.cs = s_cur_cs;
 
 	op.sfctrl.d32 = 0;
 
@@ -266,6 +278,7 @@ static int snor_write_status2(u32 reg_index, u8 status)
 	op.sfcmd.d32 = 0;
 	op.sfcmd.b.cmd = CMD_WRITE_STATUS;
 	op.sfcmd.b.rw = SFC_WRITE;
+	op.sfcmd.b.cs = s_cur_cs;
 
 	op.sfctrl.d32 = 0;
 
@@ -296,6 +309,7 @@ static int snor_write_status1(u32 reg_index, u8 status)
 	op.sfcmd.d32 = 0;
 	op.sfcmd.b.cmd = CMD_WRITE_STATUS;
 	op.sfcmd.b.rw = SFC_WRITE;
+	op.sfcmd.b.cs = s_cur_cs;
 
 	op.sfctrl.d32 = 0;
 
@@ -318,6 +332,7 @@ static int snor_write_status(u32 reg_index, u8 status)
 	op.sfcmd.d32 = 0;
 	op.sfcmd.b.cmd = write_stat_cmd[reg_index];
 	op.sfcmd.b.rw = SFC_WRITE;
+	op.sfcmd.b.cs = s_cur_cs;
 
 	op.sfctrl.d32 = 0;
 

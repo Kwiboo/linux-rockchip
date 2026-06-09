@@ -13,6 +13,7 @@
 
 static void __iomem *g_sfc_reg;
 static u32 sfc_version;
+static u16 s_cs_dll_cells[SFC_MAX_CHIP_SELECT_NUM];
 
 static void sfc_reset(void)
 {
@@ -51,11 +52,14 @@ u32 sfc_get_max_dll_cells(void)
 	case SFC_VER_4:
 		return SCLK_SMP_SEL_MAX_V4;
 	default:
+		if (sfc_get_version() > SFC_VER_8)
+			return SCLK_SMP_SEL_MAX_V4;
+
 		return 0;
 	}
 }
 
-void sfc_set_delay_lines(u16 cells)
+void sfc_set_delay_lines(u16 cells, u8 cs)
 {
 	u16 cell_max = (u16)sfc_get_max_dll_cells();
 	u32 val = 0;
@@ -65,6 +69,9 @@ void sfc_set_delay_lines(u16 cells)
 
 	if (cells)
 		val = SCLK_SMP_SEL_EN | cells;
+	if (cs >= SFC_MAX_CHIP_SELECT_NUM)
+		return;
+	s_cs_dll_cells[cs] = cells;
 
 	writel(val, g_sfc_reg + SFC_DLL_CTRL0);
 }
@@ -77,6 +84,9 @@ int sfc_init(void __iomem *reg_addr)
 	if (sfc_get_version() >= SFC_VER_4)
 		writel(1, g_sfc_reg + SFC_LEN_CTRL);
 	sfc_version = sfc_get_version();
+
+	writel(0xFFFFFFFF, g_sfc_reg + SFC_ICLR);
+	writel(0xFFFFFFFF, g_sfc_reg + SFC_IMR);
 
 	return SFC_OK;
 }
