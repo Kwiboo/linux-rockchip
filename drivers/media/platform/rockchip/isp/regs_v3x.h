@@ -2711,10 +2711,10 @@
 
 #define ISP3X_DHAZ_BF_WEIGHT_MASK	GENMASK(8, 0)
 
-#define ISP33_IIR_RD_ID(x)		((x) & 0x3f)
+#define ISP33_IIR_RD_ID(x)		((x) & 0xff)
 #define ISP33_IIR_RD_P			BIT(8)
 #define ISP33_IIR_RDATA_VAL		BIT(9)
-#define ISP33_IIR_WR_ID(x)		(((x) & 0x3f) << 16)
+#define ISP33_IIR_WR_ID(x)		(((x) & 0xff) << 16)
 #define ISP33_IIR_WR_CLEAR		BIT(24)
 
 /* HDRTMO */
