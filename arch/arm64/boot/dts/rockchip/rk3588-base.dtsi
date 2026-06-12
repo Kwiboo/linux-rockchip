@@ -1160,8 +1160,6 @@
 		clocks = <&cru ACLK_NPU0>, <&cru HCLK_NPU0>,
 			 <&scmi_clk SCMI_CLK_NPU>, <&cru PCLK_NPU_ROOT>;
 		clock-names = "aclk", "hclk", "npu", "pclk";
-		assigned-clocks = <&scmi_clk SCMI_CLK_NPU>;
-		assigned-clock-rates = <200000000>;
 		resets = <&cru SRST_A_RKNN0>, <&cru SRST_H_RKNN0>;
 		reset-names = "srst_a", "srst_h";
 		power-domains = <&power RK3588_PD_NPUTOP>;
@@ -1191,8 +1189,6 @@
 		clocks = <&cru ACLK_NPU1>, <&cru HCLK_NPU1>,
 			 <&scmi_clk SCMI_CLK_NPU>, <&cru PCLK_NPU_ROOT>;
 		clock-names = "aclk", "hclk", "npu", "pclk";
-		assigned-clocks = <&scmi_clk SCMI_CLK_NPU>;
-		assigned-clock-rates = <200000000>;
 		resets = <&cru SRST_A_RKNN1>, <&cru SRST_H_RKNN1>;
 		reset-names = "srst_a", "srst_h";
 		power-domains = <&power RK3588_PD_NPU1>;
@@ -1221,8 +1217,6 @@
 		clocks = <&cru ACLK_NPU2>, <&cru HCLK_NPU2>,
 			 <&scmi_clk SCMI_CLK_NPU>, <&cru PCLK_NPU_ROOT>;
 		clock-names = "aclk", "hclk", "npu", "pclk";
-		assigned-clocks = <&scmi_clk SCMI_CLK_NPU>;
-		assigned-clock-rates = <200000000>;
 		resets = <&cru SRST_A_RKNN2>, <&cru SRST_H_RKNN2>;
 		reset-names = "srst_a", "srst_h";
 		power-domains = <&power RK3588_PD_NPU2>;
