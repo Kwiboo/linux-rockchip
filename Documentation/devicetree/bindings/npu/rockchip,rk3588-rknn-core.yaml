@@ -50,6 +50,8 @@ properties:
 
   npu-supply: true
 
+  operating-points-v2: true
+
   power-domains:
     maxItems: 1
 
@@ -103,6 +105,7 @@ examples:
         interrupts = <GIC_SPI 110 IRQ_TYPE_LEVEL_HIGH 0>;
         iommus = <&rknn_mmu_0>;
         npu-supply = <&vdd_npu_s0>;
+        operating-points-v2 = <&npu_opp_table>;
         power-domains = <&power RK3588_PD_NPUTOP>;
         resets = <&cru SRST_A_RKNN0>, <&cru SRST_H_RKNN0>;
         reset-names = "srst_a", "srst_h";
