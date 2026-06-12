@@ -14,6 +14,7 @@
 
 #include "rocket_device.h"
 #include "rocket_core.h"
+#include "rocket_devfreq.h"
 #include "rocket_job.h"
 
 static const char * const rocket_opp_regulators[] = { "npu" };
@@ -109,6 +110,11 @@ int rocket_core_init(struct rocket_core *core)
 	if (err)
 		return err;
 
+	err = rocket_devfreq_init(core);
+	if (err)
+		return dev_err_probe(dev, err, "failed to init devfreq for core %d\n",
+				     core->index);
+
 	core->pc_iomem = devm_platform_ioremap_resource_byname(pdev, "pc");
 	if (IS_ERR(core->pc_iomem)) {
 		dev_err(dev, "couldn't find PC registers %ld\n", PTR_ERR(core->pc_iomem));
@@ -173,6 +179,8 @@ int rocket_core_init(struct rocket_core *core)
 
 void rocket_core_fini(struct rocket_core *core)
 {
+	if (core->rdev->opp_core == (int)core->index)
+		rocket_devfreq_fini(core->rdev);
 	pm_runtime_dont_use_autosuspend(core->dev);
 	pm_runtime_disable(core->dev);
 	iommu_group_put(core->iommu_group);

@@ -11,6 +11,7 @@
 #include <linux/platform_device.h>
 
 #include "rocket_core.h"
+#include "rocket_devfreq.h"
 
 struct rocket_device {
 	struct drm_device ddev;
@@ -28,6 +29,9 @@ struct rocket_device {
 	 * OPP, or -1 if no core has OPP configured.
 	 */
 	int opp_core;
+
+	/* Shared devfreq state, hosted by the lead opp_core's device. */
+	struct rocket_devfreq devfreq;
 };
 
 struct rocket_device *rocket_device_init(struct platform_device *pdev,

@@ -15,6 +15,7 @@
 #include <linux/pm_runtime.h>
 
 #include "rocket_device.h"
+#include "rocket_devfreq.h"
 #include "rocket_drv.h"
 #include "rocket_gem.h"
 #include "rocket_job.h"
@@ -247,21 +248,7 @@ static int rocket_device_runtime_resume(struct device *dev)
 		return err;
 	}
 
-	/*
-	 * If an OPP table is wired up in the DT, drive the NPU clock to the
-	 * highest available OPP whenever the device is runtime-resumed. This
-	 * gives best-case inference latency; the regulator vote is released
-	 * again from runtime_suspend.
-	 */
-	if (rdev->cores[core].max_freq) {
-		err = dev_pm_opp_set_rate(dev, rdev->cores[core].max_freq);
-		if (err) {
-			dev_err(dev, "failed to set OPP rate (%d) for core %d\n", err, core);
-			clk_bulk_disable_unprepare(ARRAY_SIZE(rdev->cores[core].clks),
-						   rdev->cores[core].clks);
-			return err;
-		}
-	}
+	rocket_devfreq_resume(&rdev->cores[core]);
 
 	return 0;
 }
@@ -277,6 +264,8 @@ static int rocket_device_runtime_suspend(struct device *dev)
 	if (!rocket_job_is_idle(&rdev->cores[core]))
 		return -EBUSY;
 
+	rocket_devfreq_suspend(&rdev->cores[core]);
+
 	/*
 	 * Drop the SCMI NPU clock back to the OPP marked with "opp-suspend"
 	 * in DT before letting the NPU power domain be powered off. On RK3588
@@ -286,8 +275,15 @@ static int rocket_device_runtime_suspend(struct device *dev)
 	 * PVTPLL path. The opp-suspend rate (200 MHz on RK3588) bypasses the
 	 * PVTPLL and keeps the genpd handshake reliable, while leaving the
 	 * npu-supply rail voted on so we don't churn the regulator.
+	 *
+	 * When devfreq is active this is handled by devfreq_suspend_device()
+	 * (the devfreq core picks up the opp-suspend rate itself), which
+	 * rocket_devfreq_suspend() only invokes once the last core goes
+	 * down, so an idle core doesn't clamp the shared clock while its
+	 * siblings are still executing jobs. Only apply the manual clamp
+	 * here when no devfreq instance is registered.
 	 */
-	if (rdev->cores[core].suspend_freq)
+	if (!rdev->devfreq.devfreq && rdev->cores[core].suspend_freq)
 		dev_pm_opp_set_rate(dev, rdev->cores[core].suspend_freq);
 
 	clk_bulk_disable_unprepare(ARRAY_SIZE(rdev->cores[core].clks), rdev->cores[core].clks);

@@ -8,6 +8,9 @@ config DRM_ACCEL_ROCKET
 	depends on MMU
 	select DRM_SCHED
 	select DRM_GEM_SHMEM_HELPER
+	select PM_DEVFREQ
+	select DEVFREQ_GOV_SIMPLE_ONDEMAND
+	select DEVFREQ_THERMAL
 	help
 	  Choose this option if you have a Rockchip SoC that contains a
 	  compatible Neural Processing Unit (NPU), such as the RK3588. Called by

@@ -15,6 +15,7 @@
 
 #include "rocket_core.h"
 #include "rocket_device.h"
+#include "rocket_devfreq.h"
 #include "rocket_drv.h"
 #include "rocket_job.h"
 #include "rocket_registers.h"
@@ -327,6 +328,7 @@ static struct dma_fence *rocket_job_run(struct drm_sched_job *sched_job)
 
 	scoped_guard(mutex, &core->job_lock) {
 		core->in_flight_job = job;
+		rocket_devfreq_record_busy(rdev);
 		rocket_job_hw_submit(core, job);
 	}
 
@@ -357,6 +359,7 @@ static void rocket_job_handle_irq(struct rocket_core *core)
 
 			iommu_detach_group(NULL, iommu_group_get(core->dev));
 			dma_fence_signal(core->in_flight_job->done_fence);
+			rocket_devfreq_record_idle(core->rdev);
 			pm_runtime_put_autosuspend(core->dev);
 			core->in_flight_job = NULL;
 		}
@@ -376,8 +379,10 @@ rocket_reset(struct rocket_core *core, struct drm_sched_job *bad)
 	 * manually calling pm_runtime_put_noidle().
 	 */
 	scoped_guard(mutex, &core->job_lock) {
-		if (core->in_flight_job)
+		if (core->in_flight_job) {
+			rocket_devfreq_record_idle(core->rdev);
 			pm_runtime_put_noidle(core->dev);
+		}
 
 		iommu_detach_group(NULL, core->iommu_group);
 
