@@ -8,11 +8,84 @@
 #include <linux/err.h>
 #include <linux/iommu.h>
 #include <linux/platform_device.h>
+#include <linux/pm_opp.h>
 #include <linux/pm_runtime.h>
 #include <linux/reset.h>
 
+#include "rocket_device.h"
 #include "rocket_core.h"
 #include "rocket_job.h"
+
+static const char * const rocket_opp_regulators[] = { "npu" };
+
+static int rocket_core_init_opp(struct rocket_core *core)
+{
+	struct device *dev = core->dev;
+	struct rocket_device *rdev = core->rdev;
+	struct dev_pm_opp *opp;
+	unsigned long freq = ULONG_MAX;
+	int err;
+
+	core->max_freq = 0;
+	core->suspend_freq = 0;
+
+	/*
+	 * On RK3588 all three NPU cores share the same SCMI NPU clock and the
+	 * same npu-supply rail. The OPP framework can only have one device
+	 * configure the (shared) OPP table; configuring it from a second core
+	 * after the first has populated the OPPs returns -EBUSY. Let only the
+	 * first-probed core set up OPP, and let sibling cores ride along on the
+	 * clock/voltage state programmed by that lead core.
+	 */
+	if (rdev->opp_core != -1)
+		return 0;
+
+	err = devm_pm_opp_set_clkname(dev, "npu");
+	if (err)
+		return dev_err_probe(dev, err, "failed to set OPP clock for core %d\n",
+				     core->index);
+
+	err = devm_pm_opp_set_regulators(dev, rocket_opp_regulators);
+	if (err && err != -ENOTSUPP)
+		return dev_err_probe(dev, err, "failed to set OPP regulators for core %d\n",
+				     core->index);
+
+	err = devm_pm_opp_of_add_table(dev);
+	if (err == -ENODEV) {
+		/* No operating-points-v2 in DT: leave DVFS disabled. */
+		return 0;
+	}
+	if (err)
+		return dev_err_probe(dev, err, "failed to add OPP table for core %d\n",
+				     core->index);
+
+	opp = dev_pm_opp_find_freq_floor(dev, &freq);
+	if (IS_ERR(opp))
+		return dev_err_probe(dev, PTR_ERR(opp),
+				     "failed to find highest OPP for core %d\n", core->index);
+	dev_pm_opp_put(opp);
+	core->max_freq = freq;
+
+	/*
+	 * On RK3588 the nputop power domain refuses to ack a power-on
+	 * transition while the SCMI NPU clock is on the PVTPLL path (any
+	 * rate >= 300 MHz, per BL31's rk3588_clk.c). The OPP marked with
+	 * "opp-suspend" in DT is the rate that bypasses the PVTPLL
+	 * (200 MHz on RK3588) and must be programmed before letting the
+	 * power domain power down.
+	 */
+	core->suspend_freq = dev_pm_opp_get_suspend_opp_freq(dev);
+	if (!core->suspend_freq) {
+		dev_warn(dev, "no opp-suspend in OPP table; runtime suspend may fail to power-cycle nputop\n");
+		core->suspend_freq = core->max_freq;
+	}
+
+	rdev->opp_core = core->index;
+	dev_info(dev, "OPP enabled, max %lu MHz, suspend %lu MHz\n",
+		 core->max_freq / 1000000, core->suspend_freq / 1000000);
+
+	return 0;
+}
 
 int rocket_core_init(struct rocket_core *core)
 {
@@ -31,6 +104,10 @@ int rocket_core_init(struct rocket_core *core)
 	err = devm_clk_bulk_get(dev, ARRAY_SIZE(core->clks), core->clks);
 	if (err)
 		return dev_err_probe(dev, err, "failed to get clocks for core %d\n", core->index);
+
+	err = rocket_core_init_opp(core);
+	if (err)
+		return err;
 
 	core->pc_iomem = devm_platform_ioremap_resource_byname(pdev, "pc");
 	if (IS_ERR(core->pc_iomem)) {

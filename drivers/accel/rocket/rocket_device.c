@@ -35,6 +35,8 @@ struct rocket_device *rocket_device_init(struct platform_device *pdev,
 	if (!rdev->cores)
 		return ERR_PTR(-ENOMEM);
 
+	rdev->opp_core = -1;
+
 	dma_set_max_seg_size(dev, UINT_MAX);
 
 	err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(40));

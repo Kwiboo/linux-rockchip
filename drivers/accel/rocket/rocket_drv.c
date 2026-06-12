@@ -11,6 +11,7 @@
 #include <linux/iommu.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/pm_opp.h>
 #include <linux/pm_runtime.h>
 
 #include "rocket_device.h"
@@ -246,6 +247,22 @@ static int rocket_device_runtime_resume(struct device *dev)
 		return err;
 	}
 
+	/*
+	 * If an OPP table is wired up in the DT, drive the NPU clock to the
+	 * highest available OPP whenever the device is runtime-resumed. This
+	 * gives best-case inference latency; the regulator vote is released
+	 * again from runtime_suspend.
+	 */
+	if (rdev->cores[core].max_freq) {
+		err = dev_pm_opp_set_rate(dev, rdev->cores[core].max_freq);
+		if (err) {
+			dev_err(dev, "failed to set OPP rate (%d) for core %d\n", err, core);
+			clk_bulk_disable_unprepare(ARRAY_SIZE(rdev->cores[core].clks),
+						   rdev->cores[core].clks);
+			return err;
+		}
+	}
+
 	return 0;
 }
 
@@ -259,6 +276,19 @@ static int rocket_device_runtime_suspend(struct device *dev)
 
 	if (!rocket_job_is_idle(&rdev->cores[core]))
 		return -EBUSY;
+
+	/*
+	 * Drop the SCMI NPU clock back to the OPP marked with "opp-suspend"
+	 * in DT before letting the NPU power domain be powered off. On RK3588
+	 * the regular DVFS OPPs are sourced from the NPU PVTPLL, and the
+	 * power-domain handshake fails ("failed to get ack on domain
+	 * 'nputop'") on the subsequent power-on if the clock is left on the
+	 * PVTPLL path. The opp-suspend rate (200 MHz on RK3588) bypasses the
+	 * PVTPLL and keeps the genpd handshake reliable, while leaving the
+	 * npu-supply rail voted on so we don't churn the regulator.
+	 */
+	if (rdev->cores[core].suspend_freq)
+		dev_pm_opp_set_rate(dev, rdev->cores[core].suspend_freq);
 
 	clk_bulk_disable_unprepare(ARRAY_SIZE(rdev->cores[core].clks), rdev->cores[core].clks);
 

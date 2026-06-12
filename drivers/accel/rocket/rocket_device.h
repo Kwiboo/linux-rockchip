@@ -19,6 +19,15 @@ struct rocket_device {
 
 	struct rocket_core *cores;
 	unsigned int num_cores;
+
+	/*
+	 * All NPU cores share the same SCMI clock and the same npu-supply on
+	 * the SoCs we currently support (RK3588). Only the first-probed core
+	 * sets up the OPP table and drives the shared rail; sibling cores rely
+	 * on that shared state. opp_core is the index of the core that owns the
+	 * OPP, or -1 if no core has OPP configured.
+	 */
+	int opp_core;
 };
 
 struct rocket_device *rocket_device_init(struct platform_device *pdev,
