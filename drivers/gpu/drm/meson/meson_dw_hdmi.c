@@ -768,20 +768,6 @@ static const struct component_ops meson_dw_hdmi_ops = {
 	.unbind	= meson_dw_hdmi_unbind,
 };
 
-static int __maybe_unused meson_dw_hdmi_pm_suspend(struct device *dev)
-{
-	struct meson_dw_hdmi *meson_dw_hdmi = dev_get_drvdata(dev);
-
-	if (!meson_dw_hdmi)
-		return 0;
-
-	/* Reset TOP */
-	meson_dw_hdmi->data->top_write(meson_dw_hdmi,
-				       HDMITX_TOP_SW_RESET, 0);
-
-	return 0;
-}
-
 static int __maybe_unused meson_dw_hdmi_pm_resume(struct device *dev)
 {
 	struct meson_dw_hdmi *meson_dw_hdmi = dev_get_drvdata(dev);
@@ -807,8 +793,7 @@ static void meson_dw_hdmi_remove(struct platform_device *pdev)
 }
 
 static const struct dev_pm_ops meson_dw_hdmi_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(meson_dw_hdmi_pm_suspend,
-				meson_dw_hdmi_pm_resume)
+	SET_SYSTEM_SLEEP_PM_OPS(NULL, meson_dw_hdmi_pm_resume)
 };
 
 static const struct of_device_id meson_dw_hdmi_of_table[] = {
