@@ -3341,6 +3341,20 @@ static PyObject *pyrf__parse_events(PyObject *self, PyObject *args)
 		return NULL;
 	}
 
+	if (pthreads && pthreads != Py_None &&
+	    !PyObject_TypeCheck(pthreads, &pyrf_thread_map__type)) {
+		PyErr_SetString(PyExc_TypeError, "threads must be a perf.thread_map or None");
+		evlist__put(evlist);
+		return NULL;
+	}
+
+	if (pcpus && pcpus != Py_None &&
+	    !PyObject_TypeCheck(pcpus, &pyrf_cpu_map__type)) {
+		PyErr_SetString(PyExc_TypeError, "cpus must be a perf.cpu_map or None");
+		evlist__put(evlist);
+		return NULL;
+	}
+
 	threads = (pthreads && pthreads != Py_None) ?
 			((struct pyrf_thread_map *)pthreads)->threads : NULL;
 	cpus = (pcpus && pcpus != Py_None) ?
@@ -3373,6 +3387,20 @@ static PyObject *pyrf__parse_metrics(PyObject *self, PyObject *args)
 		return PyErr_NoMemory();
 
 	if (!PyArg_ParseTuple(args, "s|sOO", &input, &pmu, &pcpus, &pthreads)) {
+		evlist__put(evlist);
+		return NULL;
+	}
+
+	if (pthreads && pthreads != Py_None &&
+	    !PyObject_TypeCheck(pthreads, &pyrf_thread_map__type)) {
+		PyErr_SetString(PyExc_TypeError, "threads must be a perf.thread_map or None");
+		evlist__put(evlist);
+		return NULL;
+	}
+
+	if (pcpus && pcpus != Py_None &&
+	    !PyObject_TypeCheck(pcpus, &pyrf_cpu_map__type)) {
+		PyErr_SetString(PyExc_TypeError, "cpus must be a perf.cpu_map or None");
 		evlist__put(evlist);
 		return NULL;
 	}
