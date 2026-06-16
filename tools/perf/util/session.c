@@ -2673,7 +2673,7 @@ static const u32 perf_event__min_size[PERF_RECORD_HEADER_MAX] = {
  * Caller must ensure event->header.type < PERF_RECORD_HEADER_MAX.
  * If min is non-NULL, stores the required minimum on failure.
  */
-static bool perf_event__too_small(const union perf_event *event, u32 *min)
+bool perf_event__too_small(const union perf_event *event, u32 *min)
 {
 	u32 min_sz = perf_event__min_size[event->header.type];
 
