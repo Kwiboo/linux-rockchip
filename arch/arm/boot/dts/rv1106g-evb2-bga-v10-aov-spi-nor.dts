@@ -1,0 +1,92 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 Rockchip Electronics Co., Ltd.
+ */
+
+/dts-v1/;
+
+#include "rv1106g-evb2-v12-200w-spi-nor.dts"
+
+/ {
+	model = "Rockchip RV1106G EVB2 BGA V10 Board";
+	compatible = "rockchip,rv1106g-evb2-bga-v10-aov-spi-nor", "rockchip,rv1106";
+
+	vcc3v3_sd: vcc3v3-sd {
+		enable-active-high;
+	};
+};
+
+&acodec {
+	pa-ctl-gpios = <&gpio1 RK_PB1 GPIO_ACTIVE_HIGH>;
+	status = "okay";
+};
+
+&rkcif_mipi_lvds {
+	aov-reserved;
+	status = "okay";
+};
+
+&csi2_dphy0 {
+	status = "okay";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			csi_dphy_input0: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&sc450ai_out>;
+				data-lanes = <1 2>;
+			};
+		};
+	};
+};
+
+&i2c4 {
+	rockchip,amp-shared;
+	/delete-node/ sc3338@30;
+	/delete-node/ sc200ai@30;
+
+	sc450ai: sc450ai@30 {
+		compatible = "smartsens,sc450ai";
+		status = "okay";
+		reg = <0x30>;
+		clocks = <&cru MCLK_REF_MIPI0>;
+		clock-names = "xvclk";
+		reset-gpios = <&gpio3 RK_PC5 GPIO_ACTIVE_LOW>;
+		pwdn-gpios = <&gpio3 RK_PD2 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&mipi_refclk_out0>;
+		rockchip,camera-module-index = <0>;
+		rockchip,camera-module-facing = "back";
+		rockchip,camera-module-name = "CMK-OT2119-PC1";
+		rockchip,camera-module-lens-name = "30IRC-F16";
+		port {
+			sc450ai_out: endpoint {
+				remote-endpoint = <&csi_dphy_input0>;
+				data-lanes = <1 2>;
+			};
+		};
+	};
+};
+
+&rkisp_thunderboot {
+	/*
+	 * vicap, capture raw10, ceil(w*10/8/256)*256*h *4(buf num) + 0x6000(header)
+	 * e.g. 2688x1520: 0x14ce000
+	 */
+	reg = <0x00860000 0x14ce000>;
+};
+
+&ramdisk_r {
+	reg = <0x01D2E000 (20 * 0x00100000)>;
+};
+
+&ramdisk_c {
+	reg = <0x0312E000 (10 * 0x00100000)>;
+};

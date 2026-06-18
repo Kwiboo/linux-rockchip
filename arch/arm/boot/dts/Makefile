@@ -1038,6 +1038,7 @@ dtb-$(CONFIG_ARCH_ROCKCHIP) += \
 	rv1106g-evb1-v11-sii902x-bt11202hdmi.dtb \
 	rv1106g-evb1-v11-sii902x-rgb2hdmi.dtb \
 	rv1106g-evb1-v11-spi-nand-cvr.dtb \
+	rv1106g-evb2-bga-v10-aov-spi-nor.dtb \
 	rv1106g-evb2-v10.dtb \
 	rv1106g-evb2-v10-dual-camera.dtb \
 	rv1106g-evb2-v11-emmc.dtb \
