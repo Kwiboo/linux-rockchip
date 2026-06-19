@@ -35,6 +35,8 @@
 #define AIR_FW_ADDR_DM	0x00000000
 #define AIR_FW_ADDR_DSP	0x00100000
 
+#define AIR_EXT_PAGE_ACCESS            0x1f
+
 /* MII Registers */
 #define AIR_AUX_CTRL_STATUS		0x1d
 #define   AIR_AUX_CTRL_STATUS_SPEED_MASK	GENMASK(4, 2)
