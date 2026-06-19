@@ -29,6 +29,7 @@
 #include "amdgpu.h"
 #include "amdgpu_dm.h"
 #include "amdgpu_dm_wb.h"
+#include "amdgpu_dm_kunit_helpers.h"
 #include "amdgpu_display.h"
 #include "dc.h"
 
@@ -40,7 +41,7 @@ static const u32 amdgpu_dm_wb_formats[] = {
 	DRM_FORMAT_XRGB2101010,
 };
 
-static int amdgpu_dm_wb_encoder_atomic_check(struct drm_encoder *encoder,
+STATIC_IFN_KUNIT int amdgpu_dm_wb_encoder_atomic_check(struct drm_encoder *encoder,
 					struct drm_crtc_state *crtc_state,
 					struct drm_connector_state *conn_state)
 {
@@ -59,9 +60,11 @@ static int amdgpu_dm_wb_encoder_atomic_check(struct drm_encoder *encoder,
 		return -EINVAL;
 	}
 
-	for (i = 0; i < sizeof(amdgpu_dm_wb_formats) / sizeof(u32); i++) {
-		if (fb->format->format == amdgpu_dm_wb_formats[i])
+	for (i = 0; i < ARRAY_SIZE(amdgpu_dm_wb_formats); i++) {
+		if (fb->format->format == amdgpu_dm_wb_formats[i]) {
 			found = true;
+			break;
+		}
 	}
 
 	if (!found) {
@@ -72,13 +75,15 @@ static int amdgpu_dm_wb_encoder_atomic_check(struct drm_encoder *encoder,
 
 	return 0;
 }
+EXPORT_IF_KUNIT(amdgpu_dm_wb_encoder_atomic_check);
 
 
-static int amdgpu_dm_wb_connector_get_modes(struct drm_connector *connector)
+STATIC_IFN_KUNIT int amdgpu_dm_wb_connector_get_modes(struct drm_connector *connector)
 {
 	/* Maximum resolution supported by DWB */
 	return drm_add_modes_noedid(connector, 3840, 2160);
 }
+EXPORT_IF_KUNIT(amdgpu_dm_wb_connector_get_modes);
 
 static int amdgpu_dm_wb_prepare_job(struct drm_writeback_connector *wb_connector,
 			       struct drm_writeback_job *job)
@@ -187,7 +192,7 @@ int amdgpu_dm_wb_connector_init(struct amdgpu_display_manager *dm,
 {
 	struct dc *dc = dm->dc;
 	struct dc_link *link = dc_get_link_at_index(dc, link_index);
-	int res = 0;
+	int res;
 
 	wbcon->link = link;
 
