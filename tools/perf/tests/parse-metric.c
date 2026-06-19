@@ -53,7 +53,7 @@ static double compute_single(struct evlist *evlist, const char *name)
 	struct evsel *evsel;
 
 	evlist__for_each_entry(evlist, evsel) {
-		me = metricgroup__lookup(&evlist->metric_events, evsel, false);
+		me = metricgroup__lookup(evlist__metric_events(evlist), evsel, false);
 		if (me != NULL) {
 			list_for_each_entry (mexp, &me->head, nd) {
 				if (strcmp(mexp->metric_name, name))
@@ -84,11 +84,11 @@ static int __compute_metric(const char *name, struct value *vals,
 
 	cpus = perf_cpu_map__new("0");
 	if (!cpus) {
-		evlist__delete(evlist);
+		evlist__put(evlist);
 		return -ENOMEM;
 	}
 
-	perf_evlist__set_maps(&evlist->core, cpus, NULL);
+	perf_evlist__set_maps(evlist__core(evlist), cpus, NULL);
 
 	/* Parse the metric into metric_events list. */
 	pme_test = find_core_metrics_table("testarch", "testcpu");
@@ -113,7 +113,7 @@ out:
 	/* ... cleanup. */
 	evlist__free_stats(evlist);
 	perf_cpu_map__put(cpus);
-	evlist__delete(evlist);
+	evlist__put(evlist);
 	return err;
 }
 

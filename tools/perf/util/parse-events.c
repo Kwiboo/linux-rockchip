@@ -2251,6 +2251,33 @@ static int parse_events__sort_events_and_fix_groups(struct list_head *list)
 		}
 		last_event_was_forced_leader = (force_grouped_leader == pos);
 	}
+
+	/*
+	 * Make sure the first wildcard match is the earliest entry in the list.
+	 * Since list_sort might have reordered the aliases, the original leader
+	 * might not be at the head of the list anymore. We find the first
+	 * alias in the sorted list and make it the new leader, and redirect
+	 * all other aliases to it.
+	 */
+	list_for_each_entry(pos, list, core.node) {
+		struct evsel *orig_leader = pos->first_wildcard_match;
+
+		if (!orig_leader)
+			continue;
+
+		if (orig_leader->first_wildcard_match) {
+			/* Original leader was redirected to a new leader */
+			pos->first_wildcard_match = orig_leader->first_wildcard_match;
+		} else if (pos->core.idx < orig_leader->core.idx) {
+			/*
+			 * We are earlier than the original leader in sorted order,
+			 * and no earlier alias has claimed leadership yet.
+			 */
+			orig_leader->first_wildcard_match = pos;
+			pos->first_wildcard_match = NULL;
+		}
+	}
+
 	list_for_each_entry(pos, list, core.node) {
 		struct evsel *pos_leader = evsel__leader(pos);
 
@@ -2267,7 +2294,7 @@ int __parse_events(struct evlist *evlist, const char *str, const char *pmu_filte
 {
 	struct parse_events_state parse_state = {
 		.list	  = LIST_HEAD_INIT(parse_state.list),
-		.idx	  = evlist->core.nr_entries,
+		.idx	  = evlist__nr_entries(evlist),
 		.error	  = err,
 		.stoken	  = PE_START_EVENTS,
 		.fake_pmu = fake_pmu,
@@ -2316,7 +2343,7 @@ int __parse_events(struct evlist *evlist, const char *str, const char *pmu_filte
 
 	/*
 	 * There are 2 users - builtin-record and builtin-test objects.
-	 * Both call evlist__delete in case of error, so we dont
+	 * Both call evlist__put in case of error, so we dont
 	 * need to bother.
 	 */
 	return ret;
@@ -2519,7 +2546,7 @@ int parse_events_option_new_evlist(const struct option *opt, const char *str, in
 	}
 	ret = parse_events_option(opt, str, unset);
 	if (ret) {
-		evlist__delete(*args->evlistp);
+		evlist__put(*args->evlistp);
 		*args->evlistp = NULL;
 	}
 
@@ -2541,7 +2568,7 @@ foreach_evsel_in_last_glob(struct evlist *evlist,
 	 *
 	 * So no need to WARN here, let *func do this.
 	 */
-	if (evlist->core.nr_entries > 0)
+	if (evlist__nr_entries(evlist) > 0)
 		last = evlist__last(evlist);
 
 	do {
@@ -2551,7 +2578,7 @@ foreach_evsel_in_last_glob(struct evlist *evlist,
 		if (!last)
 			return 0;
 
-		if (last->core.node.prev == &evlist->core.entries)
+		if (last->core.node.prev == &evlist__core(evlist)->entries)
 			return 0;
 		last = list_entry(last->core.node.prev, struct evsel, core.node);
 	} while (!last->cmdline_group_boundary);

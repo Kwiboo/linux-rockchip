@@ -214,7 +214,7 @@ static void metric__free(struct metric *m)
 	zfree(&m->metric_refs);
 	expr__ctx_free(m->pctx);
 	zfree(&m->modifier);
-	evlist__delete(m->evlist);
+	evlist__put(m->evlist);
 	free(m);
 }
 
@@ -295,7 +295,8 @@ static int setup_metric_events(const char *pmu, struct hashmap *ids,
 	const char *metric_id;
 	struct evsel *ev;
 	size_t ids_size, matched_events, i;
-	bool all_pmus = !strcmp(pmu, "all") || perf_pmus__num_core_pmus() == 1 || !is_pmu_core(pmu);
+	bool all_pmus = !strcmp(pmu, "all") || !strcmp(pmu, "default_core") ||
+			perf_pmus__num_core_pmus() == 1 || !is_pmu_core(pmu);
 
 	*out_metric_events = NULL;
 	ids_size = hashmap__size(ids);
@@ -415,14 +416,9 @@ static int metricgroup__sys_event_iter(const struct pmu_metric *pm,
 	if (!pm->metric_expr || !pm->compat)
 		return 0;
 
-	while ((pmu = perf_pmus__scan(pmu))) {
-
-		if (!pmu->id || !pmu_uncore_identifier_match(pm->compat, pmu->id))
-			continue;
-
-		return d->fn(pm, table, d->data);
-	}
-	return 0;
+	/* Only process with the iterator if there is a a PMU that matches the ID. */
+	pmu = perf_pmus__scan_for_uncore_id(pmu, pm->compat);
+	return pmu ? d->fn(pm, table, d->data) : 0;
 }
 
 int metricgroup__for_each_metric(const struct pmu_metrics_table *table, pmu_metric_iter_fn fn,
@@ -1335,7 +1331,7 @@ static int parse_ids(bool metric_no_merge, bool fake_pmu,
 	parsed_evlist = NULL;
 err_out:
 	parse_events_error__exit(&parse_error);
-	evlist__delete(parsed_evlist);
+	evlist__put(parsed_evlist);
 	strbuf_release(&events);
 	return ret;
 }
@@ -1494,7 +1490,7 @@ static int parse_groups(struct evlist *perf_evlist,
 			goto out;
 		}
 
-		me = metricgroup__lookup(&perf_evlist->metric_events,
+		me = metricgroup__lookup(evlist__metric_events(perf_evlist),
 					 pick_display_evsel(&metric_list, metric_events),
 					 /*create=*/true);
 
@@ -1545,13 +1541,13 @@ static int parse_groups(struct evlist *perf_evlist,
 
 
 	if (combined_evlist) {
-		evlist__splice_list_tail(perf_evlist, &combined_evlist->core.entries);
-		evlist__delete(combined_evlist);
+		evlist__splice_list_tail(perf_evlist, &evlist__core(combined_evlist)->entries);
+		evlist__put(combined_evlist);
 	}
 
 	list_for_each_entry(m, &metric_list, nd) {
 		if (m->evlist)
-			evlist__splice_list_tail(perf_evlist, &m->evlist->core.entries);
+			evlist__splice_list_tail(perf_evlist, &evlist__core(m->evlist)->entries);
 	}
 
 out:

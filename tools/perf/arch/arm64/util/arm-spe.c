@@ -60,7 +60,7 @@ static bool arm_spe_is_set_freq(struct evsel *evsel)
  */
 static struct perf_cpu_map *arm_spe_find_cpus(struct evlist *evlist)
 {
-	struct perf_cpu_map *event_cpus = evlist->core.user_requested_cpus;
+	struct perf_cpu_map *event_cpus = evlist__core(evlist)->user_requested_cpus;
 	struct perf_cpu_map *online_cpus = perf_cpu_map__new_online_cpus();
 	struct perf_cpu_map *intersect_cpus;
 
@@ -157,7 +157,7 @@ static int arm_spe_info_fill(struct auxtrace_record *itr,
 	if (priv_size != arm_spe_info_priv_size(itr, session->evlist))
 		return -EINVAL;
 
-	if (!session->evlist->core.nr_mmaps)
+	if (!evlist__core(session->evlist)->nr_mmaps)
 		return -EINVAL;
 
 	cpu_map = arm_spe_find_cpus(session->evlist);
@@ -363,7 +363,7 @@ static int arm_spe_setup_tracking_event(struct evlist *evlist,
 {
 	int err;
 	struct evsel *tracking_evsel;
-	struct perf_cpu_map *cpus = evlist->core.user_requested_cpus;
+	struct perf_cpu_map *cpus = evlist__core(evlist)->user_requested_cpus;
 
 	/* Add dummy event to keep tracking */
 	err = parse_event(evlist, "dummy:u");
@@ -396,7 +396,7 @@ static int arm_spe_recording_options(struct auxtrace_record *itr,
 	struct arm_spe_recording *sper =
 			container_of(itr, struct arm_spe_recording, itr);
 	struct evsel *evsel, *tmp;
-	struct perf_cpu_map *cpus = evlist->core.user_requested_cpus;
+	struct perf_cpu_map *cpus = evlist__core(evlist)->user_requested_cpus;
 	bool discard = false;
 	int err;
 	u64 discard_bit;
@@ -428,7 +428,8 @@ static int arm_spe_recording_options(struct auxtrace_record *itr,
 	evlist__for_each_entry_safe(evlist, tmp, evsel) {
 		if (evsel__is_aux_event(evsel)) {
 			arm_spe_setup_evsel(evsel, cpus);
-			if (!evsel__get_config_val(evsel, "discard", &discard_bit))
+			if (evsel__config_exists(evsel, "discard") &&
+			    !evsel__get_config_val(evsel, "discard", &discard_bit))
 				discard = !!discard_bit;
 		}
 	}

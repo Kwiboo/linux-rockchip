@@ -213,9 +213,10 @@ static int __symbol__account_cycles(struct cyc_hist *ch,
 }
 
 static int __symbol__inc_addr_samples(struct map_symbol *ms,
-				      struct annotated_source *src, struct evsel *evsel, u64 addr,
+				      struct annotated_source *src, u64 addr,
 				      struct perf_sample *sample)
 {
+	struct evsel *evsel = sample->evsel;
 	struct symbol *sym = ms->sym;
 	long hash_key;
 	u64 offset;
@@ -235,7 +236,8 @@ static int __symbol__inc_addr_samples(struct map_symbol *ms,
 	h = annotated_source__histogram(src, evsel);
 	if (h == NULL) {
 		pr_debug("%s(%d): ENOMEM! sym->name=%s, start=%#" PRIx64 ", addr=%#" PRIx64 ", end=%#" PRIx64 ", func: %d\n",
-			 __func__, __LINE__, sym->name, sym->start, addr, sym->end, sym->type == STT_FUNC);
+			 __func__, __LINE__, sym->name, sym->start, addr, sym->end,
+			 symbol__type(sym) == STT_FUNC);
 		return -ENOMEM;
 	}
 
@@ -318,7 +320,7 @@ alloc_histograms:
 }
 
 static int symbol__inc_addr_samples(struct map_symbol *ms,
-				    struct evsel *evsel, u64 addr,
+				    u64 addr,
 				    struct perf_sample *sample)
 {
 	struct symbol *sym = ms->sym;
@@ -326,8 +328,8 @@ static int symbol__inc_addr_samples(struct map_symbol *ms,
 
 	if (sym == NULL)
 		return 0;
-	src = symbol__hists(sym, evsel->evlist->core.nr_entries);
-	return src ? __symbol__inc_addr_samples(ms, src, evsel, addr, sample) : 0;
+	src = symbol__hists(sym, evlist__nr_entries(sample->evsel->evlist));
+	return src ? __symbol__inc_addr_samples(ms, src, addr, sample) : 0;
 }
 
 static int symbol__account_br_cntr(struct annotated_branch *branch,
@@ -337,7 +339,7 @@ static int symbol__account_br_cntr(struct annotated_branch *branch,
 {
 	unsigned int br_cntr_nr = evsel__leader(evsel)->br_cntr_nr;
 	unsigned int base = evsel__leader(evsel)->br_cntr_idx;
-	unsigned int off = offset * evsel->evlist->nr_br_cntr;
+	unsigned int off = offset * evlist__nr_br_cntr(evsel->evlist);
 	u64 *branch_br_cntr = branch->br_cntr;
 	unsigned int i, mask, width;
 
@@ -367,7 +369,7 @@ static int symbol__account_cycles(u64 addr, u64 start, struct symbol *sym,
 
 	if (sym == NULL)
 		return 0;
-	branch = symbol__find_branch_hist(sym, evsel->evlist->nr_br_cntr);
+	branch = symbol__find_branch_hist(sym, evlist__nr_br_cntr(evsel->evlist));
 	if (!branch)
 		return -ENOMEM;
 	if (addr < sym->start || addr >= sym->end)
@@ -509,7 +511,7 @@ static void annotation__count_and_fill(struct annotation *notes, u64 start, u64 
 static int annotation__compute_ipc(struct annotation *notes, size_t size,
 				   struct evsel *evsel)
 {
-	unsigned int br_cntr_nr = evsel->evlist->nr_br_cntr;
+	unsigned int br_cntr_nr = evlist__nr_br_cntr(evsel->evlist);
 	int err = 0;
 	s64 offset;
 
@@ -581,16 +583,14 @@ static int annotation__compute_ipc(struct annotation *notes, size_t size,
 	return 0;
 }
 
-int addr_map_symbol__inc_samples(struct addr_map_symbol *ams, struct perf_sample *sample,
-				 struct evsel *evsel)
+int addr_map_symbol__inc_samples(struct addr_map_symbol *ams, struct perf_sample *sample)
 {
-	return symbol__inc_addr_samples(&ams->ms, evsel, ams->al_addr, sample);
+	return symbol__inc_addr_samples(&ams->ms, ams->al_addr, sample);
 }
 
-int hist_entry__inc_addr_samples(struct hist_entry *he, struct perf_sample *sample,
-				 struct evsel *evsel, u64 ip)
+int hist_entry__inc_addr_samples(struct hist_entry *he, struct perf_sample *sample, u64 ip)
 {
-	return symbol__inc_addr_samples(&he->ms, evsel, ip, sample);
+	return symbol__inc_addr_samples(&he->ms, ip, sample);
 }
 
 
@@ -1813,7 +1813,7 @@ int annotation_br_cntr_abbr_list(char **str, struct evsel *evsel, bool header)
 	struct evsel *pos;
 	struct strbuf sb;
 
-	if (evsel->evlist->nr_br_cntr <= 0)
+	if (evlist__nr_br_cntr(evsel->evlist) <= 0)
 		return -ENOTSUP;
 
 	strbuf_init(&sb, /*hint=*/ 0);
@@ -2224,7 +2224,7 @@ int symbol__annotate2(struct map_symbol *ms, struct evsel *evsel,
 
 	annotation__init_column_widths(notes, sym);
 	annotation__update_column_widths(notes);
-	sym->annotate2 = 1;
+	symbol__set_annotate2(sym, true);
 
 	return 0;
 }

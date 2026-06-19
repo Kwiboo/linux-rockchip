@@ -2,6 +2,7 @@ from os import getenv, path
 from subprocess import Popen, PIPE
 from re import sub
 import shlex
+import shutil
 
 cc = getenv("CC")
 assert cc, "Environment variable CC not set"
@@ -73,19 +74,22 @@ class install_lib(_install_lib):
         _install_lib.finalize_options(self)
         self.build_dir = build_lib
 
+    def run(self):
+        _install_lib.run(self)
+        shutil.copy2(f'{src_perf}/python/perf.pyi', self.install_dir)
 
-cflags = getenv('CFLAGS', '').split()
+
 # switch off several checks (need to be at the end of cflags list)
-cflags += ['-fno-strict-aliasing', '-Wno-write-strings', '-Wno-unused-parameter', '-Wno-redundant-decls' ]
+extra_cflags = ['-fno-strict-aliasing', '-Wno-write-strings', '-Wno-unused-parameter', '-Wno-redundant-decls' ]
 if cc_is_clang:
-    cflags += ["-Wno-unused-command-line-argument" ]
+    extra_cflags += ["-Wno-unused-command-line-argument" ]
     if clang_has_option("-Wno-cast-function-type-mismatch"):
-        cflags += ["-Wno-cast-function-type-mismatch" ]
+        extra_cflags += ["-Wno-cast-function-type-mismatch" ]
 else:
-    cflags += ['-Wno-cast-function-type' ]
+    extra_cflags += ['-Wno-cast-function-type' ]
 
 # The python headers have mixed code with declarations (decls after asserts, for instance)
-cflags += [ "-Wno-declaration-after-statement" ]
+extra_cflags += [ "-Wno-declaration-after-statement" ]
 
 src_perf  = f'{srctree}/tools/perf'
 build_lib = getenv('PYTHON_EXTBUILD_LIB')
@@ -94,7 +98,7 @@ build_tmp = getenv('PYTHON_EXTBUILD_TMP')
 perf = Extension('perf',
                  sources = [ src_perf + '/util/python.c' ],
 		         include_dirs = ['util/include'],
-		         extra_compile_args = cflags,
+		         extra_compile_args = extra_cflags,
                  )
 
 setup(name='perf',

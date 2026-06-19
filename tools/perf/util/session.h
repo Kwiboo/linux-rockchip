@@ -71,6 +71,8 @@ struct perf_session {
 	void			*one_mmap_addr;
 	/** @one_mmap_offset: File offset in perf.data file when mapped. */
 	u64			one_mmap_offset;
+	/** @one_mmap_size: Size of the single mmap in bytes. */
+	u64			one_mmap_size;
 	/** @ordered_events: Used to turn unordered events into ordered ones. */
 	struct ordered_events	ordered_events;
 	/** @data: Optional perf data file being read from. */
@@ -119,6 +121,8 @@ static inline struct perf_session *perf_session__new(struct perf_data *data,
 void perf_session__delete(struct perf_session *session);
 
 void perf_event_header__bswap(struct perf_event_header *hdr);
+
+bool perf_event__too_small(const union perf_event *event, u32 *min);
 
 int perf_session__peek_event(struct perf_session *session, off_t file_offset,
 			     void *buf, size_t buf_sz,
