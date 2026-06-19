@@ -1134,7 +1134,7 @@ cifs_discard_remaining_data(struct TCP_Server_Info *server)
 }
 
 static int
-__cifs_readv_discard(struct TCP_Server_Info *server, struct mid_q_entry *mid,
+__cifs_discard_and_dequeue(struct TCP_Server_Info *server, struct mid_q_entry *mid,
 		     bool malformed)
 {
 	int length;
@@ -1146,12 +1146,162 @@ __cifs_readv_discard(struct TCP_Server_Info *server, struct mid_q_entry *mid,
 	return length;
 }
 
-static int
-cifs_readv_discard(struct TCP_Server_Info *server, struct mid_q_entry *mid)
+/*
+ * Receive handler for async QueryDirectory with multi-credit support
+ */
+int
+cifs_query_dir_receive(struct TCP_Server_Info *server, struct mid_q_entry *mid)
 {
-	struct cifs_io_subrequest *rdata = mid->callback_data;
+	int length, len;
+	unsigned int data_offset, data_len, resp_size;
+	struct cifs_query_dir_io *qd_io = mid->callback_data;
+	char *buf = server->smallbuf;
+	unsigned int buflen = server->pdu_size;
+	struct smb2_query_directory_rsp *rsp;
 
-	return  __cifs_readv_discard(server, mid, rdata->result);
+	cifs_dbg(FYI, "%s: mid=%llu buf_capacity=%zu\n",
+		 __func__, mid->mid, qd_io->combined_iov.iov_len);
+
+	/*
+	 * Read the rest of QUERY_DIRECTORY_RSP header (sans Data array).
+	 * QueryDirectory response structure is 64 bytes (SMB2 header) + 8 bytes (fixed part).
+	 */
+	resp_size = sizeof(struct smb2_query_directory_rsp);
+	len = min_t(unsigned int, buflen, resp_size) - HEADER_SIZE(server) + 1;
+
+	length = cifs_read_from_socket(server,
+				       buf + HEADER_SIZE(server) - 1, len);
+	if (length < 0) {
+		qd_io->result = length;
+		return __cifs_discard_and_dequeue(server, mid, false);
+	}
+	server->total_read += length;
+
+	if (server->ops->is_session_expired &&
+	    server->ops->is_session_expired(buf)) {
+		cifs_reconnect(server, true);
+		return -1;
+	}
+
+	if (server->ops->is_status_pending &&
+	    server->ops->is_status_pending(buf, server)) {
+		cifs_discard_remaining_data(server);
+		return -1;
+	}
+
+	/* Is there enough to get to the rest of the QUERY_DIRECTORY_RSP header? */
+	if (server->total_read < resp_size) {
+		cifs_dbg(FYI, "%s: server returned short header. got=%u expected=%u\n",
+			 __func__, server->total_read, resp_size);
+		qd_io->result = smb_EIO2(smb_eio_trace_read_rsp_short,
+					 server->total_read, resp_size);
+		return __cifs_discard_and_dequeue(server, mid, true);
+	}
+
+	/* Set up first iov for signature check and to get credits */
+	qd_io->iov[0].iov_base = buf;
+	qd_io->iov[0].iov_len = server->total_read;
+	qd_io->iov[1].iov_base = NULL;
+	qd_io->iov[1].iov_len = 0;
+	cifs_dbg(FYI, "0: iov_base=%p iov_len=%zu\n",
+		 qd_io->iov[0].iov_base, qd_io->iov[0].iov_len);
+
+	/* Parse header early to access status before map_error converts it */
+	rsp = (struct smb2_query_directory_rsp *)buf;
+
+	/* Was the SMB query_directory successful? */
+	qd_io->result = server->ops->map_error(buf, false);
+	if (qd_io->result != 0) {
+		if (qd_io->combined_iov.iov_base && qd_io->iov[0].iov_len > 0 &&
+		    qd_io->iov[0].iov_len <= qd_io->combined_iov.iov_len) {
+			memcpy(qd_io->combined_iov.iov_base, qd_io->iov[0].iov_base,
+			       qd_io->iov[0].iov_len);
+			qd_io->iov[0].iov_base = qd_io->combined_iov.iov_base;
+		}
+		cifs_dbg(FYI, "%s: server returned error %d (Status was 0x%x)\n",
+			 __func__, qd_io->result, le32_to_cpu(rsp->hdr.Status));
+		return __cifs_discard_and_dequeue(server, mid, false);
+	}
+
+	data_offset = le16_to_cpu(rsp->OutputBufferOffset);
+	data_len = le32_to_cpu(rsp->OutputBufferLength);
+
+	cifs_dbg(FYI, "%s: total_read=%u data_offset=%u data_len=%u\n",
+		 __func__, server->total_read, data_offset, data_len);
+
+	/* Validate data_offset and data_len */
+	if (data_offset < server->total_read) {
+		cifs_dbg(FYI, "%s: data offset (%u) inside response header\n",
+			 __func__, data_offset);
+		data_offset = server->total_read;
+		data_len = 0;
+	} else if (data_offset > MAX_CIFS_SMALL_BUFFER_SIZE) {
+		cifs_dbg(FYI, "%s: data offset (%u) beyond end of smallbuf\n",
+			 __func__, data_offset);
+		qd_io->result = smb_EIO1(smb_eio_trace_read_overlarge,
+					 data_offset);
+		return __cifs_discard_and_dequeue(server, mid, true);
+	}
+
+	/* Read any padding between header and data */
+	len = data_offset - server->total_read;
+	if (len > 0) {
+		length = cifs_read_from_socket(server,
+					       buf + server->total_read, len);
+		if (length < 0) {
+			qd_io->result = length;
+			return __cifs_discard_and_dequeue(server, mid, false);
+		}
+		server->total_read += length;
+		qd_io->iov[0].iov_len = server->total_read;
+	}
+
+	/* Check if data fits in the pre-allocated combined buffer */
+	if (qd_io->iov[0].iov_len + data_len > qd_io->combined_iov.iov_len) {
+		cifs_dbg(VFS, "%s: response (%zu + %u) exceeds buffer capacity (%zu)\n",
+			 __func__, qd_io->iov[0].iov_len, data_len, qd_io->combined_iov.iov_len);
+		qd_io->result = smb_EIO2(smb_eio_trace_read_rsp_malformed,
+					 data_len, (unsigned int)qd_io->combined_iov.iov_len);
+		return __cifs_discard_and_dequeue(server, mid, true);
+	}
+
+	/*
+	 * Build combined header+data in qd_io->combined_iov.iov_base,
+	 * preserving the wire layout so SMB2 signing can be verified against
+	 * the exact on-the-wire bytes.  hdr_len already accounts for the
+	 * header and any padding up to data_offset; data is read at that
+	 * same offset.  OutputBufferOffset/Length are left untouched.
+	 */
+	if (qd_io->iov[0].iov_len > 0 && qd_io->result == 0) {
+		size_t hdr_len = qd_io->iov[0].iov_len;
+
+		/* Copy header+padding to combined buffer, preserving wire layout */
+		memcpy(qd_io->combined_iov.iov_base, qd_io->iov[0].iov_base, hdr_len);
+
+		/* Read directory entries at the wire data_offset position */
+		if (data_len > 0) {
+			length = cifs_read_from_socket(server,
+						       qd_io->combined_iov.iov_base + hdr_len,
+						       data_len);
+			if (length < 0) {
+				qd_io->result = length;
+				return __cifs_discard_and_dequeue(server, mid, false);
+			}
+			server->total_read += length;
+
+			/* Set up second iov pointing to the directory data within combined buffer */
+			qd_io->iov[1].iov_base = qd_io->combined_iov.iov_base + hdr_len;
+			qd_io->iov[1].iov_len = length;
+		}
+
+		qd_io->combined_iov.iov_len = hdr_len + (data_len > 0 ? length : 0);
+
+		cifs_dbg(FYI, "total_read=%u buflen=%u data_len=%u hdr_len=%zu combined_len=%zu\n",
+			 server->total_read, buflen, data_len, hdr_len,
+			 qd_io->combined_iov.iov_len);
+	}
+
+	return __cifs_discard_and_dequeue(server, mid, false);
 }
 
 int
@@ -1205,7 +1355,7 @@ cifs_readv_receive(struct TCP_Server_Info *server, struct mid_q_entry *mid)
 		cifs_dbg(FYI, "%s: server returned error %d\n",
 			 __func__, rdata->result);
 		/* normal error on read response */
-		return __cifs_readv_discard(server, mid, false);
+		return __cifs_discard_and_dequeue(server, mid, false);
 	}
 
 	/* Is there enough to get to the rest of the READ_RSP header? */
@@ -1215,7 +1365,7 @@ cifs_readv_receive(struct TCP_Server_Info *server, struct mid_q_entry *mid)
 			 server->vals->read_rsp_size);
 		rdata->result = smb_EIO2(smb_eio_trace_read_rsp_short,
 					 server->total_read, server->vals->read_rsp_size);
-		return cifs_readv_discard(server, mid);
+		return __cifs_discard_and_dequeue(server, mid, rdata->result);
 	}
 
 	data_offset = server->ops->read_data_offset(buf);
@@ -1234,7 +1384,7 @@ cifs_readv_receive(struct TCP_Server_Info *server, struct mid_q_entry *mid)
 			 __func__, data_offset);
 		rdata->result = smb_EIO1(smb_eio_trace_read_overlarge,
 					 data_offset);
-		return cifs_readv_discard(server, mid);
+		return __cifs_discard_and_dequeue(server, mid, rdata->result);
 	}
 
 	cifs_dbg(FYI, "%s: total_read=%u data_offset=%u\n",
@@ -1262,7 +1412,7 @@ cifs_readv_receive(struct TCP_Server_Info *server, struct mid_q_entry *mid)
 			/* data_len is corrupt -- discard frame */
 			rdata->result = smb_EIO2(smb_eio_trace_read_rsp_malformed,
 						 end_off, buflen);
-			return cifs_readv_discard(server, mid);
+			return __cifs_discard_and_dequeue(server, mid, rdata->result);
 		}
 	}
 
@@ -1282,7 +1432,7 @@ cifs_readv_receive(struct TCP_Server_Info *server, struct mid_q_entry *mid)
 
 	/* discard anything left over */
 	if (server->total_read < buflen)
-		return cifs_readv_discard(server, mid);
+		return __cifs_discard_and_dequeue(server, mid, rdata->result);
 
 	dequeue_mid(server, mid, false);
 	mid->resp_buf = server->smallbuf;

@@ -329,6 +329,7 @@ static int cifs_debug_dirs_proc_show(struct seq_file *m, void *v)
 						(unsigned long)atomic_long_read(&cfids->total_dirents_entries),
 						(unsigned long long)atomic64_read(&cfids->total_dirents_bytes));
 				list_for_each_entry(cfid, &cfids->entries, entry) {
+					spin_lock(&cfid->cfid_lock);
 					seq_printf(m, "0x%x 0x%llx 0x%llx ",
 						tcon->tid,
 						ses->Suid,
@@ -340,11 +341,13 @@ static int cifs_debug_dirs_proc_show(struct seq_file *m, void *v)
 					seq_printf(m, "%s", cfid->path);
 					if (cfid->file_all_info_is_valid)
 						seq_printf(m, "\tvalid file info");
+					spin_unlock(&cfid->cfid_lock);
 					if (cfid->dirents.is_valid)
 						seq_printf(m, ", valid dirents");
-					if (!list_empty(&cfid->dirents.entries))
+					if (READ_ONCE(cfid->dirents.entries_count))
 						seq_printf(m, ", dirents: %lu entries, %lu bytes",
-						cfid->dirents.entries_count, cfid->dirents.bytes_used);
+						READ_ONCE(cfid->dirents.entries_count),
+						READ_ONCE(cfid->dirents.bytes_used));
 					seq_printf(m, "\n");
 				}
 				spin_unlock(&cfids->cfid_list_lock);

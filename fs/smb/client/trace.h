@@ -165,6 +165,7 @@
 	EM(cifs_trace_rw_credits_write_prepare,		"wr-prepare ") \
 	EM(cifs_trace_rw_credits_write_response_add,	"wr-resp-add") \
 	EM(cifs_trace_rw_credits_write_response_clear,	"wr-resp-clr") \
+	EM(cifs_trace_rw_credits_query_dir_done,	"qd-done    ") \
 	E_(cifs_trace_rw_credits_zero_in_flight,	"ZERO-IN-FLT")
 
 #define smb3_tcon_ref_traces					      \

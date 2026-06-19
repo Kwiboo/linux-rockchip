@@ -12,6 +12,7 @@
 #include "cifsglob.h"
 #include "cifsproto.h"
 #include "smb2proto.h"
+#include "smb2pdu.h"
 #include "cifs_debug.h"
 #include "cifs_unicode.h"
 #include "../common/smb2status.h"
@@ -317,7 +318,7 @@ char *
 smb2_get_data_area_len(int *off, int *len, struct smb2_hdr *shdr)
 {
 	const int max_off = 4096;
-	const int max_len = 128 * 1024;
+	int max_len = 128 * 1024;
 
 	*off = 0;
 	*len = 0;
@@ -368,6 +369,10 @@ smb2_get_data_area_len(int *off, int *len, struct smb2_hdr *shdr)
 		  ((struct smb2_query_directory_rsp *)shdr)->OutputBufferOffset);
 		*len = le32_to_cpu(
 		  ((struct smb2_query_directory_rsp *)shdr)->OutputBufferLength);
+		/* Allow larger buffers for query directory (up to 2MB).
+		 * The actual data is handled separately in cifs_query_dir_receive().
+		 */
+		max_len = SMB2_MAX_QD_DATABUF_SIZE;
 		break;
 	case SMB2_IOCTL:
 		*off = le32_to_cpu(
