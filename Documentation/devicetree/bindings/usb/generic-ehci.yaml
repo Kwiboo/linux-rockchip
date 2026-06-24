@@ -52,6 +52,7 @@ properties:
               - ibm,476gtr-ehci
               - nxp,lpc1850-ehci
               - qca,ar7100-ehci
+              - rockchip,rk3568-ehci
               - rockchip,rk3588-ehci
               - snps,hsdk-v1.0-ehci
               - socionext,uniphier-ehci
@@ -190,7 +191,9 @@ allOf:
       properties:
         compatible:
           contains:
-            const: rockchip,rk3588-ehci
+            enum:
+              - rockchip,rk3568-ehci
+              - rockchip,rk3588-ehci
     then:
       properties:
         clocks:
