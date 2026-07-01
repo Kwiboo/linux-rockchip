@@ -397,6 +397,22 @@ void rkcif_free_reserved_mem_buf(struct rkcif_device *dev, struct rkcif_rx_buffe
 				 RKISP_VICAP_CMD_RX_BUFFER_FREE, &buf->dbufs);
 	if (dummy->is_need_vaddr)
 		dummy->dbuf->ops->vunmap(dummy->dbuf, dummy->vaddr);
+
+	/*
+	 * Release the dma_buf reference held by VICAP before
+	 * free_reserved_area() returns the physical pages. Otherwise
+	 * rkcif_shm_release() will never be called and rkcif_shm_data
+	 * will leak. Also, once free_reserved_area() runs, vaddr / the
+	 * underlying pages become invalid, so any later vunmap or
+	 * dbuf access would be use-after-free.
+	 * Symmetric to the dma_buf_put() call in rkcif_free_buffer().
+	 */
+	if (dummy->dbuf) {
+		dma_buf_put(dummy->dbuf);
+		dummy->dbuf = NULL;
+	}
+	dummy->vaddr = NULL;
+
 #ifdef CONFIG_VIDEO_ROCKCHIP_THUNDER_BOOT_ISP
 	{
 		phys_addr_t start, end;
