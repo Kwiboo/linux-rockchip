@@ -215,6 +215,8 @@ allOf:
       properties:
         clocks:
           minItems: 4
+      required:
+        - clocks
     else:
       properties:
         clocks:
