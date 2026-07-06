@@ -186,6 +186,17 @@ allOf:
       required:
         - clocks
         - clock-names
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: rockchip,rk3588-ehci
+    then:
+      properties:
+        clocks:
+          minItems: 4
+      required:
+        - clocks
 
 unevaluatedProperties: false
 
