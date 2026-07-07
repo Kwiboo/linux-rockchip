@@ -16,6 +16,7 @@ static const struct flash_info xtx_parts[] = {
 	{ "xt25q256f", INFO(0x0b6019, 0, 64 * 1024, 512, SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ) },
 	{ "xt25q512f", INFO(0x0b601a, 0, 64 * 1024, 1024, SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ) },
 	{ "xt55q1gf", INFO(0x0b601b, 0, 64 * 1024, 2048, SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ) },
+	{ "xt25w512b", INFO(0x0b651a, 0, 64 * 1024, 1024, SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ) },
 };
 
 const struct spi_nor_manufacturer spi_nor_xtx = {
