@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 Rockchip Electronics Co., Ltd.
+ */
+
+#include "arm64/rockchip/rk3326-evb-lp3-v11-avb.dts"
+
+/ {
+	model = "Rockchip rk3326 evb board (AArch32)";
+	compatible = "rockchip,rk3326-evb-lp3-v11-avb-aarch32", "rockchip,rk3326";
+};
