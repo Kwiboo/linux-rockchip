@@ -128,6 +128,7 @@ struct sditf_priv {
 	u32 hdr_wrap_line;
 	int free_buf_delay_cnt;
 	bool is_toisp_off;
+	bool is_stopping;
 	bool is_buf_init;
 	bool is_multi_online;
 	bool is_free_thunderboot_buf;
