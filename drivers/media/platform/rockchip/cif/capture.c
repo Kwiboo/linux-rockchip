@@ -5212,12 +5212,14 @@ static void rkcif_stream_stop(struct rkcif_stream *stream)
 
 	atomic_dec_if_positive(&stream->cifdev->id_use_cnt);
 	if (cif_dev->switch_info.is_use_switch) {
+		/* Returns new value; >0 means other users remain. */
 		ret = atomic_dec_if_positive(&cif_dev->hw_dev->switch_stream_cnt[cif_dev->switch_info.host_idx]);
-		if (ret) {
+		if (ret > 0) {
 			stream->state = RKCIF_STATE_READY;
 			stream->dma_en = 0;
 			return;
 		}
+		cif_dev->switch_info.is_stream_pause = true;
 		v4l2_dbg(5, rkcif_debug, &cif_dev->v4l2_dev,
 			 "%s %d, switch dec cnt %d\n", __func__, __LINE__,
 			 atomic_read(&cif_dev->hw_dev->switch_stream_cnt[cif_dev->switch_info.host_idx]));
@@ -6370,6 +6372,10 @@ static void rkcif_clean_state_one_to_multi_mode(struct rkcif_device *dev)
 	}
 }
 
+static void rkcif_set_is_in_flip(struct rkcif_device *dev,
+				struct rkcif_stream *stream, bool in_flip);
+static void rkcif_reset_flip_state(struct rkcif_device *dev, bool in_flip);
+
 void rkcif_do_stop_stream(struct rkcif_stream *stream,
 			  enum rkcif_stream_mode mode)
 {
@@ -6537,6 +6543,15 @@ void rkcif_do_stop_stream(struct rkcif_stream *stream,
 			v4l2_err(v4l2_dev, "pipeline close failed error:%d\n", ret);
 		if (atomic_read(&dev->pipe.stream_cnt) == 0)
 			dev->can_be_reset = true;
+		/*
+		 * Do not use cancel_delayed_work_sync here: work_flip takes
+		 * quick_flip_lock -> stream_lock. Async cancel + work-side
+		 * stream_cnt check is enough.
+		 */
+		if (atomic_read(&dev->pipe.stream_cnt) == 0) {
+			cancel_delayed_work(&dev->work_flip);
+			rkcif_reset_flip_state(dev, false);
+		}
 		mutex_lock(&hw_dev->dev_lock);
 		for (i = 0; i < hw_dev->dev_num; i++) {
 			if (atomic_read(&hw_dev->cif_dev[i]->pipe.stream_cnt) != 0) {
@@ -6561,7 +6576,7 @@ void rkcif_do_stop_stream(struct rkcif_stream *stream,
 			dev->sensor_linetime = 0;
 			dev->wait_line = 0;
 			stream->is_line_wake_up = false;
-			dev->is_in_flip = false;
+			rkcif_set_is_in_flip(dev, &dev->stream[0], false);
 			dev->pre_buf_num = 0;
 			dev->hw_dev->is_in_reset = false;
 		}
@@ -7898,7 +7913,11 @@ int rkcif_do_start_stream(struct rkcif_stream *stream, enum rkcif_stream_mode mo
 		}
 		if (dev->switch_info.is_use_switch && dev->sync_cfg.type == INTERNAL_MASTER_MODE) {
 			dev->switch_info.is_active = true;
-			dev->switch_info.switch_dev->switch_info.is_active = false;
+			dev->switch_info.is_stream_pause = false;
+			if (dev->switch_info.switch_dev) {
+				dev->switch_info.switch_dev->switch_info.is_active = false;
+				dev->switch_info.switch_dev->switch_info.is_stream_pause = false;
+			}
 			rkcif_switch_change(dev, !!dev->switch_info.gpio_val);
 		}
 	}
@@ -9038,27 +9057,144 @@ void rkcif_free_buf_by_user_require(struct rkcif_device *dev)
 	dev->is_alloc_buf_user = false;
 }
 
+/* Lock order: quick_flip_lock -> stream_lock. Keep quick_flip across wait. */
+static inline void rkcif_lock_quick_stream(struct rkcif_device *dev)
+{
+	mutex_lock(&dev->quick_flip_lock);
+	mutex_lock(&dev->stream_lock);
+}
+
+static inline void rkcif_unlock_quick_stream(struct rkcif_device *dev)
+{
+	mutex_unlock(&dev->stream_lock);
+	mutex_unlock(&dev->quick_flip_lock);
+}
+
+static int rkcif_hdr_stream_num(struct rkcif_device *dev);
+static void rkcif_streams_restore_capture(struct rkcif_device *dev, int stream_num,
+					 bool clear_to_stop_dma,
+					 bool require_streaming);
+
 int rkcif_quick_stream_on(struct rkcif_device *dev, bool is_intr)
 {
+	return rkcif_quick_stream_on_locked(dev, is_intr, false);
+}
+
+static void rkcif_set_is_in_flip(struct rkcif_device *dev,
+				struct rkcif_stream *stream, bool in_flip)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&stream->vbq_lock, flags);
+	dev->is_in_flip = in_flip;
+	spin_unlock_irqrestore(&stream->vbq_lock, flags);
+}
+
+static void rkcif_clear_flip_pending(struct rkcif_device *dev)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&dev->stream[0].vbq_lock, flags);
+	memset(&dev->flip_pending, 0, sizeof(dev->flip_pending));
+	spin_unlock_irqrestore(&dev->stream[0].vbq_lock, flags);
+}
+
+static void rkcif_reset_flip_state(struct rkcif_device *dev, bool in_flip)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&dev->stream[0].vbq_lock, flags);
+	memset(&dev->flip_pending, 0, sizeof(dev->flip_pending));
+	dev->is_in_flip = in_flip;
+	spin_unlock_irqrestore(&dev->stream[0].vbq_lock, flags);
+}
+
+static void rkcif_wait_stream_stop_complete(struct rkcif_stream *cur_stream,
+					    bool drop_stream_lock)
+{
+	struct rkcif_device *dev = cur_stream->cifdev;
+
+	reinit_completion(&cur_stream->stop_complete);
+	cur_stream->is_wait_stop_complete = true;
+	if (drop_stream_lock)
+		mutex_unlock(&dev->stream_lock);
+	wait_for_completion_timeout(&cur_stream->stop_complete,
+				    msecs_to_jiffies(RKCIF_STOP_MAX_WAIT_TIME_MS));
+	if (drop_stream_lock)
+		mutex_lock(&dev->stream_lock);
+}
+
+/* Arm wait first, then set to_stop_dma — FS may act on to_stop before FE completes. */
+static void rkcif_wait_stream_stop_dma(struct rkcif_stream *cur_stream, u32 to_stop_dma)
+{
+	reinit_completion(&cur_stream->stop_complete);
+	cur_stream->is_wait_stop_complete = true;
+	cur_stream->to_stop_dma = to_stop_dma;
+	wait_for_completion_timeout(&cur_stream->stop_complete,
+				    msecs_to_jiffies(RKCIF_STOP_MAX_WAIT_TIME_MS));
+}
+
+/*
+ * flip_start toisp handling:
+ * 1) toisp not enabled: skip
+ * 2) enabled and stream already stopped (sensor_off): disable now, restore on flip_end
+ * 3) enabled and still streaming: wait FE/ISP; later enable deferred while in flip
+ */
+static void rkcif_flip_start_suspend_toisp_if_active(struct rkcif_device *dev)
+{
+	unsigned long flags;
+	bool stream_stopped;
+
+	if (!dev->sditf[0])
+		return;
+	if (dev->sditf[0]->mode.rdbk_mode >= RKISP_VICAP_RDBK_AIQ)
+		return;
+	if (READ_ONCE(dev->sditf[0]->is_toisp_off)) {
+		v4l2_dbg(3, rkcif_debug, &dev->v4l2_dev,
+			 "flip_start skip toisp, not enabled\n");
+		return;
+	}
+
+	stream_stopped = atomic_read(&dev->sensor_off) != 0;
+	if (stream_stopped) {
+		v4l2_dbg(3, rkcif_debug, &dev->v4l2_dev,
+			 "flip_start stop_path disable toisp, sensor_off %d\n",
+			 atomic_read(&dev->sensor_off));
+		sditf_disable_immediately(dev->sditf[0]);
+		WRITE_ONCE(dev->sditf[0]->is_toisp_off, true);
+		spin_lock_irqsave(&dev->stream[0].vbq_lock, flags);
+		dev->flip_pending.toisp_enable = true;
+		dev->flip_pending.priv = dev->sditf[0];
+		spin_unlock_irqrestore(&dev->stream[0].vbq_lock, flags);
+	} else {
+		v4l2_dbg(3, rkcif_debug, &dev->v4l2_dev,
+			 "flip_start streaming wait FE (no force toisp off)\n");
+	}
+}
+
+int rkcif_quick_stream_on_locked(struct rkcif_device *dev, bool is_intr,
+				 bool stream_lock_held)
+{
 	struct v4l2_subdev *sd;
-	struct rkcif_stream *stream = NULL;
+	struct rkcif_stream *stream;
 	int i = 0;
-	int stream_num = 0;
+	int stream_num;
 	int ret = 0;
 	int on = 1;
 
-	if (dev->hdr.hdr_mode == HDR_X2)
-		stream_num = 2;
-	else if (dev->hdr.hdr_mode == HDR_X3)
-		stream_num = 3;
-	else
-		stream_num = 1;
+	stream_num = rkcif_hdr_stream_num(dev);
 
-	for (i = 0; i < stream_num; i++)
-		dev->stream[i].cur_skip_frame = dev->stream[i].skip_frame;
+	/* Skip setting cur_skip_frame while in flip to avoid image corruption. */
+	for (i = 0; i < stream_num; i++) {
+		if (!dev->is_in_flip)
+			dev->stream[i].cur_skip_frame = dev->stream[i].skip_frame;
+	}
 	dev->sditf[0]->mode.rdbk_mode = dev->sditf[0]->mode_src.rdbk_mode;
 	if (dev->switch_info.is_use_switch) {
 		atomic_inc(&dev->hw_dev->switch_stream_cnt[dev->switch_info.host_idx]);
+		dev->switch_info.is_stream_pause = false;
+		if (dev->switch_info.switch_dev)
+			dev->switch_info.switch_dev->switch_info.is_stream_pause = false;
 		v4l2_dbg(5, rkcif_debug, &dev->v4l2_dev,
 			 "%s %d, switch inc cnt %d\n", __func__, __LINE__,
 			 atomic_read(&dev->hw_dev->switch_stream_cnt[dev->switch_info.host_idx]));
@@ -9068,17 +9204,34 @@ int rkcif_quick_stream_on(struct rkcif_device *dev, bool is_intr)
 			stream = &dev->stream[i];
 			if (dev->is_in_flip)
 				break;
-			if (stream->cifdev->hdr.hdr_mode == NO_HDR ||
-			    (stream->cifdev->hdr.hdr_mode == HDR_X2 && stream->id == 1) ||
-			    (stream->cifdev->hdr.hdr_mode == HDR_X3 && stream->id == 2)) {
+			if (dev->hdr.hdr_mode == NO_HDR ||
+			    (dev->hdr.hdr_mode == HDR_X2 && stream->id == 1) ||
+			    (dev->hdr.hdr_mode == HDR_X3 && stream->id == 2)) {
 				rkcif_enable_capture(stream);
 			} else {
-				dev->stream[i].to_en_dma = RKCIF_DMAEN_BY_ISP;
-				rkcif_enable_dma_capture(&dev->stream[i], true);
+				stream->to_en_dma = RKCIF_DMAEN_BY_ISP;
+				rkcif_enable_dma_capture(stream, true);
 			}
 		}
-		if (dev->chip_id == CHIP_RV1106_CIF) {
-			sditf_change_to_online(dev->sditf[0]);
+		if (dev->chip_id >= CHIP_RV1106_CIF) {
+			unsigned long flags;
+			bool defer_online = false;
+
+			spin_lock_irqsave(&dev->stream[0].vbq_lock, flags);
+			if (dev->is_in_flip) {
+				dev->flip_pending.change_to_online = true;
+				if (!dev->flip_pending.priv)
+					dev->flip_pending.priv = dev->sditf[0];
+				defer_online = true;
+			}
+			spin_unlock_irqrestore(&dev->stream[0].vbq_lock, flags);
+
+			if (defer_online) {
+				v4l2_dbg(3, rkcif_debug, &dev->v4l2_dev,
+					 "quick_stream_on defer change_to_online\n");
+			} else {
+				sditf_change_to_online(dev->sditf[0]);
+			}
 			sd = get_rkisp_sd(dev->sditf[0]);
 			if (sd)
 				ret = v4l2_subdev_call(sd, core, ioctl,
@@ -9107,7 +9260,8 @@ int rkcif_quick_stream_on(struct rkcif_device *dev, bool is_intr)
 		}
 	}
 
-	rkcif_do_soft_reset(dev);
+	if (!dev->is_in_flip)
+		rkcif_do_soft_reset(dev);
 	if (is_intr) {
 		if (atomic_read(&dev->sensor_off)) {
 			atomic_set(&dev->sensor_off, 0);
@@ -9117,14 +9271,16 @@ int rkcif_quick_stream_on(struct rkcif_device *dev, bool is_intr)
 		}
 
 	} else {
-		mutex_lock(&dev->stream_lock);
+		if (!stream_lock_held)
+			mutex_lock(&dev->stream_lock);
 		rkcif_dphy_quick_stream(dev, on);
 		if (atomic_read(&dev->sensor_off)) {
 			v4l2_subdev_call(dev->terminal_sensor.sd, core, ioctl,
 					 RKMODULE_SET_QUICK_STREAM, &on);
 			atomic_set(&dev->sensor_off, 0);
 		}
-		mutex_unlock(&dev->stream_lock);
+		if (!stream_lock_held)
+			mutex_unlock(&dev->stream_lock);
 	}
 	dev->resume_mode = RKISP_RTT_MODE_MULTI_FRAME;
 	return ret;
@@ -9136,59 +9292,42 @@ void rkcif_flip_end_wait_work(struct work_struct *work)
 	struct rkcif_device *dev = container_of(dwork,
 						struct rkcif_device,
 						work_flip);
-	int stream_num = 0;
-	int i = 0;
-	struct rkcif_stream *cur_stream = NULL;
-	unsigned long flags;
+	int stream_num;
 
-	mutex_lock(&dev->stream_lock);
-	if (dev->hdr.hdr_mode == HDR_X2)
-		stream_num = 2;
-	else if (dev->hdr.hdr_mode == HDR_X3)
-		stream_num = 3;
-	else
-		stream_num = 1;
-	if (dev->sditf[0]->mode.rdbk_mode < RKISP_VICAP_RDBK_AIQ) {
-		for (i = 0; i < stream_num; i++) {
-			cur_stream = &dev->stream[i];
-			cur_stream->is_hold_stream_off = false;
-			if (i == 0) {
-				spin_lock_irqsave(&cur_stream->vbq_lock, flags);
-				dev->is_in_flip = false;
-				spin_unlock_irqrestore(&cur_stream->vbq_lock, flags);
-			}
-			if (cur_stream->state != RKCIF_STATE_STREAMING)
-				continue;
-			if (dev->hdr.hdr_mode == NO_HDR ||
-			    (dev->hdr.hdr_mode == HDR_X2 && cur_stream->id == 1) ||
-			    (dev->hdr.hdr_mode == HDR_X3 && cur_stream->id == 2)) {
-				rkcif_enable_capture(cur_stream);
-			} else {
-				cur_stream->to_en_dma = RKCIF_DMAEN_BY_ISP;
-				rkcif_enable_dma_capture(cur_stream, true);
-			}
-		}
-	} else {
-		for (i = 0; i < stream_num; i++) {
-			cur_stream = &dev->stream[i];
-			cur_stream->is_hold_stream_off = false;
-			if (i == 0) {
-				spin_lock_irqsave(&cur_stream->vbq_lock, flags);
-				dev->is_in_flip = false;
-				spin_unlock_irqrestore(&cur_stream->vbq_lock, flags);
-			}
-			if (cur_stream->state != RKCIF_STATE_STREAMING)
-				continue;
-			if (dev->sditf[0]->mode.rdbk_mode != RKISP_VICAP_RDBK_AIQ)
-				cur_stream->to_en_dma = RKCIF_DMAEN_BY_ISP;
-			else
-				cur_stream->to_en_dma = RKCIF_DMAEN_BY_VICAP;
-			rkcif_enable_dma_capture(cur_stream, true);
-		}
+	/*
+	 * Same lock nest as FLIP_START / QUICK_STREAM: quick_flip serializes
+	 * against those paths that drop stream_lock across completion waits.
+	 */
+	rkcif_lock_quick_stream(dev);
+	/* Stream already gone: do not restore capture/toisp after flip. */
+	if (atomic_read(&dev->pipe.stream_cnt) == 0) {
+		rkcif_reset_flip_state(dev, false);
+		rkcif_unlock_quick_stream(dev);
+		return;
 	}
+
+	stream_num = rkcif_hdr_stream_num(dev);
+
+	/*
+	 * Apply pending (clears is_in_flip before dma restore).
+	 * Avoid ISP HW_LINK racing between clear and apply.
+	 */
+	v4l2_dbg(3, rkcif_debug, &dev->v4l2_dev,
+		 "flip end apply, real_skip_num %d\n",
+		 dev->stream[0].real_skip_num);
+	sditf_flip_apply_pending(dev);
+
+	/*
+	 * quick_stream_on skips soft_reset while is_in_flip; make up for it
+	 * after pending toisp restore and before enable_capture, so reset does
+	 * not land on an already-armed capture path.
+	 */
+	rkcif_do_soft_reset(dev);
+	/* flip_end: only restore STREAMING streams (match pre-extract behavior). */
+	rkcif_streams_restore_capture(dev, stream_num, false, true);
 	v4l2_dbg(3, rkcif_debug, &dev->v4l2_dev,
 		 "skip frame end, real skip num %d\n", dev->stream[0].real_skip_num);
-	mutex_unlock(&dev->stream_lock);
+	rkcif_unlock_quick_stream(dev);
 }
 
 static int rkcif_get_error_info(struct rkcif_device *cif_dev,
@@ -9243,13 +9382,366 @@ static int rkcif_get_error_info(struct rkcif_device *cif_dev,
 static int rkcif_do_reset_work(struct rkcif_device *cif_dev,
 			       enum rkmodule_reset_src reset_src);
 
+static int rkcif_hdr_stream_num(struct rkcif_device *dev)
+{
+	if (dev->hdr.hdr_mode == HDR_X2)
+		return 2;
+	if (dev->hdr.hdr_mode == HDR_X3)
+		return 3;
+	return 1;
+}
+
+static bool rkcif_switch_should_wait_stop(struct rkcif_device *dev)
+{
+	struct rkcif_device *switch_dev = dev->switch_info.switch_dev;
+
+	return !dev->switch_info.is_use_switch ||
+	       (!dev->switch_info.is_stream_pause &&
+		(!switch_dev || !switch_dev->switch_info.is_stream_pause));
+}
+
+static void rkcif_quick_stream_dec_switch_cnt_if_paused(struct rkcif_device *dev)
+{
+	struct rkcif_device *switch_dev = dev->switch_info.switch_dev;
+
+	if (dev->switch_info.is_use_switch &&
+	    (dev->switch_info.is_stream_pause ||
+	     (switch_dev && switch_dev->switch_info.is_stream_pause)))
+		atomic_dec_if_positive(&dev->hw_dev->switch_stream_cnt[dev->switch_info.host_idx]);
+}
+
+/* Shared by flip_end and AOV one-frame start. */
+static void rkcif_streams_restore_capture(struct rkcif_device *dev, int stream_num,
+					 bool clear_to_stop_dma,
+					 bool require_streaming)
+{
+	struct rkcif_stream *cur_stream;
+	int i;
+
+	if (dev->sditf[0]->mode.rdbk_mode < RKISP_VICAP_RDBK_AIQ) {
+		for (i = 0; i < stream_num; i++) {
+			cur_stream = &dev->stream[i];
+			if (clear_to_stop_dma)
+				cur_stream->to_stop_dma = 0;
+			cur_stream->is_hold_stream_off = false;
+			if (require_streaming &&
+			    cur_stream->state != RKCIF_STATE_STREAMING)
+				continue;
+			if (dev->hdr.hdr_mode == NO_HDR ||
+			    (dev->hdr.hdr_mode == HDR_X2 && cur_stream->id == 1) ||
+			    (dev->hdr.hdr_mode == HDR_X3 && cur_stream->id == 2)) {
+				rkcif_enable_capture(cur_stream);
+			} else {
+				cur_stream->to_en_dma = RKCIF_DMAEN_BY_ISP;
+				rkcif_enable_dma_capture(cur_stream, true);
+			}
+		}
+		return;
+	}
+
+	for (i = 0; i < stream_num; i++) {
+		cur_stream = &dev->stream[i];
+		if (clear_to_stop_dma)
+			cur_stream->to_stop_dma = 0;
+		cur_stream->is_hold_stream_off = false;
+		if (require_streaming &&
+		    cur_stream->state != RKCIF_STATE_STREAMING)
+			continue;
+		if (dev->sditf[0]->mode.rdbk_mode != RKISP_VICAP_RDBK_AIQ)
+			cur_stream->to_en_dma = RKCIF_DMAEN_BY_ISP;
+		else
+			cur_stream->to_en_dma = RKCIF_DMAEN_BY_VICAP;
+		rkcif_enable_dma_capture(cur_stream, true);
+	}
+}
+
+static int rkcif_cmd_set_quick_stream(struct rkcif_device *dev,
+				      struct rkcif_stream *stream,
+				      struct rkcif_quick_stream_param *param)
+{
+	struct rkcif_stream *cur_stream;
+	struct rkcif_stream *last_stream;
+	int stream_num;
+	int ret = 0;
+	int i;
+	unsigned long flags;
+
+	if (!dev->sditf[0])
+		return -EINVAL;
+
+	rkcif_lock_quick_stream(dev);
+	stream_num = rkcif_hdr_stream_num(dev);
+	last_stream = &dev->stream[stream_num - 1];
+
+	if (param->on) {
+		spin_lock_irqsave(&dev->stream_spinlock, flags);
+		if (last_stream->is_finish_single_cap) {
+			spin_unlock_irqrestore(&dev->stream_spinlock, flags);
+			ret = rkcif_quick_stream_on_locked(dev, false, true);
+			v4l2_dbg(3, rkcif_debug, &dev->v4l2_dev,
+				 "%s, finish single capture, restart now\n", __func__);
+		} else {
+			last_stream->is_wait_single_cap = true;
+			spin_unlock_irqrestore(&dev->stream_spinlock, flags);
+			v4l2_dbg(3, rkcif_debug, &dev->v4l2_dev,
+				 "%s, wait for single capture finish, and than to restart\n",
+				 __func__);
+			reinit_completion(&last_stream->start_complete);
+			mutex_unlock(&dev->stream_lock);
+			wait_for_completion_timeout(&last_stream->start_complete,
+						    msecs_to_jiffies(RKCIF_STOP_MAX_WAIT_TIME_MS));
+			mutex_lock(&dev->stream_lock);
+		}
+		for (i = 0; i < stream_num; i++) {
+			dev->stream[i].is_pause_stream = false;
+			dev->stream[i].is_hold_stream_off = false;
+		}
+		rkcif_unlock_quick_stream(dev);
+		return ret;
+	}
+
+	if (dev->sditf[0]->mode.rdbk_mode < RKISP_VICAP_RDBK_AIQ) {
+		stream->cifdev->sensor_state = param->on;
+		stream->cifdev->sensor_state_change = true;
+		for (i = 0; i < stream_num; i++) {
+			cur_stream = &dev->stream[i];
+			cur_stream->is_hold_stream_off = true;
+			if (!rkcif_switch_should_wait_stop(dev))
+				continue;
+			rkcif_wait_stream_stop_complete(cur_stream, false);
+		}
+		rkcif_quick_stream_dec_switch_cnt_if_paused(dev);
+	} else {
+		for (i = 0; i < stream_num; i++) {
+			cur_stream = &dev->stream[i];
+			cur_stream->is_hold_stream_off = true;
+			if (!rkcif_switch_should_wait_stop(dev))
+				continue;
+			if (dev->sditf[0]->mode.rdbk_mode == RKISP_VICAP_RDBK_AUTO)
+				rkcif_wait_stream_stop_dma(cur_stream, RKCIF_DMAEN_BY_ISP);
+			else
+				rkcif_wait_stream_stop_dma(cur_stream, RKCIF_DMAEN_BY_VICAP);
+		}
+		rkcif_quick_stream_dec_switch_cnt_if_paused(dev);
+		rkcif_dphy_quick_stream(dev, param->on);
+		v4l2_subdev_call(dev->terminal_sensor.sd, core, ioctl,
+				 RKMODULE_SET_QUICK_STREAM, &param->on);
+		atomic_inc(&stream->cifdev->sensor_off);
+	}
+	param->frame_num = dev->stream[0].frame_idx - 1;
+	if (!dev->is_rtt_suspend) {
+		dev->resume_mode = param->resume_mode;
+		v4l2_dbg(3, rkcif_debug, &dev->v4l2_dev,
+			 "set resume mode %d\n", dev->resume_mode);
+	}
+	rkcif_unlock_quick_stream(dev);
+	return 0;
+}
+
+static int rkcif_cmd_start_capture_one_frame_aov(struct rkcif_device *dev,
+						 struct rkcif_stream *stream)
+{
+	struct sditf_priv *priv = dev->sditf[0];
+	struct rkisp_vicap_mode vicap_mode;
+	struct v4l2_subdev *sd;
+	int stream_num;
+	int on = 1;
+	int ret = 0;
+	int i;
+
+	if (!priv)
+		return -EINVAL;
+
+	rkcif_lock_quick_stream(dev);
+	stream_num = rkcif_hdr_stream_num(dev);
+	for (i = 0; i < stream_num; i++) {
+		dev->stream[i].cur_skip_frame = dev->stream[i].skip_frame;
+		dev->stream[i].is_single_cap = true;
+		dev->stream[i].is_finish_single_cap = false;
+		dev->stream[i].is_wait_single_cap = false;
+	}
+
+	vicap_mode = priv->mode_src;
+	if (vicap_mode.rdbk_mode < RKISP_VICAP_RDBK_AIQ) {
+		if (dev->chip_id == CHIP_RV1106_CIF)
+			vicap_mode.rdbk_mode = RKISP_VICAP_RDBK_AUTO_ONE_FRAME;
+		else
+			vicap_mode.rdbk_mode = RKISP_VICAP_ONLINE_ONE_FRAME;
+	} else if (vicap_mode.rdbk_mode == RKISP_VICAP_RDBK_AIQ) {
+		vicap_mode.rdbk_mode = RKISP_VICAP_RDBK_AIQ;
+	} else {
+		vicap_mode.rdbk_mode = RKISP_VICAP_RDBK_AUTO_ONE_FRAME;
+	}
+
+	sd = get_rkisp_sd(priv);
+	if (sd) {
+		ret = v4l2_subdev_call(sd, core, ioctl,
+				       RKISP_VICAP_CMD_MODE, &vicap_mode);
+		if (ret)
+			v4l2_err(&dev->v4l2_dev,
+				 "set isp work mode %d failed\n", vicap_mode.rdbk_mode);
+		else
+			v4l2_dbg(1, rkcif_debug, &dev->v4l2_dev,
+				 "set isp work mode %d", vicap_mode.rdbk_mode);
+	}
+
+	rkcif_streams_restore_capture(dev, stream_num, true, false);
+	if (dev->sditf[0]->mode.rdbk_mode >= RKISP_VICAP_RDBK_AIQ &&
+	    dev->switch_info.is_use_switch) {
+		atomic_inc(&dev->hw_dev->switch_stream_cnt[dev->switch_info.host_idx]);
+		if (dev->sync_cfg.type == INTERNAL_MASTER_MODE) {
+			dev->switch_info.is_active = true;
+			dev->switch_info.is_stream_pause = false;
+			if (dev->switch_info.switch_dev) {
+				dev->switch_info.switch_dev->switch_info.is_active = false;
+				dev->switch_info.switch_dev->switch_info.is_stream_pause = false;
+			}
+			rkcif_switch_change(dev, !!dev->switch_info.gpio_val);
+		}
+	}
+
+	rkcif_dphy_quick_stream(dev, on);
+	v4l2_subdev_call(dev->terminal_sensor.sd, core, ioctl,
+			 RKMODULE_SET_QUICK_STREAM, &on);
+	atomic_set(&stream->cifdev->sensor_off, 0);
+	rkcif_unlock_quick_stream(dev);
+	return 0;
+}
+
+static int rkcif_cmd_set_sensor_flip_start(struct rkcif_device *dev)
+{
+	struct rkcif_stream *cur_stream;
+	int stream_num;
+	int i;
+
+	rkcif_lock_quick_stream(dev);
+	stream_num = rkcif_hdr_stream_num(dev);
+
+	if (atomic_read(&dev->sensor_off)) {
+		for (i = 0; i < stream_num; i++)
+			dev->stream[i].real_skip_num = 0;
+		if (dev->sditf[0]->mode.rdbk_mode < RKISP_VICAP_RDBK_AIQ) {
+			for (i = 0; i < stream_num; i++) {
+				cur_stream = &dev->stream[i];
+				if (cur_stream->state != RKCIF_STATE_STREAMING)
+					continue;
+				if (!(cur_stream->dma_en & (RKCIF_DMAEN_BY_ISP |
+							    RKCIF_DMAEN_BY_VICAP)))
+					continue;
+				cur_stream->is_hold_stream_off = true;
+				v4l2_dbg(3, rkcif_debug, &dev->v4l2_dev,
+					 "flip sensor_off wait stream[%d] stop, dma_en 0x%x\n",
+					 i, cur_stream->dma_en);
+				rkcif_wait_stream_stop_complete(cur_stream, true);
+			}
+		}
+		rkcif_clear_flip_pending(dev);
+		rkcif_flip_start_suspend_toisp_if_active(dev);
+		rkcif_set_is_in_flip(dev, &dev->stream[0], true);
+		v4l2_dbg(3, rkcif_debug, &dev->v4l2_dev,
+			 "flip start (sensor_off), toisp_pending %d\n",
+			 dev->flip_pending.toisp_enable);
+		rkcif_unlock_quick_stream(dev);
+		return 0;
+	}
+
+	if (dev->is_in_flip) {
+		v4l2_err(&dev->v4l2_dev, "last flip ops not finish\n");
+		rkcif_unlock_quick_stream(dev);
+		return -EBUSY;
+	}
+
+	if (dev->sditf[0]->mode.rdbk_mode < RKISP_VICAP_RDBK_AIQ) {
+		for (i = 0; i < stream_num; i++) {
+			cur_stream = &dev->stream[i];
+			if (cur_stream->state != RKCIF_STATE_STREAMING)
+				continue;
+			cur_stream->is_hold_stream_off = true;
+			rkcif_wait_stream_stop_complete(cur_stream, false);
+			if (i == 0) {
+				rkcif_clear_flip_pending(dev);
+				rkcif_flip_start_suspend_toisp_if_active(dev);
+				rkcif_set_is_in_flip(dev, cur_stream, true);
+				v4l2_dbg(3, rkcif_debug, &dev->v4l2_dev,
+					 "flip start, toisp_pending %d\n",
+					 dev->flip_pending.toisp_enable);
+			}
+		}
+	} else {
+		for (i = 0; i < stream_num; i++) {
+			cur_stream = &dev->stream[i];
+			if (cur_stream->state != RKCIF_STATE_STREAMING)
+				continue;
+			cur_stream->is_hold_stream_off = true;
+			if (dev->sditf[0]->mode.rdbk_mode != RKISP_VICAP_RDBK_AIQ)
+				rkcif_wait_stream_stop_dma(cur_stream, RKCIF_DMAEN_BY_ISP);
+			else
+				rkcif_wait_stream_stop_dma(cur_stream, RKCIF_DMAEN_BY_VICAP);
+			if (i == 0) {
+				rkcif_clear_flip_pending(dev);
+				rkcif_set_is_in_flip(dev, cur_stream, true);
+			}
+		}
+	}
+	rkcif_unlock_quick_stream(dev);
+	return 0;
+}
+
+static int rkcif_cmd_set_sensor_flip_end(struct rkcif_stream *stream, int flip_skip)
+{
+	struct rkcif_device *dev = stream->cifdev;
+	int stream_num;
+	int i;
+	int line_time;
+	u64 tline;
+	u64 delay_ms;
+	u32 vblank;
+
+	rkcif_lock_quick_stream(dev);
+	stream_num = rkcif_hdr_stream_num(dev);
+	if (flip_skip) {
+		/*
+		 * Online toisp: capture is disabled during the flip window,
+		 * so no FS is generated; delay_ms already covers the skip.
+		 * Do not set cur_skip_frame again, or SOF will be skipped
+		 * extra frames after flip end. Keep AIQ skip for rdbk/DMA.
+		 */
+		if (dev->sditf[0] &&
+		    dev->sditf[0]->mode.rdbk_mode < RKISP_VICAP_RDBK_AIQ) {
+			for (i = 0; i < stream_num; i++)
+				dev->stream[i].cur_skip_frame = 0;
+		} else {
+			for (i = 0; i < stream_num; i++)
+				dev->stream[i].cur_skip_frame = flip_skip;
+		}
+		line_time = rkcif_get_linetime(stream);
+		if (line_time < 0) {
+			delay_ms = 1;
+		} else {
+			tline = line_time;
+			tline = div_u64(tline, 1000);
+			vblank = rkcif_get_sensor_vblank(dev);
+			delay_ms = tline * flip_skip * (vblank + stream->pixm.height);
+			delay_ms = div_u64(delay_ms, 1000);
+			if (!delay_ms)
+				delay_ms = 1;
+		}
+	} else {
+		delay_ms = 1;
+	}
+	schedule_delayed_work(&dev->work_flip, msecs_to_jiffies(delay_ms));
+	v4l2_dbg(3, rkcif_debug, &dev->v4l2_dev,
+		 "flip end scheduled, skip %d cur_skip %d delay_ms %llu\n",
+		 flip_skip, dev->stream[0].cur_skip_frame, delay_ms);
+	rkcif_unlock_quick_stream(dev);
+	return 0;
+}
+
 static long rkcif_ioctl_default(struct file *file, void *fh,
 				bool valid_prio, unsigned int cmd, void *arg)
 {
 	struct rkcif_stream *stream = video_drvdata(file);
 	struct rkcif_device *dev = stream->cifdev;
-	struct sditf_priv *priv = dev->sditf[0];
-	struct rkcif_stream *cur_stream = NULL;
 	const struct cif_input_fmt *in_fmt;
 	struct v4l2_rect rect;
 	struct csi_channel_info csi_info;
@@ -9257,19 +9749,8 @@ static long rkcif_ioctl_default(struct file *file, void *fh,
 	struct rkcif_buffer_info *buf_info = NULL;
 	struct rkmodule_capture_info *capture_info;
 	int reset_src;
-	struct rkcif_quick_stream_param *stream_param;
 	int ret = 0;
 	int i = 0;
-	int stream_num = 0;
-	int on = 0;
-	struct rkcif_stream *last_stream = NULL;
-	unsigned long flags;
-	int flip_skip = 0;
-	u32 tline = 0;
-	u32 delay_ms = 0;
-	u32 vblank = 0;
-	struct rkisp_vicap_mode vicap_mode;
-	struct v4l2_subdev *sd = NULL;
 	struct rkmodule_error_info *err_info;
 
 	switch (cmd) {
@@ -9322,158 +9803,9 @@ static long rkcif_ioctl_default(struct file *file, void *fh,
 			return 0;
 		return rkcif_do_reset_work(dev, reset_src);
 	case RKCIF_CMD_SET_QUICK_STREAM:
-		stream_param = (struct rkcif_quick_stream_param *)arg;
-		if (!dev->sditf[0])
-			return -EINVAL;
-		if (dev->hdr.hdr_mode == HDR_X2) {
-			stream_num = 2;
-			last_stream = &dev->stream[1];
-		} else if (dev->hdr.hdr_mode == HDR_X3) {
-			stream_num = 3;
-			last_stream = &dev->stream[2];
-		} else {
-			stream_num = 1;
-			last_stream = &dev->stream[0];
-		}
-		if (stream_param->on) {
-			spin_lock_irqsave(&dev->stream_spinlock, flags);
-			if (last_stream->is_finish_single_cap) {
-				spin_unlock_irqrestore(&dev->stream_spinlock, flags);
-				ret = rkcif_quick_stream_on(dev, false);
-				v4l2_dbg(3, rkcif_debug, &dev->v4l2_dev,
-					 "%s %d, finish single capture, restart now\n", __func__, __LINE__);
-			} else {
-				last_stream->is_wait_single_cap = true;
-				spin_unlock_irqrestore(&dev->stream_spinlock, flags);
-				v4l2_dbg(3, rkcif_debug, &dev->v4l2_dev,
-					 "%s %d, wait for single capture finish, and than to restart\n", __func__, __LINE__);
-				reinit_completion(&last_stream->start_complete);
-				wait_for_completion_timeout(&last_stream->start_complete,
-							    msecs_to_jiffies(RKCIF_STOP_MAX_WAIT_TIME_MS));
-			}
-			stream->is_pause_stream = false;
-			stream->is_hold_stream_off = false;
-		} else {
-			if (dev->sditf[0]->mode.rdbk_mode < RKISP_VICAP_RDBK_AIQ) {
-				stream->cifdev->sensor_state = stream_param->on;
-				stream->cifdev->sensor_state_change = true;
-				for (i = 0; i < stream_num; i++) {
-					cur_stream = &dev->stream[i];
-					reinit_completion(&cur_stream->stop_complete);
-					cur_stream->is_wait_stop_complete = true;
-					stream->is_hold_stream_off = true;
-					wait_for_completion_timeout(&cur_stream->stop_complete,
-								    msecs_to_jiffies(RKCIF_STOP_MAX_WAIT_TIME_MS));
-				}
-			} else {
-				for (i = 0; i < stream_num; i++) {
-					cur_stream = &dev->stream[i];
-					cur_stream->is_wait_stop_complete = true;
-					stream->is_hold_stream_off = true;
-					reinit_completion(&cur_stream->stop_complete);
-					if (dev->sditf[0]->mode.rdbk_mode == RKISP_VICAP_RDBK_AUTO)
-						cur_stream->to_stop_dma = RKCIF_DMAEN_BY_ISP;
-					else
-						cur_stream->to_stop_dma = RKCIF_DMAEN_BY_VICAP;
-					wait_for_completion_timeout(&cur_stream->stop_complete,
-								    msecs_to_jiffies(RKCIF_STOP_MAX_WAIT_TIME_MS));
-				}
-				mutex_lock(&stream->cifdev->stream_lock);
-				rkcif_dphy_quick_stream(dev, stream_param->on);
-				v4l2_subdev_call(dev->terminal_sensor.sd, core, ioctl,
-						 RKMODULE_SET_QUICK_STREAM, &stream_param->on);
-				atomic_inc(&stream->cifdev->sensor_off);
-				mutex_unlock(&stream->cifdev->stream_lock);
-			}
-			stream_param->frame_num = dev->stream[0].frame_idx - 1;
-			if (!dev->is_rtt_suspend) {
-				dev->resume_mode = stream_param->resume_mode;
-				v4l2_dbg(3, rkcif_debug, &dev->v4l2_dev,
-					 "set resume mode %d\n", dev->resume_mode);
-			}
-		}
-		break;
+		return rkcif_cmd_set_quick_stream(dev, stream, arg);
 	case RKCIF_CMD_START_CAPTURE_ONE_FRAME_AOV:
-		if (!dev->sditf[0])
-			return -EINVAL;
-		if (dev->hdr.hdr_mode == HDR_X2)
-			stream_num = 2;
-		else if (dev->hdr.hdr_mode == HDR_X3)
-			stream_num = 3;
-		else
-			stream_num = 1;
-		for (i = 0; i < stream_num; i++) {
-			dev->stream[i].cur_skip_frame = dev->stream[i].skip_frame;
-			dev->stream[i].is_single_cap = true;
-			stream->is_finish_single_cap = false;
-			stream->is_wait_single_cap = false;
-		}
-		vicap_mode = priv->mode_src;
-		if (vicap_mode.rdbk_mode < RKISP_VICAP_RDBK_AIQ) {
-			if (dev->chip_id == CHIP_RV1106_CIF)
-				vicap_mode.rdbk_mode = RKISP_VICAP_RDBK_AUTO_ONE_FRAME;
-			else
-				vicap_mode.rdbk_mode = RKISP_VICAP_ONLINE_ONE_FRAME;
-		} else if (vicap_mode.rdbk_mode == RKISP_VICAP_RDBK_AIQ) {
-			vicap_mode.rdbk_mode = RKISP_VICAP_RDBK_AIQ;
-		} else {
-			vicap_mode.rdbk_mode = RKISP_VICAP_RDBK_AUTO_ONE_FRAME;
-		}
-
-		sd = get_rkisp_sd(priv);
-		if (sd) {
-			ret = v4l2_subdev_call(sd, core, ioctl,
-					       RKISP_VICAP_CMD_MODE, &vicap_mode);
-			if (ret)
-				v4l2_err(&dev->v4l2_dev,
-					 "set isp work mode %d failed\n", vicap_mode.rdbk_mode);
-			else
-				v4l2_dbg(1, rkcif_debug, &dev->v4l2_dev,
-					 "set isp work mode %d", vicap_mode.rdbk_mode);
-		}
-
-		if (dev->sditf[0]->mode.rdbk_mode < RKISP_VICAP_RDBK_AIQ) {
-			for (i = 0; i < stream_num; i++) {
-				cur_stream = &dev->stream[i];
-				cur_stream->to_stop_dma = 0;
-				cur_stream->is_hold_stream_off = false;
-				if (dev->hdr.hdr_mode == NO_HDR ||
-				    (dev->hdr.hdr_mode == HDR_X2 && cur_stream->id == 1) ||
-				    (dev->hdr.hdr_mode == HDR_X3 && cur_stream->id == 2)) {
-					rkcif_enable_capture(cur_stream);
-				} else {
-					cur_stream->to_en_dma = RKCIF_DMAEN_BY_ISP;
-					rkcif_enable_dma_capture(cur_stream, true);
-				}
-			}
-		} else {
-			for (i = 0; i < stream_num; i++) {
-				cur_stream = &dev->stream[i];
-				cur_stream->to_stop_dma = 0;
-				if (dev->sditf[0]->mode.rdbk_mode != RKISP_VICAP_RDBK_AIQ)
-					cur_stream->to_en_dma = RKCIF_DMAEN_BY_ISP;
-				else
-					cur_stream->to_en_dma = RKCIF_DMAEN_BY_VICAP;
-				rkcif_enable_dma_capture(cur_stream, true);
-				cur_stream->is_hold_stream_off = false;
-			}
-			if (dev->switch_info.is_use_switch) {
-				atomic_inc(&dev->hw_dev->switch_stream_cnt[dev->switch_info.host_idx]);
-				if (dev->sync_cfg.type == INTERNAL_MASTER_MODE) {
-					dev->switch_info.is_active = true;
-					dev->switch_info.switch_dev->switch_info.is_active = false;
-					rkcif_switch_change(dev, !!dev->switch_info.gpio_val);
-				}
-			}
-		}
-		mutex_lock(&stream->cifdev->stream_lock);
-		on = 1;
-		rkcif_dphy_quick_stream(dev, on);
-		v4l2_subdev_call(dev->terminal_sensor.sd, core, ioctl,
-				 RKMODULE_SET_QUICK_STREAM, &on);
-		atomic_set(&stream->cifdev->sensor_off, 0);
-		mutex_unlock(&stream->cifdev->stream_lock);
-		break;
+		return rkcif_cmd_start_capture_one_frame_aov(dev, stream);
 	case RKCIF_CMD_ALLOC_BUF:
 		buf_info = (struct rkcif_buffer_info *)arg;
 		if (buf_info == NULL)
@@ -9512,85 +9844,9 @@ static long rkcif_ioctl_default(struct file *file, void *fh,
 			  "set capture mode %d\n", dev->channels[0].capture_info.mode);
 		break;
 	case RKCIF_CMD_SET_SENSOR_FLIP_START:
-		mutex_lock(&dev->stream_lock);
-		if (dev->hdr.hdr_mode == HDR_X2)
-			stream_num = 2;
-		else if (dev->hdr.hdr_mode == HDR_X3)
-			stream_num = 3;
-		else
-			stream_num = 1;
-		if (atomic_read(&dev->sensor_off)) {
-			for (i = 0; i < stream_num; i++) {
-				cur_stream = &dev->stream[i];
-				cur_stream->real_skip_num = 0;
-				cur_stream->is_hold_stream_off = true;
-			}
-			spin_lock_irqsave(&cur_stream->vbq_lock, flags);
-			dev->is_in_flip = true;
-			spin_unlock_irqrestore(&cur_stream->vbq_lock, flags);
-			mutex_unlock(&dev->stream_lock);
-			return 0;
-		}
-		if (dev->is_in_flip) {
-			v4l2_err(&dev->v4l2_dev, "last flip ops not finish\n");
-			mutex_unlock(&dev->stream_lock);
-			return -EBUSY;
-		}
-		if (dev->sditf[0]->mode.rdbk_mode < RKISP_VICAP_RDBK_AIQ) {
-			for (i = 0; i < stream_num; i++) {
-				cur_stream = &dev->stream[i];
-				if (cur_stream->state != RKCIF_STATE_STREAMING)
-					continue;
-				cur_stream->is_hold_stream_off = true;
-				reinit_completion(&cur_stream->stop_complete);
-				cur_stream->is_wait_stop_complete = true;
-				wait_for_completion_timeout(&cur_stream->stop_complete,
-							    msecs_to_jiffies(RKCIF_STOP_MAX_WAIT_TIME_MS));
-				if (i == 0) {
-					spin_lock_irqsave(&cur_stream->vbq_lock, flags);
-					dev->is_in_flip = true;
-					spin_unlock_irqrestore(&cur_stream->vbq_lock, flags);
-				}
-			}
-		} else {
-			for (i = 0; i < stream_num; i++) {
-				cur_stream = &dev->stream[i];
-				if (cur_stream->state != RKCIF_STATE_STREAMING)
-					continue;
-				cur_stream->is_wait_stop_complete = true;
-				cur_stream->is_hold_stream_off = true;
-				reinit_completion(&cur_stream->stop_complete);
-				if (dev->sditf[0]->mode.rdbk_mode != RKISP_VICAP_RDBK_AIQ)
-					cur_stream->to_stop_dma = RKCIF_DMAEN_BY_ISP;
-				else
-					cur_stream->to_stop_dma = RKCIF_DMAEN_BY_VICAP;
-				wait_for_completion_timeout(&cur_stream->stop_complete,
-							    msecs_to_jiffies(RKCIF_STOP_MAX_WAIT_TIME_MS));
-				if (i == 0) {
-					spin_lock_irqsave(&cur_stream->vbq_lock, flags);
-					dev->is_in_flip = true;
-					spin_unlock_irqrestore(&cur_stream->vbq_lock, flags);
-				}
-			}
-		}
-		mutex_unlock(&dev->stream_lock);
-		break;
+		return rkcif_cmd_set_sensor_flip_start(dev);
 	case RKCIF_CMD_SET_SENSOR_FLIP_END:
-		mutex_lock(&dev->stream_lock);
-		flip_skip = *(int *)arg;
-		if (flip_skip) {
-			tline = rkcif_get_linetime(stream);
-			tline = div_u64(tline, 1000);
-			vblank = rkcif_get_sensor_vblank(dev);
-			delay_ms = tline * (flip_skip * (vblank + stream->pixm.height));
-			delay_ms = div_u64(delay_ms, 1000);
-		} else {
-			delay_ms = 1;
-		}
-		schedule_delayed_work(&dev->work_flip, msecs_to_jiffies(delay_ms));
-		v4l2_dbg(3, rkcif_debug, &dev->v4l2_dev, "flip delay_ms %d\n", delay_ms);
-		mutex_unlock(&dev->stream_lock);
-		break;
+		return rkcif_cmd_set_sensor_flip_end(stream, *(int *)arg);
 	case RKCIF_CMD_SUPPORT_GET_EXP:
 		if (*(int *)arg)
 			dev->is_support_get_exp = true;
@@ -12528,6 +12784,25 @@ void rkcif_enable_dma_capture(struct rkcif_stream *stream, bool is_only_enable)
 	u32 val = 0;
 	u32 uncompact = 0;
 
+	if (cif_dev->is_in_flip && stream->to_en_dma) {
+		unsigned long flags;
+		u32 to_en_dma;
+
+		spin_lock_irqsave(&cif_dev->stream[0].vbq_lock, flags);
+		if (cif_dev->is_in_flip && stream->to_en_dma) {
+			to_en_dma = stream->to_en_dma;
+			cif_dev->flip_pending.dma_mask |= BIT(stream->id);
+			cif_dev->flip_pending.to_en_dma[stream->id] |= to_en_dma;
+			stream->to_en_dma = 0;
+			spin_unlock_irqrestore(&cif_dev->stream[0].vbq_lock, flags);
+			v4l2_dbg(3, rkcif_debug, &cif_dev->v4l2_dev,
+				 "defer dma enable, stream[%d] to_en_dma 0x%x\n",
+				 stream->id, to_en_dma);
+			return;
+		}
+		spin_unlock_irqrestore(&cif_dev->stream[0].vbq_lock, flags);
+	}
+
 	if (stream->buf_owner == RKCIF_DMAEN_BY_ISP)
 		stream->buf_owner = RKCIF_DMAEN_BY_ISP_TO_VICAP;
 
@@ -13295,14 +13570,16 @@ static void rkcif_toisp_check_stop_status(struct sditf_priv *priv,
 						rkcif_stop_dma_capture(stream);
 					}
 				}
-				if (stream->cifdev->switch_info.is_use_switch)
+				if (stream->cifdev->switch_info.is_use_switch) {
+					stream->cifdev->switch_info.is_stream_pause = true;
 					v4l2_dbg(5, rkcif_debug, &stream->cifdev->v4l2_dev,
 						 "%s %d, switch dec cnt %d\n", __func__, __LINE__,
 						 atomic_read(&stream->cifdev->hw_dev->switch_stream_cnt[stream->cifdev->switch_info.host_idx]));
+				}
 				stream->is_wait_stop_complete = false;
 				complete(&stream->stop_complete);
 			}
-			if (stream->cur_skip_frame &&
+			if (stream->cur_skip_frame && !stream->cifdev->is_in_flip &&
 			    (stream->cifdev->hdr.hdr_mode == NO_HDR ||
 			     (stream->cifdev->hdr.hdr_mode == HDR_X2 && stream->id == 1) ||
 			     (stream->cifdev->hdr.hdr_mode == HDR_X3 && stream->id == 2)))
@@ -13315,8 +13592,14 @@ static void rkcif_toisp_check_stop_status(struct sditf_priv *priv,
 					  "stream[%d] toisp fe %d\n",
 					  stream->id,
 					  stream->frame_idx - 1);
-			if (priv->mode.rdbk_mode == RKISP_VICAP_ONLINE_UNITE ||
-			    priv->mode.rdbk_mode == RKISP_VICAP_ONLINE_MULTI)
+			/*
+			 * Mark toisp off on FE for one-shot / multi / unite online.
+			 * Do not include continuous RKISP_VICAP_ONLINE: that would
+			 * leave is_toisp_off stuck true while HW is still streaming.
+			 */
+			if (priv->mode.rdbk_mode == RKISP_VICAP_ONLINE_ONE_FRAME ||
+			    priv->mode.rdbk_mode == RKISP_VICAP_ONLINE_MULTI ||
+			    priv->mode.rdbk_mode == RKISP_VICAP_ONLINE_UNITE)
 				WRITE_ONCE(priv->is_toisp_off, true);
 
 			rkcif_deal_readout_time(stream);
@@ -13976,7 +14259,8 @@ int rkcif_stream_suspend(struct rkcif_device *cif_dev, int mode)
 			suspend_cnt++;
 			v4l2_dbg(1, rkcif_debug, &cif_dev->v4l2_dev,
 				 "stream[%d] stopping\n", stream->id);
-			if (!stream->is_pause_stream) {
+			if (!stream->is_pause_stream &&
+			    rkcif_switch_should_wait_stop(cif_dev)) {
 				stream->stopping = true;
 				ret = wait_event_timeout(stream->wq_stopped,
 							 stream->state != RKCIF_STATE_STREAMING,
@@ -14166,13 +14450,18 @@ int rkcif_stream_resume(struct rkcif_device *cif_dev, int mode)
 		if (cif_dev->switch_info.is_use_switch) {
 			if (atomic_read(&cif_dev->hw_dev->switch_stream_cnt[cif_dev->switch_info.host_idx]) == 0) {
 				tmp_stream = stream;
-				if (cif_dev->switch_info.switch_dev->switch_info.is_init_buf)
+				if (cif_dev->switch_info.switch_dev &&
+				    cif_dev->switch_info.switch_dev->switch_info.is_init_buf)
 					tmp_stream = &cif_dev->switch_info.switch_dev->stream[stream->id];
 				rkcif_clean_buffer_state(tmp_stream);
 			}
 			if (cif_dev->sync_cfg.type == INTERNAL_MASTER_MODE) {
 				cif_dev->switch_info.is_active = true;
-				cif_dev->switch_info.switch_dev->switch_info.is_active = false;
+				cif_dev->switch_info.is_stream_pause = false;
+				if (cif_dev->switch_info.switch_dev) {
+					cif_dev->switch_info.switch_dev->switch_info.is_active = false;
+					cif_dev->switch_info.switch_dev->switch_info.is_stream_pause = false;
+				}
 				rkcif_switch_change(cif_dev, !!cif_dev->switch_info.gpio_val);
 			}
 		} else {
@@ -14552,6 +14841,67 @@ void rkcif_switch_change(struct rkcif_device *cif_dev, bool is_switch)
 	}
 }
 
+/*
+ * rdbk/DMA FE ping-pong: flip is_active and GPIO to the camera that is about
+ * to capture. Online toisp keeps GPIO/is_active in sditf_enable instead.
+ */
+static void rkcif_switch_fe_pingpong(struct rkcif_device *cif_dev)
+{
+	struct rkcif_device *switch_dev = cif_dev->switch_info.switch_dev;
+	bool to_switch_dev = cif_dev->switch_info.is_active;
+	struct rkcif_device *next = to_switch_dev ? switch_dev : cif_dev;
+
+	if (atomic_read(&next->sensor_off) != 0 &&
+	    cif_dev->resume_mode != RKISP_RTT_MODE_ONE_FRAME)
+		return;
+
+	cif_dev->switch_info.is_active = !to_switch_dev;
+	switch_dev->switch_info.is_active = to_switch_dev;
+	rkcif_switch_change(cif_dev, !!next->switch_info.gpio_val);
+}
+
+/* Pick stream/buf_stream for switch dual-cam FE; ping-pong only in rdbk/DMA. */
+static void rkcif_switch_fe_select_stream(struct rkcif_device *cif_dev,
+					 int mipi_id,
+					 struct rkcif_stream **stream,
+					 struct rkcif_stream **buf_stream)
+{
+	struct rkcif_device *switch_dev;
+	bool online_toisp;
+	bool active;
+
+	if (!cif_dev->switch_info.is_use_switch) {
+		*stream = &cif_dev->stream[mipi_id];
+		*buf_stream = *stream;
+		return;
+	}
+
+	switch_dev = cif_dev->switch_info.switch_dev;
+	if (!switch_dev) {
+		*stream = &cif_dev->stream[mipi_id];
+		*buf_stream = *stream;
+		return;
+	}
+	online_toisp = cif_dev->sditf[0] &&
+		cif_dev->sditf[0]->mode.rdbk_mode < RKISP_VICAP_RDBK_AIQ;
+	active = cif_dev->switch_info.is_active;
+
+	v4l2_dbg(5, rkcif_debug, &cif_dev->v4l2_dev,
+		 "%s: is_active=%d sensor_off=%d online_toisp=%d\n",
+		 __func__, active, atomic_read(&cif_dev->sensor_off), online_toisp);
+
+	*stream = active ? &cif_dev->stream[mipi_id]
+			 : &switch_dev->stream[mipi_id];
+
+	if (!online_toisp)
+		rkcif_switch_fe_pingpong(cif_dev);
+
+	if (cif_dev->switch_info.is_init_buf)
+		*buf_stream = &cif_dev->stream[(*stream)->id];
+	else
+		*buf_stream = &switch_dev->stream[(*stream)->id];
+}
+
 static void rkcif_sync_sof_to_isp(struct rkcif_stream *stream)
 {
 	struct rkcif_device *cif_dev = stream->cifdev;
@@ -14694,38 +15044,8 @@ void rkcif_irq_pingpong_v1(struct rkcif_device *cif_dev)
 			if (mipi_id < 0)
 				continue;
 
-			if (cif_dev->switch_info.is_use_switch) {
-				v4l2_dbg(5, rkcif_debug, &cif_dev->v4l2_dev,
-					 "%s %d: switch_info.is_use_switch = %d, is_active = %d, sensor_off = %d\n",
-					 __func__, __LINE__,
-					 cif_dev->switch_info.is_use_switch,
-					 cif_dev->switch_info.is_active,
-					 atomic_read(&cif_dev->sensor_off));
-				if (cif_dev->switch_info.is_active) {
-					stream = &cif_dev->stream[mipi_id];
-					if (atomic_read(&cif_dev->switch_info.switch_dev->sensor_off) == 0 ||
-					    cif_dev->resume_mode == RKISP_RTT_MODE_ONE_FRAME) {
-						cif_dev->switch_info.is_active = false;
-						cif_dev->switch_info.switch_dev->switch_info.is_active = true;
-						rkcif_switch_change(cif_dev, !!cif_dev->switch_info.switch_dev->switch_info.gpio_val);
-					}
-				} else {
-					stream = &cif_dev->switch_info.switch_dev->stream[mipi_id];
-					if (atomic_read(&cif_dev->sensor_off) == 0 ||
-					    cif_dev->resume_mode == RKISP_RTT_MODE_ONE_FRAME) {
-						cif_dev->switch_info.is_active = true;
-						cif_dev->switch_info.switch_dev->switch_info.is_active = false;
-						rkcif_switch_change(cif_dev, !!cif_dev->switch_info.gpio_val);
-					}
-				}
-				if (cif_dev->switch_info.is_init_buf)
-					buf_stream = &cif_dev->stream[stream->id];
-				else
-					buf_stream = &cif_dev->switch_info.switch_dev->stream[stream->id];
-			} else {
-				stream = &cif_dev->stream[mipi_id];
-				buf_stream = stream;
-			}
+			rkcif_switch_fe_select_stream(cif_dev, mipi_id,
+						      &stream, &buf_stream);
 
 			if (!cif_dev->sditf[0] ||
 			    cif_dev->sditf[0]->mode.rdbk_mode >= RKISP_VICAP_RDBK_AIQ)
@@ -14810,7 +15130,7 @@ void rkcif_irq_pingpong_v1(struct rkcif_device *cif_dev)
 					is_update = true;
 				else
 					is_update = rkcif_check_buffer_prepare(stream);
-				if (is_update)
+				if (is_update && !stream->cifdev->is_in_flip)
 					rkcif_update_stream_toisp(cif_dev, stream, mipi_id);
 			} else if (stream->dma_en & RKCIF_DMAEN_BY_ROCKIT) {
 				v4l2_dbg(4, rkcif_debug, &cif_dev->v4l2_dev,
@@ -14898,6 +15218,8 @@ void rkcif_irq_pingpong_v1(struct rkcif_device *cif_dev)
 
 			if (stream->is_finish_stop_dma && stream->is_wait_stop_complete) {
 				stream->is_wait_stop_complete = false;
+				if (stream->cifdev->switch_info.is_use_switch)
+					stream->cifdev->switch_info.is_stream_pause = true;
 				complete(&stream->stop_complete);
 			}
 
@@ -14918,7 +15240,7 @@ void rkcif_irq_pingpong_v1(struct rkcif_device *cif_dev)
 				stream->is_line_inten = false;
 			}
 
-			if (stream->cur_skip_frame)
+			if (stream->cur_skip_frame && !stream->cifdev->is_in_flip)
 				stream->cur_skip_frame--;
 			if (stream->to_en_scale) {
 				stream->to_en_scale = false;
