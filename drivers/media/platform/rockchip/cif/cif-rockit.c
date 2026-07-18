@@ -11,6 +11,48 @@
 
 static struct rockit_rkcif_cfg *rockit_rkcif_cfg;
 
+/*
+ * Rockit buffer lifecycle trace. Enable with:
+ *   echo 3 > /sys/module/video_rkcif/parameters/debug
+ * dma_addr is the stable id to follow one buf across add/del/rel/done.
+ *
+ * Caller must hold stream->vbq_lock: walks rockit_buf_head and reads
+ * curr_buf_rockit / next_buf_rockit.
+ */
+void rkcif_rockit_trace(struct rkcif_stream *stream, const char *op,
+			const char *site, struct rkcif_buffer *buf, int phase)
+{
+	struct rkcif_buffer *entry;
+	int list_n = 0;
+	char list_buf[128];
+	int pos = 0;
+
+	if (!stream || !stream->cifdev || rkcif_debug < 3)
+		return;
+
+	list_buf[0] = '\0';
+	list_for_each_entry(entry, &stream->rockit_buf_head, queue) {
+		if (pos < (int)sizeof(list_buf) - 12)
+			pos += scnprintf(list_buf + pos, sizeof(list_buf) - pos,
+					"%s0x%x", list_n ? "," : "",
+					entry->buff_addr[RKCIF_PLANE_Y]);
+		list_n++;
+	}
+
+	v4l2_dbg(3, rkcif_debug, &stream->cifdev->v4l2_dev,
+		 "rockit %s: stream[%d] dma_addr=0x%x @%s ph=%d curr_dma=0x%x next_dma=0x%x ln=%d[%s] cnt=%d lack=%d st=%d cc=%d dma_en=0x%x\n",
+		 op, stream->id,
+		 buf ? buf->buff_addr[RKCIF_PLANE_Y] : 0,
+		 site, phase,
+		 stream->curr_buf_rockit ?
+			stream->curr_buf_rockit->buff_addr[RKCIF_PLANE_Y] : 0,
+		 stream->next_buf_rockit ?
+			stream->next_buf_rockit->buff_addr[RKCIF_PLANE_Y] : 0,
+		 list_n, list_buf, atomic_read(&stream->buf_cnt),
+		 stream->lack_buf_cnt, stream->buf_state.state,
+		 stream->buf_state.check_cnt, stream->dma_en);
+}
+
 struct rkcif_rockit_buffer {
 	struct rkcif_buffer cif_buf;
 	struct dma_buf *dmabuf;
@@ -77,6 +119,7 @@ int rkcif_rockit_buf_queue(struct rockit_rkcif_cfg *input_rockit_cfg)
 {
 	struct rkcif_stream *stream = NULL;
 	struct rkcif_rockit_buffer *rkcif_buf = NULL;
+	struct rkcif_buffer *cif_buf = NULL;
 	struct rkcif_device *cif_dev = NULL;
 	const struct vb2_mem_ops *g_ops = NULL;
 	int i, ret, offset, dev_id;
@@ -84,6 +127,7 @@ int rkcif_rockit_buf_queue(struct rockit_rkcif_cfg *input_rockit_cfg)
 	void *mem = NULL;
 	struct sg_table  *sg_tbl;
 	unsigned long lock_flags = 0;
+	bool already_queued = false;
 
 	stream = rkcif_rockit_get_stream(input_rockit_cfg);
 
@@ -131,6 +175,7 @@ int rkcif_rockit_buf_queue(struct rockit_rkcif_cfg *input_rockit_cfg)
 
 		rkcif_buf = stream_cfg->rkcif_buff[i];
 		rkcif_buf->mpi_buf = input_rockit_cfg->mpibuf;
+		INIT_LIST_HEAD(&rkcif_buf->cif_buf.queue);
 
 		mem = g_ops->attach_dmabuf(stream->cifdev->hw_dev->dev,
 					   input_rockit_cfg->buf,
@@ -161,6 +206,9 @@ int rkcif_rockit_buf_queue(struct rockit_rkcif_cfg *input_rockit_cfg)
 		}
 	}
 
+	if (!rkcif_buf)
+		return -EINVAL;
+
 	for (i = 0; i < stream->cif_fmt_out->mplanes; i++)
 		rkcif_buf->cif_buf.buff_addr[i] = rkcif_buf->buff_addr;
 
@@ -173,14 +221,37 @@ int rkcif_rockit_buf_queue(struct rockit_rkcif_cfg *input_rockit_cfg)
 	}
 
 	v4l2_dbg(2, rkcif_debug, &cif_dev->v4l2_dev,
-		 "stream:%d rockit_queue buf:0x%x\n",
+		 "stream:%d rockit_queue dma_addr=0x%x\n",
 		 stream->id, rkcif_buf->cif_buf.buff_addr[0]);
 
 	if (stream_cfg->is_discard)
 		return -EINVAL;
 
 	spin_lock_irqsave(&stream->vbq_lock, lock_flags);
+	/* still owned by dma, ignore duplicate queue */
+	if (stream->curr_buf_rockit == &rkcif_buf->cif_buf ||
+	    stream->next_buf_rockit == &rkcif_buf->cif_buf) {
+		rkcif_rockit_trace(stream, "rej-pp", "queue",
+				   &rkcif_buf->cif_buf, 0);
+		spin_unlock_irqrestore(&stream->vbq_lock, lock_flags);
+		return 0;
+	}
+
+	list_for_each_entry(cif_buf, &stream->rockit_buf_head, queue) {
+		if (cif_buf == &rkcif_buf->cif_buf) {
+			already_queued = true;
+			break;
+		}
+	}
+	if (already_queued) {
+		rkcif_rockit_trace(stream, "rej-aq", "queue",
+				   &rkcif_buf->cif_buf, 0);
+		spin_unlock_irqrestore(&stream->vbq_lock, lock_flags);
+		return 0;
+	}
+
 	list_add_tail(&rkcif_buf->cif_buf.queue, &stream->rockit_buf_head);
+	rkcif_rockit_trace(stream, "add", "queue", &rkcif_buf->cif_buf, 0);
 	spin_unlock_irqrestore(&stream->vbq_lock, lock_flags);
 
 	atomic_inc(&stream->buf_cnt);
@@ -197,6 +268,7 @@ int rkcif_rockit_buf_done(struct rkcif_stream *stream, struct rkcif_buffer *buf)
 	struct rkcif_rockit_buffer *rkcif_buf = NULL;
 	struct rkcif_stream_cfg *stream_cfg = NULL;
 	u32 dev_id = stream->cifdev->csi_host_idx;
+	unsigned long flags;
 
 	if (!rockit_rkcif_cfg ||
 	    !rockit_rkcif_cfg->rkcif_rockit_mpibuf_done ||
@@ -228,17 +300,21 @@ int rkcif_rockit_buf_done(struct rkcif_stream *stream, struct rkcif_buffer *buf)
 
 	rockit_rkcif_cfg->node = stream_cfg->node;
 
+	spin_lock_irqsave(&stream->vbq_lock, flags);
 	if (list_empty(&stream->rockit_buf_head))
 		rockit_rkcif_cfg->is_empty = true;
 	else
 		rockit_rkcif_cfg->is_empty = false;
+	rkcif_rockit_trace(stream, "done", "irq", buf, 0);
+	spin_unlock_irqrestore(&stream->vbq_lock, flags);
 
 	if (rockit_rkcif_cfg->rkcif_rockit_mpibuf_done) {
 		rockit_rkcif_cfg->rkcif_rockit_mpibuf_done(rockit_rkcif_cfg);
 		atomic_dec(&stream->buf_cnt);
 	} else {
-		v4l2_err(&dev->v4l2_dev, "%s %d, stream[%d] rockit buf done 0x%x fail, %p\n",
-			 __func__, __LINE__, stream->id, rkcif_buf->cif_buf.buff_addr[0], rockit_rkcif_cfg->rkcif_rockit_mpibuf_done);
+		v4l2_err(&dev->v4l2_dev,
+			 "rockit done fail: stream[%d] dma_addr=0x%x no mpibuf_done\n",
+			 stream->id, rkcif_buf->cif_buf.buff_addr[0]);
 	}
 
 	return 0;

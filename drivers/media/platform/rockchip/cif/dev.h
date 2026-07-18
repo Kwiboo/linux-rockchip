@@ -1181,6 +1181,9 @@ void rkcif_dphy_quick_stream(struct rkcif_device *dev, int on);
 
 void rkcif_check_buffer_update_pingpong_rockit(struct rkcif_stream *stream,
 					       int channel_id);
+/* Caller must hold stream->vbq_lock (walks rockit_buf_head). */
+void rkcif_rockit_trace(struct rkcif_stream *stream, const char *op,
+			const char *site, struct rkcif_buffer *buf, int phase);
 
 int rkcif_quick_stream_on(struct rkcif_device *dev, bool is_intr);
 

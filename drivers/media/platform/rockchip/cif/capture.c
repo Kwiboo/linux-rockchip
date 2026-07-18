@@ -3437,6 +3437,8 @@ static void rkcif_assign_new_buffer_init_rockit(struct rkcif_stream *stream,
 			stream->curr_buf_rockit = list_first_entry(&stream->rockit_buf_head,
 							    struct rkcif_buffer,
 							    queue);
+			rkcif_rockit_trace(stream, "del", "init-f0",
+					   stream->curr_buf_rockit, CIF_CSI_FRAME0_READY);
 			list_del(&stream->curr_buf_rockit->queue);
 		}
 	}
@@ -3473,6 +3475,8 @@ static void rkcif_assign_new_buffer_init_rockit(struct rkcif_stream *stream,
 			if (!list_empty(&stream->rockit_buf_head)) {
 				stream->next_buf_rockit = list_first_entry(&stream->rockit_buf_head,
 								    struct rkcif_buffer, queue);
+				rkcif_rockit_trace(stream, "del", "init-f1",
+						   stream->next_buf_rockit, CIF_CSI_FRAME1_READY);
 				list_del(&stream->next_buf_rockit->queue);
 			}
 		}
@@ -3491,6 +3495,8 @@ static void rkcif_assign_new_buffer_init_rockit(struct rkcif_stream *stream,
 			} else {
 				if (stream->curr_buf_rockit) {
 					stream->next_buf_rockit = stream->curr_buf_rockit;
+					rkcif_rockit_trace(stream, "alias", "init-f1",
+							   stream->curr_buf_rockit, CIF_CSI_FRAME1_READY);
 					rkcif_write_register(dev, frm1_addr_y,
 							     stream->next_buf_rockit->buff_addr[RKCIF_PLANE_Y]);
 					if (stream->cif_fmt_out->fmt_type != CIF_FMT_TYPE_RAW)
@@ -3572,6 +3578,9 @@ static int rkcif_assign_new_buffer_update_rockit(struct rkcif_stream *stream,
 			stream->buf_state.state = RKCIF_BUF_ROTATE;
 		else
 			stream->buf_state.state = RKCIF_BUF_LOSS;
+		rkcif_rockit_trace(stream,
+				   stream->buf_state.state == RKCIF_BUF_ROTATE ? "rot" : "loss",
+				   "assign-entry", NULL, stream->frame_phase);
 		if (!dummy_buf->vaddr &&
 		    stream->curr_buf_rockit == stream->next_buf_rockit &&
 		    (rkcif_get_interlace_mode(stream) != RKCIF_INTERLACE_SOFT ||
@@ -3579,22 +3588,22 @@ static int rkcif_assign_new_buffer_update_rockit(struct rkcif_stream *stream,
 			ret = -EINVAL;
 
 		if (stream->frame_phase == CIF_CSI_FRAME0_READY) {
-			if (!stream->curr_buf_rockit)
-				ret = -EINVAL;
 			stream->curr_buf_rockit = list_first_entry(&stream->rockit_buf_head,
 							    struct rkcif_buffer, queue);
 			if (stream->curr_buf_rockit) {
+				rkcif_rockit_trace(stream, "del", "assign-f0",
+						   stream->curr_buf_rockit, CIF_CSI_FRAME0_READY);
 				list_del(&stream->curr_buf_rockit->queue);
 				buffer = stream->curr_buf_rockit;
 			}
 		} else if (stream->frame_phase == CIF_CSI_FRAME1_READY) {
-			if (!stream->next_buf_rockit)
-				ret = -EINVAL;
 			if (rkcif_get_interlace_mode(stream) == RKCIF_INTERLACE_SOFT ||
 			    rkcif_get_interlace_mode(stream) == RKCIF_INTERLACE_SOFT_AUTO) {
 				if (stream->next_buf_rockit != stream->curr_buf_rockit) {
 					stream->next_buf_rockit = stream->curr_buf_rockit;
 					buffer = stream->next_buf_rockit;
+					rkcif_rockit_trace(stream, "alias", "assign-f1",
+							   buffer, CIF_CSI_FRAME1_READY);
 				} else {
 					buffer = NULL;
 				}
@@ -3603,11 +3612,15 @@ static int rkcif_assign_new_buffer_update_rockit(struct rkcif_stream *stream,
 				stream->next_buf_rockit = list_first_entry(&stream->rockit_buf_head,
 								    struct rkcif_buffer, queue);
 				if (stream->next_buf_rockit) {
+					rkcif_rockit_trace(stream, "del", "assign-f1",
+							   stream->next_buf_rockit, CIF_CSI_FRAME1_READY);
 					list_del(&stream->next_buf_rockit->queue);
 					buffer = stream->next_buf_rockit;
 				}
 			}
 		}
+		if (buffer && stream->lack_buf_cnt)
+			stream->lack_buf_cnt--;
 	} else {
 		buffer = NULL;
 		if (dummy_buf->vaddr) {
@@ -3631,10 +3644,14 @@ static int rkcif_assign_new_buffer_update_rockit(struct rkcif_stream *stream,
 				stream->next_buf_rockit = stream->curr_buf_rockit;
 				buffer = stream->curr_buf_rockit;
 			}
+			rkcif_rockit_trace(stream, "swap", "assign-THESAME", buffer,
+					   stream->frame_phase);
 			if (stream->lack_buf_cnt < 2)
 				stream->lack_buf_cnt++;
 			stream->buf_state.state = RKCIF_BUF_THESAME;
 		} else {
+			rkcif_rockit_trace(stream, "loss", "assign-empty", NULL,
+					   stream->frame_phase);
 			stream->curr_buf_rockit = NULL;
 			stream->next_buf_rockit = NULL;
 			if (stream->lack_buf_cnt < 2)
@@ -3704,6 +3721,9 @@ void rkcif_check_buffer_update_pingpong_rockit(struct rkcif_stream *stream,
 	bool is_dual_update_buf = false;
 	int on = 1;
 
+	spin_lock_irqsave(&stream->vbq_lock, flags);
+
+	/* read buf_state under vbq_lock, mutual exclusion with assign */
 	if (stream->state != RKCIF_STATE_STREAMING ||
 	    rkcif_get_interlace_mode(stream) == RKCIF_INTERLACE_SOFT ||
 	    rkcif_get_interlace_mode(stream) == RKCIF_INTERLACE_SOFT_AUTO ||
@@ -3711,8 +3731,11 @@ void rkcif_check_buffer_update_pingpong_rockit(struct rkcif_stream *stream,
 	    (stream->buf_state.state == RKCIF_BUF_THESAME &&
 	     stream->buf_state.check_cnt >= 1) ||
 	    (stream->buf_state.state == RKCIF_BUF_LOSS &&
-	     stream->buf_state.check_cnt >= 2))
+	     stream->buf_state.check_cnt >= 2)) {
+		rkcif_rockit_trace(stream, "skip", "check", NULL, stream->frame_phase_cache);
+		spin_unlock_irqrestore(&stream->vbq_lock, flags);
 		return;
+	}
 
 	frame_phase = stream->frame_phase_cache;
 	if (stream->buf_state.state == RKCIF_BUF_LOSS) {
@@ -3725,7 +3748,6 @@ void rkcif_check_buffer_update_pingpong_rockit(struct rkcif_stream *stream,
 				frame_phase = CIF_CSI_FRAME0_READY;
 		}
 	}
-	spin_lock_irqsave(&stream->vbq_lock, flags);
 	if (stream->curr_buf_rockit == stream->next_buf_rockit ||
 	    stream->curr_buf_rockit == NULL ||
 	    stream->next_buf_rockit == NULL) {
@@ -3756,23 +3778,35 @@ void rkcif_check_buffer_update_pingpong_rockit(struct rkcif_stream *stream,
 					stream->curr_buf_rockit = list_first_entry(&stream->rockit_buf_head,
 										   struct rkcif_buffer, queue);
 					if (stream->curr_buf_rockit) {
+						rkcif_rockit_trace(stream, "del", "check-f0",
+								   stream->curr_buf_rockit,
+								   CIF_CSI_FRAME0_READY);
 						list_del(&stream->curr_buf_rockit->queue);
 						buffer = stream->curr_buf_rockit;
 					}
-					if (buffer && is_dual_update_buf)
+					if (buffer && is_dual_update_buf) {
 						stream->next_buf_rockit = buffer;
+						rkcif_rockit_trace(stream, "dual", "check-f0", buffer,
+								   CIF_CSI_FRAME0_READY);
+					}
 				} else if (frame_phase == CIF_CSI_FRAME1_READY) {
 					stream->next_buf_rockit = list_first_entry(&stream->rockit_buf_head,
 										   struct rkcif_buffer, queue);
 					if (stream->next_buf_rockit) {
+						rkcif_rockit_trace(stream, "del", "check-f1",
+								   stream->next_buf_rockit,
+								   CIF_CSI_FRAME1_READY);
 						list_del(&stream->next_buf_rockit->queue);
 						buffer = stream->next_buf_rockit;
 					}
-					if (buffer && is_dual_update_buf)
+					if (buffer && is_dual_update_buf) {
 						stream->curr_buf_rockit = buffer;
+						rkcif_rockit_trace(stream, "dual", "check-f1", buffer,
+								   CIF_CSI_FRAME1_READY);
+					}
 				}
 			} else {
-				v4l2_info(&dev->v4l2_dev, "%s %d\n", __func__, __LINE__);
+				rkcif_rockit_trace(stream, "empty", "check", NULL, frame_phase);
 			}
 			if (buffer) {
 				if (is_dual_update_buf) {
@@ -3806,22 +3840,26 @@ void rkcif_check_buffer_update_pingpong_rockit(struct rkcif_stream *stream,
 				 "%s %d, is_wake_up %d, frame_idx %d\n",
 				 __func__, __LINE__, stream->is_line_wake_up, stream->frame_idx);
 			if (stream->curr_buf_rockit == stream->next_buf_rockit) {
-				if (stream->frame_phase_cache == CIF_CSI_FRAME0_READY) {
+				if (stream->frame_phase_cache == CIF_CSI_FRAME0_READY &&
+				    !list_empty(&stream->rockit_buf_head)) {
 					stream->curr_buf_rockit = list_first_entry(&stream->rockit_buf_head,
 										   struct rkcif_buffer, queue);
-					v4l2_dbg(3, rkcif_debug, &dev->v4l2_dev,
-						 "%s %d, stream[%d] buf idx %d\n",
-						 __func__, __LINE__, stream->id, stream->curr_buf_rockit->vb.vb2_buf.index);
-					if (stream->curr_buf_rockit)
+					if (stream->curr_buf_rockit) {
+						rkcif_rockit_trace(stream, "del", "check-wake-f0",
+								   stream->curr_buf_rockit,
+								   CIF_CSI_FRAME0_READY);
 						list_del(&stream->curr_buf_rockit->queue);
-				} else if (stream->frame_phase_cache == CIF_CSI_FRAME1_READY) {
+					}
+				} else if (stream->frame_phase_cache == CIF_CSI_FRAME1_READY &&
+					   !list_empty(&stream->rockit_buf_head)) {
 					stream->next_buf_rockit = list_first_entry(&stream->rockit_buf_head,
 										   struct rkcif_buffer, queue);
-					v4l2_dbg(4, rkcif_debug, &dev->v4l2_dev,
-						 "%s %d, stream[%d] buf idx %d\n",
-						 __func__, __LINE__, stream->id, stream->next_buf_rockit->vb.vb2_buf.index);
-					if (stream->next_buf_rockit)
+					if (stream->next_buf_rockit) {
+						rkcif_rockit_trace(stream, "del", "check-wake-f1",
+								   stream->next_buf_rockit,
+								   CIF_CSI_FRAME1_READY);
 						list_del(&stream->next_buf_rockit->queue);
+					}
 				}
 				stream->is_buf_active = true;
 			}
@@ -3851,8 +3889,7 @@ void rkcif_check_buffer_update_pingpong_rockit(struct rkcif_stream *stream,
 			stream->lack_buf_cnt--;
 
 	} else {
-		v4l2_info(&dev->v4l2_dev, "%s %d, state %d, curr_buf_rockit %p, next_buf_rockit %p\n",
-			  __func__, __LINE__, stream->state, stream->curr_buf_rockit, stream->next_buf_rockit);
+		rkcif_rockit_trace(stream, "skip", "check-owned", NULL, frame_phase);
 	}
 	spin_unlock_irqrestore(&stream->vbq_lock, flags);
 	if (stream->to_en_dma) {
@@ -11424,17 +11461,27 @@ static void rkcif_update_stream_rockit(struct rkcif_device *cif_dev,
 		return;
 	}
 	if (!stream->is_line_wake_up) {
-
-		spin_lock_irqsave(&stream->fps_lock, flags);
+		spin_lock_irqsave(&stream->vbq_lock, flags);
 		if (stream->frame_phase & CIF_CSI_FRAME0_READY) {
 			if (stream->curr_buf_rockit)
-				active_buf = stream->curr_buf_rockit;
-			stream->fps_stats.frm0_timestamp = rkcif_time_get_ns(cif_dev);
+				rkcif_rockit_trace(stream, "rel", "irq-f0",
+						   stream->curr_buf_rockit, CIF_CSI_FRAME0_READY);
+			active_buf = stream->curr_buf_rockit;
+			stream->curr_buf_rockit = NULL;
 		} else if (stream->frame_phase & CIF_CSI_FRAME1_READY) {
 			if (stream->next_buf_rockit)
-				active_buf = stream->next_buf_rockit;
-			stream->fps_stats.frm1_timestamp = rkcif_time_get_ns(cif_dev);
+				rkcif_rockit_trace(stream, "rel", "irq-f1",
+						   stream->next_buf_rockit, CIF_CSI_FRAME1_READY);
+			active_buf = stream->next_buf_rockit;
+			stream->next_buf_rockit = NULL;
 		}
+		spin_unlock_irqrestore(&stream->vbq_lock, flags);
+
+		spin_lock_irqsave(&stream->fps_lock, flags);
+		if (stream->frame_phase & CIF_CSI_FRAME0_READY)
+			stream->fps_stats.frm0_timestamp = rkcif_time_get_ns(cif_dev);
+		else if (stream->frame_phase & CIF_CSI_FRAME1_READY)
+			stream->fps_stats.frm1_timestamp = rkcif_time_get_ns(cif_dev);
 		spin_unlock_irqrestore(&stream->fps_lock, flags);
 	}
 
@@ -12501,6 +12548,10 @@ void rkcif_enable_dma_capture(struct rkcif_stream *stream, bool is_only_enable)
 			rkcif_assign_new_buffer_pingpong_toisp(stream,
 							       RKCIF_YUV_ADDR_STATE_INIT,
 							       stream->id);
+		else if (stream->to_en_dma == RKCIF_DMAEN_BY_ROCKIT)
+			rkcif_assign_new_buffer_pingpong_rockit(stream,
+								RKCIF_YUV_ADDR_STATE_INIT,
+								stream->id);
 		rkcif_write_register(cif_dev, get_reg_index_of_frm0_y_vlw(stream->id),
 				     channel->virtual_width);
 	}
