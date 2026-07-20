@@ -21,6 +21,7 @@
 #include "rockchip_trcm.h"
 
 #define DMA_GUARD_BUFFER_SIZE		64
+#define MAX_FIFO_SIZE			32 /* max fifo size in frames */
 
 static unsigned int prealloc_buffer_size_kbytes = 512;
 module_param(prealloc_buffer_size_kbytes, uint, 0444);
@@ -48,6 +49,8 @@ struct dmaengine_trcm_runtime_data {
 	unsigned int frame_bytes;
 	unsigned int channels;
 	int stream;
+
+	bool start_flag;
 };
 
 static inline ssize_t trcm_channels_to_bytes(struct dmaengine_trcm_runtime_data *prtd,
@@ -221,7 +224,9 @@ static snd_pcm_uframes_t dmaengine_trcm_pointer(
 	struct snd_pcm_substream *substream)
 {
 	struct dmaengine_trcm_runtime_data *prtd = substream_to_prtd(substream);
+	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct dma_tx_state state;
+	snd_pcm_uframes_t frames;
 	unsigned int buf_size;
 	unsigned int pos = 0;
 
@@ -230,7 +235,24 @@ static snd_pcm_uframes_t dmaengine_trcm_pointer(
 	if (state.residue > 0 && state.residue <= buf_size)
 		pos = buf_size - state.residue;
 
-	return trcm_bytes_to_frames(prtd, pos);
+	frames = trcm_bytes_to_frames(prtd, pos);
+
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		return frames;
+
+	if (!prtd->start_flag && frames >= MAX_FIFO_SIZE)
+		prtd->start_flag = true;
+
+	if (prtd->start_flag) {
+		if (frames >= MAX_FIFO_SIZE)
+			frames -= MAX_FIFO_SIZE;
+		else
+			frames = runtime->buffer_size + frames - MAX_FIFO_SIZE;
+	} else {
+		frames = 0;
+	}
+
+	return frames;
 }
 
 static void dmaengine_trcm_dma_complete(void *arg)
@@ -336,13 +358,16 @@ static int dmaengine_trcm_trigger(struct snd_soc_component *component,
 			dmaengine_pause(prtd->dma_chan);
 		else
 			dmaengine_terminate_async(prtd->dma_chan);
+		prtd->start_flag = false;
 		break;
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 		dmaengine_pause(prtd->dma_chan);
+		prtd->start_flag = false;
 		break;
 	case SNDRV_PCM_TRIGGER_STOP:
 		dmaengine_terminate_async(prtd->dma_chan);
 		dmaengine_trcm_dma_guard_ctrl(component, substream->stream, 1);
+		prtd->start_flag = false;
 		break;
 	default:
 		return -EINVAL;
