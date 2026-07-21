@@ -31,6 +31,7 @@ static const struct flash_info eon_parts[] = {
 			     SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ | SPI_NOR_4B_OPCODES) },
 	{ "en25qx64a", INFO(0x1c7117, 0, 64 * 1024, 128,
 			     SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ) },
+	{ "en25sx128a", INFO(0x1c7818, 0, 64 * 1024,  256, SECT_4K | SPI_NOR_QUAD_READ) },
 };
 
 const struct spi_nor_manufacturer spi_nor_eon = {
