@@ -460,6 +460,7 @@ dtb-$(CONFIG_ARCH_ROCKCHIP) += rv1126b-evb2-v12-aov-dual-cam-spi-nor.dtb
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rv1126b-evb2-v12-cvr.dtb
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rv1126b-evb2-v12-dv.dtb
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rv1126b-evb2-v12-fastboot-emmc.dtb
+dtb-$(CONFIG_ARCH_ROCKCHIP) += rv1126b-evb2-v12-fastboot-emmc-ahd.dtb
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rv1126b-evb2-v12-fastboot-spi-nand.dtb
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rv1126b-evb2-v12-fastboot-spi-nand-ahd.dtb
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rv1126b-evb2-v12-fastboot-spi-nor.dtb
