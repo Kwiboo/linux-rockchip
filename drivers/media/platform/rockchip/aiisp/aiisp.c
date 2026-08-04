@@ -926,7 +926,7 @@ static int rkaiisp_queue_ispbuf(struct rkaiisp_device *aidev, union rkaiisp_queu
 	v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev,
 		"idxbuf fifo in: %d\n", sequence);
 
-	if (hw_dev->is_idle) {
+	if (hw_dev->is_idle && !aidev->is_suspend) {
 		hw_dev->cur_dev_id = aidev->dev_id;
 		hw_dev->is_idle = false;
 		spin_unlock_irqrestore(&hw_dev->hw_lock, flags);
@@ -1870,6 +1870,7 @@ void rkaiisp_trigger(struct rkaiisp_device *aidev)
 	struct rkaiisp_hw_dev *hw_dev = aidev->hw_dev;
 	struct rkaiisp_ispbuf_info *ispbuf = &aidev->ispbuf;
 	unsigned long flags;
+	bool suspend_sync;
 	int sequence = 0;
 
 	if (aidev->exealgo == AIRMS)
@@ -1891,13 +1892,27 @@ void rkaiisp_trigger(struct rkaiisp_device *aidev)
 
 			spin_lock_irqsave(&hw_dev->hw_lock, flags);
 			hw_dev->is_idle = true;
+			suspend_sync = aidev->suspend_sync;
 			spin_unlock_irqrestore(&hw_dev->hw_lock, flags);
+			if (suspend_sync)
+				complete(&aidev->pm_cmpl);
 			return;
 		}
 		spin_lock_irqsave(&hw_dev->hw_lock, flags);
 		aidev->hwstate = HW_RUNNING;
 		spin_unlock_irqrestore(&hw_dev->hw_lock, flags);
 		rkaiisp_run_start(aidev);
+	} else {
+		spin_lock_irqsave(&hw_dev->hw_lock, flags);
+		if (aidev->hwstate == HW_STOP) {
+			hw_dev->is_idle = true;
+			suspend_sync = aidev->suspend_sync;
+		} else {
+			suspend_sync = false;
+		}
+		spin_unlock_irqrestore(&hw_dev->hw_lock, flags);
+		if (suspend_sync)
+			complete(&aidev->pm_cmpl);
 	}
 }
 
@@ -2431,6 +2446,7 @@ int rkaiisp_register_vdev(struct rkaiisp_device *aidev, struct v4l2_device *v4l2
 	rkaiisp_init_vdev(aidev);
 	video_set_drvdata(vdev, aidev);
 	init_waitqueue_head(&aidev->sync_onoff);
+	init_completion(&aidev->pm_cmpl);
 
 	node->pad.flags = MEDIA_PAD_FL_SOURCE;
 	ret = media_entity_pads_init(&vdev->entity, 0, &node->pad);

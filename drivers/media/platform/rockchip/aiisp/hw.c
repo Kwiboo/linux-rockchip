@@ -52,15 +52,24 @@ static irqreturn_t hw_irq_hdl(int irq, void *ctx)
 
 	mis_val = readl(base + AIISP_MI_MIS);
 	if (mis_val) {
+		if (!aidev) {
+			writel(mis_val, base + AIISP_MI_ICR);
+			dev_err(dev, "no active device for irq %#x\n", mis_val);
+			return IRQ_HANDLED;
+		}
+
 		irq_hdl_ret = rkaiisp_irq_hdl(aidev, mis_val);
 		if (irq_hdl_ret == RUN_COMPLETE) {
+			struct rkaiisp_device *done_aidev = aidev;
+			bool suspend_sync;
+
 			spin_lock(&hw_dev->hw_lock);
 			for (i = 0; i < RKAIISP_DEV_MAX; i++) {
 				aidev = hw_dev->aidev[i];
 				if (!aidev)
 					continue;
 
-				if (!aidev->streamon)
+				if (!aidev->streamon || aidev->is_suspend)
 					continue;
 
 				len[i] = rkaiisp_get_idxbuf_len(aidev);
@@ -74,14 +83,20 @@ static irqreturn_t hw_irq_hdl(int irq, void *ctx)
 				hw_dev->is_idle = false;
 				hw_dev->cur_dev_id = id;
 				aidev = hw_dev->aidev[hw_dev->cur_dev_id];
-				spin_unlock(&hw_dev->hw_lock);
+			} else {
+				hw_dev->is_idle = true;
+			}
+			suspend_sync = done_aidev->suspend_sync;
+			spin_unlock(&hw_dev->hw_lock);
+
+			if (suspend_sync)
+				complete(&done_aidev->pm_cmpl);
+
+			if (max > 0) {
 				v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev,
 					"trigger aidev: %d, idxbuf len: %d\n",
 					hw_dev->cur_dev_id, max);
 				rkaiisp_trigger(aidev);
-			} else {
-				hw_dev->is_idle = true;
-				spin_unlock(&hw_dev->hw_lock);
 			}
 		}
 	}

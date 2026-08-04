@@ -5,6 +5,7 @@
 #define _RKAIISP_DEV_H
 
 #include <linux/clk.h>
+#include <linux/completion.h>
 #include <linux/media.h>
 #include <linux/mutex.h>
 #include <linux/rk-video-format.h>
@@ -168,9 +169,12 @@ struct rkaiisp_device {
 	u32 isr_wrend_cnt;
 
 	bool streamon;
+	bool is_suspend;
+	bool suspend_sync;
 	bool showreg;
 	bool init_buf;
 	bool is_state_err;
+	struct completion pm_cmpl;
 
 	u8 iq_parambuf_num;
 };

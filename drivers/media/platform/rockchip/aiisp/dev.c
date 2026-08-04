@@ -22,6 +22,7 @@
 #include "procfs.h"
 
 #define RKAIISP_VERNO_LEN		10
+#define RKAIISP_PM_TIMEOUT_MS		500
 
 int rkaiisp_debug;
 module_param_named(debug, rkaiisp_debug, int, 0644);
@@ -216,7 +217,88 @@ static int __maybe_unused rkaiisp_runtime_resume(struct device *dev)
 	return (ret > 0) ? 0 : ret;
 }
 
+static void rkaiisp_resume_pending(struct rkaiisp_device *aidev)
+{
+	struct rkaiisp_hw_dev *hw_dev = aidev->hw_dev;
+	unsigned long flags = 0;
+	bool trigger = false;
+
+	spin_lock_irqsave(&hw_dev->hw_lock, flags);
+	aidev->is_suspend = false;
+	aidev->suspend_sync = false;
+	if (aidev->streamon && hw_dev->is_idle &&
+	    !kfifo_is_empty(&aidev->idxbuf_kfifo)) {
+		hw_dev->cur_dev_id = aidev->dev_id;
+		hw_dev->is_idle = false;
+		trigger = true;
+	}
+	spin_unlock_irqrestore(&hw_dev->hw_lock, flags);
+
+	if (trigger) {
+		v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev,
+			 "system resume trigger queued frame\n");
+		rkaiisp_trigger(aidev);
+	}
+}
+
+static int rkaiisp_pm_prepare(struct device *dev)
+{
+	struct rkaiisp_device *aidev = dev_get_drvdata(dev);
+	struct rkaiisp_hw_dev *hw_dev = aidev->hw_dev;
+	unsigned long flags = 0;
+	bool wait = false;
+	unsigned long time;
+
+	v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev,
+		 "system suspend prepare\n");
+
+	spin_lock_irqsave(&hw_dev->hw_lock, flags);
+	aidev->is_suspend = true;
+	if (!hw_dev->is_idle && hw_dev->cur_dev_id == aidev->dev_id) {
+		reinit_completion(&aidev->pm_cmpl);
+		aidev->suspend_sync = true;
+		wait = true;
+	}
+	spin_unlock_irqrestore(&hw_dev->hw_lock, flags);
+
+	if (!wait) {
+		v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev,
+			 "system suspend no active frame\n");
+		return 0;
+	}
+
+	v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev,
+		 "system suspend wait current frame\n");
+
+	time = wait_for_completion_timeout(&aidev->pm_cmpl,
+					   msecs_to_jiffies(RKAIISP_PM_TIMEOUT_MS));
+	if (!time) {
+		v4l2_err(&aidev->v4l2_dev,
+			  "system suspend continues after frame timeout: %d ms, dev_id %d, hwstate %d\n",
+			 RKAIISP_PM_TIMEOUT_MS, aidev->dev_id, aidev->hwstate);
+	} else {
+		v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev,
+			 "system suspend current frame completed\n");
+	}
+
+	spin_lock_irqsave(&hw_dev->hw_lock, flags);
+	aidev->suspend_sync = false;
+	spin_unlock_irqrestore(&hw_dev->hw_lock, flags);
+	return 0;
+}
+
+static void rkaiisp_pm_complete(struct device *dev)
+{
+	struct rkaiisp_device *aidev = dev_get_drvdata(dev);
+
+	v4l2_dbg(1, rkaiisp_debug, &aidev->v4l2_dev,
+		 "system resume complete\n");
+	rkaiisp_resume_pending(aidev);
+}
+
 static const struct dev_pm_ops rkaiisp_plat_pm_ops = {
+	.prepare = rkaiisp_pm_prepare,
+	.complete = rkaiisp_pm_complete,
 	SET_RUNTIME_PM_OPS(rkaiisp_runtime_suspend, rkaiisp_runtime_resume, NULL)
 };
 
