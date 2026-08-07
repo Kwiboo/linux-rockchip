@@ -495,6 +495,8 @@ static irqreturn_t inno_hdmi_phy_irq(int irq, void *dev_id)
 
 #define FREF 24000000
 #define FFBD_FRAC_MAX 16777216
+#define INNO_HDMI_PHY_MAX_PIXEL_CLOCK 600000000
+#define INNO_HDMI_PHY_MAX_TMDS_CHAR_RATE 600000000
 
 static int inno_hdmi_phy_pll_cal(struct inno_hdmi_phy *inno, struct pre_pll_config *cfg,
 				 u64 pixelclk, u64 tmdsclock)
@@ -514,11 +516,6 @@ static int inno_hdmi_phy_pll_cal(struct inno_hdmi_phy *inno, struct pre_pll_conf
 	bool frac_cal = false;
 
 	dev_dbg(inno->dev, "pixelclk:%llu,tmdsclock:%llu\n", pixelclk, tmdsclock);
-
-	if (pixelclk > tmdsclock && pixelclk < 340000000) {
-		dev_dbg(inno->dev, "hdmi1.4 resolution can't support yuv420 mode\n");
-		return 0;
-	}
 
 	if (inno->plat_data->dev_type == INNO_HDMI_PHY_RK3228)
 		frac_supported = false;
@@ -772,7 +769,7 @@ static int inno_hdmi_phy_power_on(struct phy *phy)
 		return -EINVAL;
 
 	dev_dbg(inno->dev, "Inno HDMI PHY Power On\n");
-	inno_hdmi_phy_clk_set_rate(&inno->hw, inno->pixclock, 0);
+	inno_hdmi_phy_clk_set_rate(&inno->hw, inno->pixclock, FREF);
 
 	if (inno->plat_data->ops->power_on)
 		return inno->plat_data->ops->power_on(inno, cfg, phy_cfg);
@@ -787,7 +784,6 @@ static int inno_hdmi_phy_power_off(struct phy *phy)
 	if (inno->plat_data->ops->power_off)
 		inno->plat_data->ops->power_off(inno);
 
-	inno->tmdsclock = 0;
 	dev_dbg(inno->dev, "Inno HDMI PHY Power Off\n");
 
 	return 0;
@@ -923,13 +919,19 @@ static int inno_hdmi_phy_clk_prepare(struct clk_hw *hw)
 		inno_update_bits(inno, 0xa0, 1, 0);
 
 	/*
-	 * If pixclock has been previously configured, restore the saved rate;
-	 * otherwise, default to 74.25MHz.
+	 * Restore the PLL after resume only if the cached configuration is
+	 * still consistent with the current bus width: converting the cached
+	 * pixel clock with the current bus width must reproduce the TMDS
+	 * clock of the last successful configuration. During a mode switch
+	 * the new bus width may be applied before the new pixel clock, so
+	 * restoring the old rate would calculate a wrong TMDS clock.
 	 */
-	if (inno->pixclock)
+	if (!inno->pixclock)
+		ret = inno_hdmi_phy_clk_set_rate(hw, 74250000, FREF);
+	else if (inno_hdmi_phy_get_tmdsclk(inno, inno->pixclock) == inno->tmdsclock)
 		ret = inno_hdmi_phy_clk_set_rate(hw, inno->pixclock, FREF);
 	else
-		ret = inno_hdmi_phy_clk_set_rate(hw, 74250000, FREF);
+		ret = 0;
 
 	return ret;
 }
@@ -963,12 +965,11 @@ static long inno_hdmi_phy_clk_round_rate(struct clk_hw *hw, unsigned long rate,
 	struct inno_hdmi_phy *inno = to_inno_hdmi_phy(hw);
 	u32 tmdsclock = inno_hdmi_phy_get_tmdsclk(inno, rate);
 
-	/* Limit pixel clock under 600MHz */
-	if (rate > 600000000)
+	if (rate > INNO_HDMI_PHY_MAX_PIXEL_CLOCK || tmdsclock > INNO_HDMI_PHY_MAX_TMDS_CHAR_RATE)
 		return -EINVAL;
 
 	for (; cfg->pixclock != ~0UL; cfg++)
-		if (cfg->pixclock == rate)
+		if (cfg->pixclock == rate && cfg->tmdsclock == tmdsclock)
 			break;
 
 	if (cfg->pixclock == ~0UL) {
@@ -988,15 +989,35 @@ static int inno_hdmi_phy_clk_set_rate(struct clk_hw *hw, unsigned long rate,
 	const struct pre_pll_config *cfg = pre_pll_cfg_table;
 	struct pre_pll_config rc = {0};
 	u32 tmdsclock = inno_hdmi_phy_get_tmdsclk(inno, rate);
+	unsigned long hw_rate;
+	u32 hw_tmdsclock;
 
 	dev_dbg(inno->dev, "%s rate %lu tmdsclk %u\n",
 		__func__, rate, tmdsclock);
 
-	/* Get the current hardware actual PLL frequency configuration */
-	inno->tmdsclock = inno_hdmi_phy_clk_recalc_rate(hw, parent_rate);
-	inno->tmdsclock = inno_hdmi_phy_get_tmdsclk(inno, inno->tmdsclock);
+	if (rate > INNO_HDMI_PHY_MAX_PIXEL_CLOCK || tmdsclock > INNO_HDMI_PHY_MAX_TMDS_CHAR_RATE) {
+		dev_err(inno->dev, "unsupported pixel clock %lu or TMDS clock %u\n",
+			rate, tmdsclock);
+		return -EINVAL;
+	}
 
-	if (inno->tmdsclock == tmdsclock)
+	/* Get the current hardware actual PLL frequency configuration */
+	hw_rate = inno_hdmi_phy_clk_recalc_rate(hw, parent_rate);
+	hw_tmdsclock = inno_hdmi_phy_get_tmdsclk(inno, hw_rate);
+
+	/*
+	 * Reuse the existing configuration only if it still matches the
+	 * requested pixel clock and TMDS clock: inno->tmdsclock holds the
+	 * TMDS clock of the last successful configuration, which also
+	 * encodes the bus width it was programmed with. Comparing it with
+	 * the target catches a bus-width change that would otherwise make
+	 * the hardware readback appear to match, e.g. after switching to
+	 * YUV420, converting the current pixel clock with the new bus
+	 * width can equal the new TMDS clock although the PLL was
+	 * configured for the old bus width.
+	 */
+	if (inno->pixclock == rate && inno->tmdsclock == tmdsclock &&
+	    hw_tmdsclock == tmdsclock)
 		return 0;
 
 	for (; cfg->pixclock != ~0UL; cfg++)
