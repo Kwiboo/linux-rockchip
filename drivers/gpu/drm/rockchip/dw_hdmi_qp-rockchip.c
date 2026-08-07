@@ -637,16 +637,29 @@ rockchip_hdmi_find_by_id(struct device_driver *drv, unsigned int id)
 	return dev_get_drvdata(dev);
 }
 
+static void dw_hdmi_rockchip_get_frl_mode(u8 rate, u8 *lanes, u8 *rate_per_lane);
+
+static u8 rockchip_hdmi_get_max_frl_rate(struct rockchip_dw_hdmi_qp *hdmi)
+{
+	u8 sink_rate = hdmi->hdmi21_data.max_lanes *
+		       hdmi->hdmi21_data.max_frl_rate_per_lane;
+
+	return min(hdmi->plat_data->max_frl_rate, sink_rate);
+}
+
 static bool rockchip_hdmi_check_dsc_rate_supported(struct rockchip_dw_hdmi_qp *hdmi,
 						   u64 tmdsclk, u8 bpp)
 {
 	u64 data_rate, dsc_rate;
 	u64 frl_rate, dsc_frl_rate;
+	u8 max_frl_rate = rockchip_hdmi_get_max_frl_rate(hdmi);
+	u8 max_dsc_frl_rate;
 
-	frl_rate = (u64)hdmi->hdmi21_data.max_lanes *
-		hdmi->hdmi21_data.max_frl_rate_per_lane * 1000000000;
-	dsc_frl_rate = (u64)hdmi->hdmi21_data.dsc_cap.max_lanes *
-		hdmi->hdmi21_data.dsc_cap.max_frl_rate_per_lane * 1000000000;
+	max_dsc_frl_rate = hdmi->hdmi21_data.dsc_cap.max_lanes *
+			       hdmi->hdmi21_data.dsc_cap.max_frl_rate_per_lane;
+	max_dsc_frl_rate = min(hdmi->plat_data->max_frl_rate, max_dsc_frl_rate);
+	frl_rate = (u64)max_frl_rate * 1000000000;
+	dsc_frl_rate = (u64)max_dsc_frl_rate * 1000000000;
 	data_rate = (u64)tmdsclk * bpp;
 	data_rate = DIV_ROUND_UP_ULL(data_rate * 18, 16);
 	/* compression ratio needs to be greater than 0.375. */
@@ -674,27 +687,28 @@ static void hdmi_select_link_config(struct rockchip_dw_hdmi_qp *hdmi,
 				    struct drm_crtc_state *crtc_state, unsigned int tmdsclk)
 {
 	struct drm_display_mode mode = {};
-	int max_lanes, max_rate_per_lane;
-	int max_dsc_lanes, max_dsc_rate_per_lane;
-	unsigned long max_frl_rate;
+	u8 max_lanes, max_rate_per_lane;
+	u8 max_dsc_lanes, max_dsc_rate_per_lane;
+	u8 max_frl_rate, max_dsc_frl_rate;
 
 	drm_mode_copy(&mode, &crtc_state->mode);
 	if (hdmi->plat_data->split_mode || hdmi->plat_data->dual_connector_split)
 		drm_mode_convert_to_origin_mode(&mode);
 
-	max_lanes = hdmi->hdmi21_data.max_lanes;
-	max_rate_per_lane = hdmi->hdmi21_data.max_frl_rate_per_lane;
-	max_frl_rate = max_lanes * max_rate_per_lane * 1000000;
+	max_frl_rate = rockchip_hdmi_get_max_frl_rate(hdmi);
+	dw_hdmi_rockchip_get_frl_mode(max_frl_rate, &max_lanes, &max_rate_per_lane);
 
 	hdmi->link_cfg.dsc_mode = false;
 	hdmi->link_cfg.frl_lanes = max_lanes;
 	hdmi->link_cfg.rate_per_lane = max_rate_per_lane;
 	hdmi->link_cfg.allm_supported = hdmi->hdmi21_data.allm_supported;
 
-	if (!max_frl_rate || (tmdsclk < HDMI20_MAX_RATE && mode.clock < HDMI20_MAX_RATE) ||
-	    hdmi->plat_data->dw_hdmi_qp_version == DW_HDMI_QP_V2) {
+	if (!max_frl_rate ||
+	    (tmdsclk < HDMI20_MAX_RATE && mode.clock < HDMI20_MAX_RATE)) {
 		dev_dbg(hdmi->dev, "use tmds mode\n");
 		hdmi->link_cfg.frl_mode = false;
+		hdmi->link_cfg.frl_lanes = 0;
+		hdmi->link_cfg.rate_per_lane = 0;
 		return;
 	}
 
@@ -703,9 +717,11 @@ static void hdmi_select_link_config(struct rockchip_dw_hdmi_qp *hdmi,
 	if (!hdmi->hdmi21_data.dsc_cap.v_1p2)
 		return;
 
-	max_dsc_lanes = hdmi->hdmi21_data.dsc_cap.max_lanes;
-	max_dsc_rate_per_lane =
-		hdmi->hdmi21_data.dsc_cap.max_frl_rate_per_lane;
+	max_dsc_frl_rate = hdmi->hdmi21_data.dsc_cap.max_lanes *
+			       hdmi->hdmi21_data.dsc_cap.max_frl_rate_per_lane;
+	max_dsc_frl_rate = min(hdmi->plat_data->max_frl_rate, max_dsc_frl_rate);
+	dw_hdmi_rockchip_get_frl_mode(max_dsc_frl_rate, &max_dsc_lanes,
+				      &max_dsc_rate_per_lane);
 
 	if (rockchip_hdmi_if_dsc_enable(hdmi,  tmdsclk * 1000)) {
 		hdmi->link_cfg.dsc_mode = true;
@@ -2300,6 +2316,7 @@ dw_hdmi_rockchip_select_output(struct drm_connector_state *conn_state,
 	bool yuv422_out = false;
 	bool dsc_rate_supported;
 	bool hdr_no_bt2020 = false;
+	u8 max_frl_rate = rockchip_hdmi_get_max_frl_rate(hdmi);
 	u32 max_tmds_clock = info->max_tmds_clock;
 	int output_eotf;
 
@@ -2451,8 +2468,8 @@ dw_hdmi_rockchip_select_output(struct drm_connector_state *conn_state,
 
 	max_tmds_clock = min(max_tmds_clock, hdmi->max_tmdsclk);
 
-	if (hdmi->link_cfg.rate_per_lane && tmdsclock > 600000)
-		max_tmds_clock = hdmi->link_cfg.frl_lanes * hdmi->link_cfg.rate_per_lane * 1000000;
+	if (max_frl_rate && tmdsclock > HDMI20_MAX_RATE)
+		max_tmds_clock = max_frl_rate * 1000000;
 
 	if (tmdsclock > max_tmds_clock) {
 		if (max_tmds_clock >= 594000) {
@@ -3209,6 +3226,8 @@ static void dw_hdmi_rockchip_get_frl_mode(u8 rate, u8 *lanes, u8 *rate_per_lane)
 		break;
 	default:
 		DRM_ERROR("Unknown frl rate :%d GHz\n", rate);
+		*lanes = 0;
+		*rate_per_lane = 0;
 		break;
 	}
 }
@@ -4604,6 +4623,8 @@ static const struct dw_hdmi_plat_data rk3538_hdmi_drv_data = {
 	.phy_name = "inno_dw_hdmi_phy2",
 	.phy_force_vendor = true,
 	.ycbcr_420_allowed = true,
+	.max_tmdsclk = 600000,
+	.max_frl_rate = 0,
 	.dw_hdmi_qp_version = DW_HDMI_QP_V2,
 	.use_drm_infoframe = true,
 	.cec_wakeup_supported = true,
@@ -4644,6 +4665,8 @@ static const struct dw_hdmi_plat_data rk3576_hdmi_drv_data = {
 	.phy_name = "samsung_hdptx_phy",
 	.phy_force_vendor = true,
 	.ycbcr_420_allowed = true,
+	.max_tmdsclk = 600000,
+	.max_frl_rate = 48,
 	.dw_hdmi_qp_version = DW_HDMI_QP_V1,
 	.use_drm_infoframe = true,
 };
@@ -4682,6 +4705,8 @@ static const struct dw_hdmi_plat_data rk3572_hdmi_drv_data = {
 	.phy_name = "samsung_hdptx_phy",
 	.phy_force_vendor = true,
 	.ycbcr_420_allowed = true,
+	.max_tmdsclk = 600000,
+	.max_frl_rate = 48,
 	.dw_hdmi_qp_version = DW_HDMI_QP_V1,
 	.use_drm_infoframe = true,
 };
@@ -4720,6 +4745,8 @@ static const struct dw_hdmi_plat_data rk3588_hdmi_drv_data = {
 	.phy_name = "samsung_hdptx_phy",
 	.phy_force_vendor = true,
 	.ycbcr_420_allowed = true,
+	.max_tmdsclk = 600000,
+	.max_frl_rate = 48,
 	.dw_hdmi_qp_version = DW_HDMI_QP_V1,
 	.use_drm_infoframe = true,
 };
