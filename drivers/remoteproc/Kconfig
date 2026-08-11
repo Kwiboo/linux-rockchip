@@ -298,6 +298,15 @@ config RCAR_REMOTEPROC
 	  This can be either built-in or a loadable module.
 	  If compiled as module (M), the module name is rcar_rproc.
 
+config ROCKCHIP_REMOTEPROC
+	tristate "Rockchip Remoteproc support"
+	depends on ROCKCHIP_SIP || COMPILE_TEST
+	help
+	  Support for Rockchip remote processors via the remote processor
+	  framework. This driver supports RK3562, RK3568 and RK3588.
+
+	  It's safe to say N here.
+
 config ST_REMOTEPROC
 	tristate "ST remoteproc support"
 	depends on ARCH_STI
