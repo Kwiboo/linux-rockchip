@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2022 Rockchip Electronics Co., Ltd.
+ *
+ */
+
+#include "rk3562-android.dtsi"
+
+/ {
+	chosen: chosen {
+		bootargs = "earlycon=uart8250,mmio32,0xff210000 console=ttyFIQ0 drm_kms_helper.fbdev_emulation=0";
+	};
+
+	firmware {
+		firmware_android: android {};
+	};
+};
+
+&firmware_android {
+	compatible = "android,firmware";
+	boot_devices = "ff880000.mmc,ff870000.mmc";
+	vbmeta {
+		compatible = "android,vbmeta";
+		parts = "vbmeta,boot,system,vendor,dtbo";
+	};
+	fstab {
+		compatible = "android,fstab";
+		vendor {
+			compatible = "android,vendor";
+			dev = "/dev/block/by-name/vendor";
+			type = "ext4";
+			mnt_flags = "ro,barrier=1,inode_readahead_blks=8";
+			fsmgr_flags = "wait,avb";
+		};
+	};
+};
+
