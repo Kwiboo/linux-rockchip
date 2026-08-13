@@ -1448,6 +1448,18 @@ static int rockchip_set_mux(struct rockchip_pin_bank *bank, int pin, int mux)
 		}
 	}
 
+	/* rv1103b force jtag m2 */
+	if (ctrl->type == RV1103B) {
+		if (bank->bank_num == 1) {
+			if ((pin == RK_PB3) || (pin == RK_PB4)) {
+				if (mux == 3)
+					regmap_update_bits(regmap, 0x10810, 0x10001, 0x10001);
+				else
+					regmap_update_bits(regmap, 0x10810, 0x10001, 0x10000);
+			}
+		}
+	}
+
 	if (mux > mask)
 		return -EINVAL;
 
