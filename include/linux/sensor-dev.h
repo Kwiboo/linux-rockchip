@@ -343,6 +343,10 @@ extern const struct dev_pm_ops sensor_pm_ops;
 #define PRESSURE_IOCTL_DISABLE			_IOW(PRESSURE_IOCTL_MAGIC, 3, int *)
 #define PRESSURE_IOCTL_SET_DELAY			_IOW(PRESSURE_IOCTL_MAGIC, 4, int *)
 
+#ifdef CONFIG_COMPAT
+#define COMPAT_PRESSURE_IOCTL_GET_ENABLED	_IOR(PRESSURE_IOCTL_MAGIC, 1, compat_uptr_t)
+#define COMPAT_PRESSURE_IOCTL_ENABLE		_IOW(PRESSURE_IOCTL_MAGIC, 2, compat_uptr_t)
+#endif
 
 #define TEMPERATURE_IOCTL_MAGIC			't'
 #define TEMPERATURE_IOCTL_GET_ENABLED	_IOR(TEMPERATURE_IOCTL_MAGIC, 1, int *)
@@ -350,6 +354,10 @@ extern const struct dev_pm_ops sensor_pm_ops;
 #define TEMPERATURE_IOCTL_DISABLE		_IOW(TEMPERATURE_IOCTL_MAGIC, 3, int *)
 #define TEMPERATURE_IOCTL_SET_DELAY		_IOW(TEMPERATURE_IOCTL_MAGIC, 4, int *)
 
+#ifdef CONFIG_COMPAT
+#define COMPAT_TEMPERATURE_IOCTL_GET_ENABLED	_IOR(TEMPERATURE_IOCTL_MAGIC, 1, compat_uptr_t)
+#define COMPAT_TEMPERATURE_IOCTL_ENABLE		_IOW(TEMPERATURE_IOCTL_MAGIC, 2, compat_uptr_t)
+#endif
 
 extern int sensor_rx_data(struct i2c_client *client, char *rxData, int length);
 extern int sensor_tx_data(struct i2c_client *client, char *txData, int length);

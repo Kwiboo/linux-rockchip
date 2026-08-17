@@ -927,7 +927,7 @@ static long compass_dev_compat_ioctl(struct file *file, unsigned int cmd, unsign
 	int result = 0;
 
 	if (!file->f_op || !file->f_op->unlocked_ioctl) {
-		printk(KERN_ERR "file->f_op or file->f_op->unlocked_ioctl is null\n");
+		pr_err("file->f_op or file->f_op->unlocked_ioctl is null\n");
 		return -ENOTTY;
 	}
 
@@ -965,7 +965,7 @@ static long compass_dev_compat_ioctl(struct file *file, unsigned int cmd, unsign
 			result = file->f_op->unlocked_ioctl(file, ECS_IOCTL_APP_GET_DELAY, (unsigned long)arg64);
 		break;
 	default:
-		break;
+		return -ENOTTY;
 	}
 
 	return result;
@@ -1157,7 +1157,7 @@ static long light_dev_compat_ioctl(struct file *file, unsigned int cmd, unsigned
 	void __user *arg64 = compat_ptr(arg);
 
 	if (!file->f_op || !file->f_op->unlocked_ioctl) {
-		printk(KERN_ERR "[DEBUG] file->f_op or file->f_op->unlocked_ioctl is null\n");
+		pr_err("file->f_op or file->f_op->unlocked_ioctl is null\n");
 		return -ENOTTY;
 	}
 
@@ -1175,7 +1175,7 @@ static long light_dev_compat_ioctl(struct file *file, unsigned int cmd, unsigned
 			ret = file->f_op->unlocked_ioctl(file, LIGHTSENSOR_IOCTL_SET_RATE, (unsigned long)arg64);
 		break;
 	default:
-		break;
+		return -ENOTTY;
 	}
 
 	return ret;
@@ -1231,7 +1231,7 @@ static long light_dev_ioctl(struct file *file,
 		break;
 
 	default:
-		break;
+		return -ENOTTY;
 	}
 
 error:
@@ -1255,7 +1255,7 @@ static long proximity_dev_compat_ioctl(struct file *file, unsigned int cmd, unsi
 	void __user *arg64 = compat_ptr(arg);
 
 	if (!file->f_op || !file->f_op->unlocked_ioctl) {
-		printk(KERN_ERR "file->f_op or file->f_op->unlocked_ioctl is null\n");
+		pr_err("file->f_op or file->f_op->unlocked_ioctl is null\n");
 		return -ENOTTY;
 	}
 
@@ -1269,7 +1269,7 @@ static long proximity_dev_compat_ioctl(struct file *file, unsigned int cmd, unsi
 			ret = file->f_op->unlocked_ioctl(file, PSENSOR_IOCTL_ENABLE, (unsigned long)arg64);
 		break;
 	default:
-		break;
+		return -ENOTTY;
 	}
 
 	return ret;
@@ -1309,7 +1309,7 @@ static long proximity_dev_ioctl(struct file *file,
 		break;
 
 	default:
-		break;
+		return -ENOTTY;
 	}
 
 	return result;
@@ -1324,6 +1324,32 @@ static int temperature_dev_release(struct inode *inode, struct file *file)
 {
 	return 0;
 }
+
+#ifdef CONFIG_COMPAT
+static long temperature_dev_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	long ret = 0;
+	void __user *arg64 = compat_ptr(arg);
+
+	if (!file->f_op || !file->f_op->unlocked_ioctl) {
+		pr_err("file->f_op or file->f_op->unlocked_ioctl is null\n");
+		return -ENOTTY;
+	}
+
+	switch (cmd) {
+	case COMPAT_TEMPERATURE_IOCTL_GET_ENABLED:
+		ret = file->f_op->unlocked_ioctl(file, TEMPERATURE_IOCTL_GET_ENABLED, (unsigned long)arg64);
+		break;
+	case COMPAT_TEMPERATURE_IOCTL_ENABLE:
+		ret = file->f_op->unlocked_ioctl(file, TEMPERATURE_IOCTL_ENABLE, (unsigned long)arg64);
+		break;
+	default:
+		return -ENOTTY;
+	}
+
+	return ret;
+}
+#endif
 
 /* ioctl - I/O control */
 static long temperature_dev_ioctl(struct file *file,
@@ -1358,7 +1384,7 @@ static long temperature_dev_ioctl(struct file *file,
 		break;
 
 	default:
-		break;
+		return -ENOTTY;
 	}
 
 	return result;
@@ -1376,6 +1402,32 @@ static int pressure_dev_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
+
+#ifdef CONFIG_COMPAT
+static long pressure_dev_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	long ret = 0;
+	void __user *arg64 = compat_ptr(arg);
+
+	if (!file->f_op || !file->f_op->unlocked_ioctl) {
+		pr_err("file->f_op or file->f_op->unlocked_ioctl is null\n");
+		return -ENOTTY;
+	}
+
+	switch (cmd) {
+	case COMPAT_PRESSURE_IOCTL_GET_ENABLED:
+		ret = file->f_op->unlocked_ioctl(file, PRESSURE_IOCTL_GET_ENABLED, (unsigned long)arg64);
+		break;
+	case COMPAT_PRESSURE_IOCTL_ENABLE:
+		ret = file->f_op->unlocked_ioctl(file, PRESSURE_IOCTL_ENABLE, (unsigned long)arg64);
+		break;
+	default:
+		return -ENOTTY;
+	}
+
+	return ret;
+}
+#endif
 
 /* ioctl - I/O control */
 static long pressure_dev_ioctl(struct file *file,
@@ -1410,7 +1462,7 @@ static long pressure_dev_ioctl(struct file *file,
 		break;
 
 	default:
-		break;
+		return -ENOTTY;
 	}
 
 	return result;
@@ -1425,6 +1477,7 @@ static int sensor_misc_device_register(struct sensor_private_data *sensor, int t
 		if (!sensor->ops->misc_dev) {
 			sensor->fops.owner = THIS_MODULE;
 			sensor->fops.unlocked_ioctl = angle_dev_ioctl;
+			sensor->fops.compat_ioctl = compat_ptr_ioctl;
 			sensor->fops.open = angle_dev_open;
 			sensor->fops.release = angle_dev_release;
 
@@ -1440,9 +1493,7 @@ static int sensor_misc_device_register(struct sensor_private_data *sensor, int t
 		if (!sensor->ops->misc_dev) {
 			sensor->fops.owner = THIS_MODULE;
 			sensor->fops.unlocked_ioctl = gsensor_dev_ioctl;
-			#ifdef CONFIG_COMPAT
-			sensor->fops.compat_ioctl = gsensor_dev_ioctl;
-			#endif
+			sensor->fops.compat_ioctl = compat_ptr_ioctl;
 			sensor->fops.open = gsensor_dev_open;
 			sensor->fops.release = gsensor_dev_release;
 
@@ -1458,9 +1509,9 @@ static int sensor_misc_device_register(struct sensor_private_data *sensor, int t
 		if (!sensor->ops->misc_dev) {
 			sensor->fops.owner = THIS_MODULE;
 			sensor->fops.unlocked_ioctl = compass_dev_ioctl;
-			#ifdef CONFIG_COMPAT
+#ifdef CONFIG_COMPAT
 			sensor->fops.compat_ioctl = compass_dev_compat_ioctl;
-			#endif
+#endif
 			sensor->fops.open = compass_dev_open;
 			sensor->fops.release = compass_dev_release;
 
@@ -1476,6 +1527,7 @@ static int sensor_misc_device_register(struct sensor_private_data *sensor, int t
 		if (!sensor->ops->misc_dev) {
 			sensor->fops.owner = THIS_MODULE;
 			sensor->fops.unlocked_ioctl = gyro_dev_ioctl;
+			sensor->fops.compat_ioctl = compat_ptr_ioctl;
 			sensor->fops.open = gyro_dev_open;
 			sensor->fops.release = gyro_dev_release;
 
@@ -1491,9 +1543,9 @@ static int sensor_misc_device_register(struct sensor_private_data *sensor, int t
 		if (!sensor->ops->misc_dev) {
 			sensor->fops.owner = THIS_MODULE;
 			sensor->fops.unlocked_ioctl = light_dev_ioctl;
-			#ifdef CONFIG_COMPAT
+#ifdef CONFIG_COMPAT
 			sensor->fops.compat_ioctl = light_dev_compat_ioctl;
-			#endif
+#endif
 			sensor->fops.open = light_dev_open;
 			sensor->fops.release = light_dev_release;
 
@@ -1509,9 +1561,9 @@ static int sensor_misc_device_register(struct sensor_private_data *sensor, int t
 		if (!sensor->ops->misc_dev) {
 			sensor->fops.owner = THIS_MODULE;
 			sensor->fops.unlocked_ioctl = proximity_dev_ioctl;
-			#ifdef CONFIG_COMPAT
+#ifdef CONFIG_COMPAT
 			sensor->fops.compat_ioctl = proximity_dev_compat_ioctl;
-			#endif
+#endif
 			sensor->fops.open = proximity_dev_open;
 			sensor->fops.release = proximity_dev_release;
 
@@ -1527,6 +1579,9 @@ static int sensor_misc_device_register(struct sensor_private_data *sensor, int t
 		if (!sensor->ops->misc_dev) {
 			sensor->fops.owner = THIS_MODULE;
 			sensor->fops.unlocked_ioctl = temperature_dev_ioctl;
+#ifdef CONFIG_COMPAT
+			sensor->fops.compat_ioctl = temperature_dev_compat_ioctl;
+#endif
 			sensor->fops.open = temperature_dev_open;
 			sensor->fops.release = temperature_dev_release;
 
@@ -1542,6 +1597,9 @@ static int sensor_misc_device_register(struct sensor_private_data *sensor, int t
 		if (!sensor->ops->misc_dev) {
 			sensor->fops.owner = THIS_MODULE;
 			sensor->fops.unlocked_ioctl = pressure_dev_ioctl;
+#ifdef CONFIG_COMPAT
+			sensor->fops.compat_ioctl = pressure_dev_compat_ioctl;
+#endif
 			sensor->fops.open = pressure_dev_open;
 			sensor->fops.release = pressure_dev_release;
 
