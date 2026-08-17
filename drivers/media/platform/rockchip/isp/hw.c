@@ -432,14 +432,13 @@ void rkisp_hw_reg_restore(struct rkisp_hw_dev *dev)
 		for (j = 0; j < ARRAY_SIZE(self_upd_reg); j++) {
 			reg = reg_buf + self_upd_reg[j];
 			*reg &= ~ISP21_SELF_FORCE_UPD;
-			if (self_upd_reg[j] == ISP3X_3DLUT_BASE &&
-			    *reg & ISP_3DLUT_EN &&
-			    dev->isp_ver != ISP_V35) {
+			if (self_upd_reg[j] == ISP3X_3DLUT_BASE && *reg & ISP_3DLUT_EN &&
+			    dev->isp_ver != ISP_V33 && dev->isp_ver < ISP_V35) {
 				reg = reg_buf + ISP3X_3DLUT_UPDATE;
 				*reg = 1;
 			}
 		}
-		if (dev->isp_ver == ISP_V35) {
+		if (dev->isp_ver >= ISP_V35) {
 			reg = reg_buf + ISP3X_SWS_CFG;
 			*reg &= ~ISP3X_3A_DDR_WRITE_EN;
 			reg = reg_buf + ISP39_W3A_CTRL0;
@@ -465,12 +464,12 @@ void rkisp_hw_reg_restore(struct rkisp_hw_dev *dev)
 			/* skip table RAM */
 			if ((j > ISP3X_LSC_CTRL && j < ISP3X_LSC_XGRAD_01) ||
 			    (j > ISP32_CAC_OFFSET && j < ISP3X_CAC_RO_CNT &&
-			     dev->isp_ver != ISP_V33 && dev->isp_ver != ISP_V35) ||
+			     dev->isp_ver != ISP_V33 && dev->isp_ver < ISP_V35)  ||
 			    (j > ISP3X_3DLUT_UPDATE && j < ISP3X_GAIN_BASE) ||
 			    (j == 0x4840 || j == 0x4a80 || j == 0x4b40 || j == 0x5660) ||
 			    (dev->isp_ver == ISP_V39 &&
 			     (j > ISP39_DHAZ_HIST_IIR0 && j < ISP39_DHAZ_LINE_CNT)) ||
-			    ((dev->isp_ver == ISP_V33 || dev->isp_ver == ISP_V35) &&
+			    ((dev->isp_ver == ISP_V33 || dev->isp_ver >= ISP_V35) &&
 			     ((j > ISP33_ENH_IIR0 && j < ISP33_ENH_ERR_FLAG) ||
 			      (j > ISP33_HIST_IIR0 && j < ISP33_HIST_STAB) ||
 			      (j >= ISP33_SHARP_NOISE_CURVE0 && j <= ISP33_SHARP_NOISE_CURVE8))))
@@ -585,7 +584,7 @@ void rkisp_hw_reg_restore(struct rkisp_hw_dev *dev)
 			val = rkisp_read_reg_cache(isp, ISP3X_CAC_BASE);
 			writel(val, base + ISP3X_CAC_BASE);
 		}
-		if (dev->isp_ver == ISP_V35) {
+		if (dev->isp_ver >= ISP_V35) {
 			reg = reg_buf + ISP39_W3A_CTRL0;
 			if (*reg & ISP39_W3A_EN) {
 				reg = reg_buf + ISP3X_SWS_CFG;
@@ -636,7 +635,7 @@ void rkisp_hw_reg_restore(struct rkisp_hw_dev *dev)
 				reg = reg_buf + ISP39_W3A_PDAF_ADDR_SHD;
 				writel(*reg, dev->base_addr + ISP39_W3A_PDAF_ADDR);
 			}
-			if (dev->isp_ver == ISP_V35) {
+			if (dev->isp_ver >= ISP_V35) {
 				reg = reg_buf + ISP39_W3A_CTRL0;
 				if (*reg & ISP39_W3A_EN) {
 					reg1 = reg_buf + ISP3X_ISP_CTRL1;
@@ -652,7 +651,7 @@ void rkisp_hw_reg_restore(struct rkisp_hw_dev *dev)
 		*reg |= CIF_ISP_CTRL_ISP_ENABLE |
 			CIF_ISP_CTRL_ISP_CFG_UPD |
 			CIF_ISP_CTRL_ISP_INFORM_ENABLE;
-		if (dev->isp_ver == ISP_V35) {
+		if (dev->isp_ver >= ISP_V35) {
 			reg1 = reg_buf + ISP3X_ISP_CTRL1;
 			if (*reg1 & ISP35_BAYER_UPD_FE_EN)
 				*reg |= ISP35_ISP_CFG_UPD_FE;
@@ -942,6 +941,17 @@ static const struct isp_match_data rk3568_isp_match_data = {
 	.unite = false,
 };
 
+static const struct isp_match_data rk3572_isp_match_data = {
+	.clks = rk3576_isp_clks,
+	.num_clks = ARRAY_SIZE(rk3576_isp_clks),
+	.isp_ver = ISP_V35_1,
+	.clk_rate_tbl = rk3576_isp_clk_rate,
+	.num_clk_rate_tbl = ARRAY_SIZE(rk3576_isp_clk_rate),
+	.irqs = isp_irqs,
+	.num_irqs = ARRAY_SIZE(isp_irqs),
+	.unite = false,
+};
+
 static const struct isp_match_data rk3576_isp_match_data = {
 	.clks = rk3576_isp_clks,
 	.num_clks = ARRAY_SIZE(rk3576_isp_clks),
@@ -986,6 +996,12 @@ static const struct of_device_id rkisp_hw_of_match[] = {
 	{
 		.compatible = "rockchip,rk3568-rkisp",
 		.data = &rk3568_isp_match_data,
+	},
+#endif
+#ifdef CONFIG_CPU_RK3572
+	{
+		.compatible = "rockchip,rk3572-rkisp",
+		.data = &rk3572_isp_match_data,
 	},
 #endif
 #ifdef CONFIG_CPU_RK3576
@@ -1173,7 +1189,7 @@ void rkisp_soft_reset(struct rkisp_hw_dev *dev, bool is_secure)
 		writel(0x02000400, dev->base_addr + ISP39_DEBAYER_G_FILTER_VSIGMA1);
 		writel(0x00cd0155, dev->base_addr + ISP39_DEBAYER_G_FILTER_VSIGMA2);
 		writel(0x00800092, dev->base_addr + ISP39_DEBAYER_G_FILTER_VSIGMA3);
-	} else if (dev->isp_ver == ISP_V35) {
+	} else if (dev->isp_ver >= ISP_V35) {
 		writel(0, dev->base_addr + ISP32_BLS_ISP_OB_PREDGAIN);
 		writel(ISP39_ADRC_CMPS_BYP_EN, dev->base_addr + ISP3X_DRC_CTRL0);
 		writel(ISP39_W3A_PDAF2DDR_HOLD_DIS | ISP39_W3A_3A_HOLD_DIS | ISP35_W3A_B3DNROUT_ILG_BYPASS,
@@ -1181,11 +1197,17 @@ void rkisp_soft_reset(struct rkisp_hw_dev *dev, bool is_secure)
 		writel(0, dev->base_addr + ISP39_LDCH_OUT_SIZE);
 		writel(0x3801, dev->base_addr + ISP33_BAY3D_CTRL1);
 	}
+	/* disable mi write axi-id polling default */
+	if (dev->isp_ver >= ISP_V33) {
+		val = readl(dev->base_addr + ISP3X_MI_WR_CTRL2);
+		val |= ISP3X_MI_WR_ID_POLL_DIS;
+		writel(val, dev->base_addr + ISP3X_MI_WR_CTRL2);
+	}
 }
 
 static void isp_config_clk(struct rkisp_hw_dev *dev, int on)
 {
-	u32 val = !on ? 0 :
+	u32 val = !on ? CIF_ICCL_MI_CLK :
 		CIF_ICCL_ISP_CLK | CIF_ICCL_CP_CLK | CIF_ICCL_MRSZ_CLK |
 		CIF_ICCL_SRSZ_CLK | CIF_ICCL_JPEG_CLK | CIF_ICCL_MI_CLK |
 		CIF_ICCL_IE_CLK | CIF_ICCL_MIPI_CLK | CIF_ICCL_DCROP_CLK;
@@ -1403,7 +1425,7 @@ static int rkisp_hw_probe(struct platform_device *pdev)
 		hw_dev->unite = ISP_UNITE_NONE;
 	}
 	hw_dev->unite_extend_pixel = 128;
-	if (hw_dev->isp_ver == ISP_V33 || hw_dev->isp_ver == ISP_V35)
+	if (hw_dev->isp_ver == ISP_V33 || hw_dev->isp_ver >= ISP_V35)
 		hw_dev->unite_extend_pixel = 512;
 
 	hw_dev->vpsl_base_addr = NULL;
