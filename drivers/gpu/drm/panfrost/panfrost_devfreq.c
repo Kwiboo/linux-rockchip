@@ -39,11 +39,12 @@ static int panfrost_devfreq_target(struct device *dev, unsigned long *freq,
 	opp = devfreq_recommended_opp(dev, freq, flags);
 	if (IS_ERR(opp))
 		return PTR_ERR(opp);
-	dev_pm_opp_put(opp);
 
-	err = dev_pm_opp_set_rate(dev, *freq);
+	err = dev_pm_opp_set_opp(dev, opp);
 	if (!err)
 		pfdev->pfdevfreq.current_frequency = *freq;
+
+	dev_pm_opp_put(opp);
 
 	return err;
 }
@@ -99,28 +100,13 @@ static int panfrost_devfreq_config_clks(struct device *dev,
 {
 	struct panfrost_device *pfdev = dev_get_drvdata(dev);
 	struct devfreq *devfreq = pfdev->pfdevfreq.devfreq;
-	unsigned long *target = data;
-	unsigned long freq;
 	int ret = 0;
-
-	/* One of target and opp must be available */
-	if (target) {
-		freq = *target;
-	} else if (opp) {
-		freq = dev_pm_opp_get_freq(opp);
-	} else {
-		WARN_ON(1);
-		return -EINVAL;
-	}
 
 	pm_runtime_get_noresume(dev);
 
-	if (!pm_runtime_suspended(dev) || !devfreq || !devfreq->suspend_freq) {
-		ret = clk_set_rate(pfdev->clock, freq);
-		if (ret)
-			dev_err(dev, "failed to set clock rate %lu: %d\n",
-				freq, ret);
-	}
+	if (!pm_runtime_suspended(dev) || !devfreq || !devfreq->suspend_freq)
+		ret = dev_pm_opp_config_clks_simple(dev, opp_table, opp,
+						    data, scaling_down);
 
 	pm_runtime_put_noidle(dev);
 
