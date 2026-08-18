@@ -173,7 +173,7 @@
 	 pinctrl-0 = <&sai4m2_lrck
 		      &sai4m2_sclk
 		      &sai4m2_sdi>;
-	rockchip,sai-rx-wait-time-ms = <50>;
+	rockchip,sai-rx-wait-time-ms = <200>;
 	status = "okay";
 };
 
