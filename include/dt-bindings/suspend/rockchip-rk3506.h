@@ -57,6 +57,8 @@
 #define RKPM_GPIO4_IE_DIS                BIT(16)
 #define RKPM_PMU_BUS_CLK_HS              BIT(17)
 #define RKPM_PWM0_CH0_CORE_PWREN         BIT(18)
+#define RKPM_GPLL_SUB_BUS_24M            BIT(19)
+
 /*
  * Wakeup source:
  *	rockchip,wakeup-config = <...>;
