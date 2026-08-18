@@ -6,6 +6,7 @@
 #include <linux/devfreq_cooling.h>
 #include <linux/platform_device.h>
 #include <linux/pm_opp.h>
+#include <linux/pm_runtime.h>
 
 #include "rocket_core.h"
 #include "rocket_device.h"
@@ -36,11 +37,12 @@ static int rocket_devfreq_target(struct device *dev, unsigned long *freq,
 	opp = devfreq_recommended_opp(dev, freq, flags);
 	if (IS_ERR(opp))
 		return PTR_ERR(opp);
-	dev_pm_opp_put(opp);
 
-	err = dev_pm_opp_set_rate(dev, *freq);
+	err = dev_pm_opp_set_opp(dev, opp);
 	if (!err)
 		rdev->devfreq.current_frequency = *freq;
+
+	dev_pm_opp_put(opp);
 
 	return err;
 }
@@ -99,6 +101,71 @@ static struct devfreq_dev_profile rocket_devfreq_profile = {
 	.get_dev_status = rocket_devfreq_get_dev_status,
 };
 
+static int rocket_devfreq_config_clks(struct device *dev,
+				   struct opp_table *opp_table,
+				   struct dev_pm_opp *opp,
+				   void *data, bool scaling_down)
+{
+	struct rocket_device *rdev = dev_get_drvdata(dev);
+	struct devfreq *devfreq = rdev->devfreq.devfreq;
+	int err = 0;
+
+	pm_runtime_get_noresume(dev);
+
+	if (!pm_runtime_suspended(dev) || !devfreq || !devfreq->suspend_freq)
+		err = dev_pm_opp_config_clks_simple(dev, opp_table, opp,
+						    data, scaling_down);
+
+	pm_runtime_put_noidle(dev);
+
+	return err;
+}
+
+static int rocket_devfreq_init_opp(struct rocket_core *core)
+{
+	static const char * const regulator_names[] = { "npu", NULL };
+	static const char * const clk_names[] = { "npu", NULL };
+	struct dev_pm_opp_config config = {
+		.clk_names = clk_names,
+		.config_clks = rocket_devfreq_config_clks,
+		.regulator_names = regulator_names,
+	};
+	struct device *dev = core->dev;
+	struct rocket_device *rdev = core->rdev;
+	int err;
+
+	/*
+	 * On RK3588 all three NPU cores share the same SCMI NPU clock and the
+	 * same npu-supply rail. The OPP framework can only have one device
+	 * configure the (shared) OPP table; configuring it from a second core
+	 * after the first has populated the OPPs returns -EBUSY. Let only the
+	 * first-probed core set up OPP, and let sibling cores ride along on the
+	 * clock/voltage state programmed by that lead core.
+	 */
+	if (rdev->opp_core != -1)
+		return 0;
+
+	err = devm_pm_opp_set_config(dev, &config);
+	if (err && err != -EOPNOTSUPP)
+		return dev_err_probe(dev, err, "failed to set OPP config for core %d\n",
+				     core->index);
+
+	err = devm_pm_opp_of_add_table(dev);
+	if (err == -ENODEV) {
+		/* No operating-points-v2 in DT: leave DVFS disabled. */
+		return 0;
+	}
+	if (err)
+		return dev_err_probe(dev, err, "failed to add OPP table for core %d\n",
+				     core->index);
+
+	rdev->opp_core = core->index;
+	dev_info(dev, "OPP enabled, clock rate %lu MHz\n",
+		 clk_get_rate(core->clks[0].clk) / 1000 / 1000);
+
+	return 0;
+}
+
 int rocket_devfreq_init(struct rocket_core *core)
 {
 	struct device *dev = core->dev;
@@ -107,6 +174,11 @@ int rocket_devfreq_init(struct rocket_core *core)
 	struct devfreq *devfreq;
 	struct thermal_cooling_device *cooling;
 	unsigned long cur_freq;
+	int err;
+
+	err = rocket_devfreq_init_opp(core);
+	if (err)
+		return err;
 
 	/*
 	 * Only the lead opp_core hosts a devfreq instance, since the OPP
@@ -116,15 +188,10 @@ int rocket_devfreq_init(struct rocket_core *core)
 	if (rdev->opp_core != (int)core->index)
 		return 0;
 
-	if (!core->max_freq)
-		return 0;
-
 	spin_lock_init(&rdevfreq->lock);
 	rocket_devfreq_reset(rdevfreq);
 
 	cur_freq = clk_get_rate(core->clks[0].clk);
-	if (!cur_freq)
-		cur_freq = core->max_freq;
 	rdevfreq->current_frequency = cur_freq;
 	rocket_devfreq_profile.initial_freq = cur_freq;
 

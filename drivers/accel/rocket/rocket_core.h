@@ -41,15 +41,6 @@ struct rocket_core {
 
 	struct iommu_group *iommu_group;
 
-	/*
-	 * Highest and lowest available OPP frequencies, in Hz. Zero if no
-	 * operating-points-v2 table is present in the device tree, in which
-	 * case DVFS is disabled and the NPU runs at whatever rate the clock
-	 * provider has set up.
-	 */
-	unsigned long max_freq;
-	unsigned long suspend_freq;
-
 	struct mutex job_lock;
 	struct rocket_job *in_flight_job;
 
