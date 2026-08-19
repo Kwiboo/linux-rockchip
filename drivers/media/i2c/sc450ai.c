@@ -1968,6 +1968,7 @@ static const struct sc450ai_mode supported_modes_2lane[] = {
 		.hdr_mode = NO_HDR,
 		.mclk = 27000000,
 		.link_freq_idx = 2,
+		.bpp = 10,
 		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
 		.lanes = 2,
 	},
