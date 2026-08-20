@@ -34,6 +34,10 @@
 	/delete-property/ pinctrl-names;
 };
 
+/* ircut2_a/b pins are used as gst412c shutter on this board */
+/delete-node/ &ircut2_a_pins;
+/delete-node/ &ircut2_b_pins;
+
 &rockchip_suspend {
 	status = "okay";
 

@@ -43,6 +43,14 @@
 	irq-gpios = <&gpio3 RK_PA7 GPIO_ACTIVE_LOW>;
 };
 
+&ircut_a_pins {
+	rockchip,pins = <3 RK_PB4 RK_FUNC_GPIO &pcfg_pull_none>;
+};
+
+&ircut_b_pins {
+	rockchip,pins = <3 RK_PB2 RK_FUNC_GPIO &pcfg_pull_none>;
+};
+
 &touch_gpio {
 	rockchip,pins =
 		<3 RK_PA7 RK_FUNC_GPIO &pcfg_pull_up>,

@@ -26,6 +26,10 @@
 	};
 };
 
+/* ircut_a/b pins are muxed to spi0 (icm42670) on this board */
+/delete-node/ &ircut_a_pins;
+/delete-node/ &ircut_b_pins;
+
 &gpio4 {
 	interrupt-affinity = <&cpu0>, <&cpu0>, <&cpu0>, <&cpu3>;
 	interrupt-pins = <0>,
