@@ -37,6 +37,8 @@
 			GIC_AMP_IRQ_CFG_ROUTE(318, 0xd0, CPU_GET_AFFINITY(3, 0))
 			/* UART5 */
 			GIC_AMP_IRQ_CFG_ROUTE(368, 0xd0, CPU_GET_AFFINITY(3, 0))
+			/* CPU OFF request from ATF (SPI 472) */
+			GIC_AMP_IRQ_CFG_ROUTE(472, 0xd0, CPU_GET_AFFINITY(3, 0))
 			/* reserved IRQ number for IRQ latency test */
 			GIC_AMP_IRQ_CFG_ROUTE(454, 0xd0, CPU_GET_AFFINITY(3, 0))
 			/* GMAC0 */
@@ -52,6 +54,12 @@
 		#address-cells = <2>;
 		#size-cells = <2>;
 		ranges;
+
+		/* amp heap and firmware */
+		heap_reserved: heap@1800000 {
+			reg = <0x0 0x1800000 0x0 0x800000>;
+			no-map;
+		};
 
 		/* remote amp core address */
 		amp_shmem_reserved: amp-shmem@7800000 {
@@ -71,14 +79,8 @@
 		};
 
 		/* mcu address */
-		mcu_reserved: mcu@8200000 {
-			reg = <0x0 0x8200000 0x0 0x100000>;
-			no-map;
-		};
-
-		/* amp heap and firmware */
-		heap_reserved: heap@1800000 {
-			reg = <0x0 0x1800000 0x0 0x800000>;
+		firmware_reserved: firmware@9400000 {
+			reg = <0x0 0x9400000 0x0 0x800000>;
 			no-map;
 		};
 	};
@@ -93,6 +95,22 @@
 		memory-region = <&rpmsg_dma_reserved>;
 
 		status = "okay";
+	};
+
+	rproc_mcu: remoteproc-mcu {
+		compatible = "rockchip,rk3588-rproc-mcu";
+		memory-region = <&firmware_reserved>;
+		resets = <&cru SRST_F_PMU_CM0_CORE>;
+		rockchip,grf = <&sys_grf>;
+		status = "okay";
+	};
+
+	rproc_ap: remoteproc-ap {
+		compatible = "rockchip,rk3588-rproc-ap";
+		memory-region = <&firmware_reserved>, <&amp_shmem_reserved>, <&rpmsg_reserved>;
+		rockchip,cpu-id = <0x300>;
+		rockchip,pe-state = <6>;  /* RK_AMP_FLAG_CPU_ARM64 | RK_AMP_FLAG_CPU_EL2_HYP */
+		status = "disabled";
 	};
 };
 
