@@ -1,0 +1,97 @@
+# SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/remoteproc/rockchip,rk3588-rproc.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Rockchip RK3588 Remote Processor Controller
+
+description: |
+  This document defines the binding for the Rockchip remoteproc driver that
+  loads and boots firmware on RK3588 remote processors. Two remote core types
+  are supported:
+    - AP core (Cortex-A55) in AMP mode, compatible "rockchip,rk3588-rproc-ap"
+    - MCU core (PMU Cortex-M0), compatible "rockchip,rk3588-rproc-mcu"
+
+maintainers:
+  - Jing Wu <jing.wu@rock-chips.com>
+
+properties:
+  compatible:
+    enum:
+      - rockchip,rk3588-rproc-ap
+      - rockchip,rk3588-rproc-mcu
+
+  memory-region:
+    $ref: /schemas/types.yaml#/definitions/phandle-array
+    description: |
+      Phandle(s) to reserved memory regions for remote processor firmware.
+      AP scenario typically uses multi-carveout: firmware + share + rpmsg.
+      MCU scenario uses single carveout.
+      The primary region must cover all ELF LOAD segments.
+
+  resets:
+    maxItems: 1
+    description:
+      Reset specifier for the PMU M0 (Cortex-M0) core. Required for
+      "rockchip,rk3588-rproc-mcu".
+
+  rockchip,grf:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description:
+      Phandle to the GRF (General Register File) syscon node.
+      Optional for both AP and MCU scenarios.
+
+  rockchip,cpu-id:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      MPIDR of the remote AP core (e.g., 0x300 for A55 cluster0 core3).
+      Only used for "rockchip,rk3588-rproc-ap".
+
+  rockchip,pe-state:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description: |
+      PE (Processing Element) state passed to ATF via SMC to configure
+      the remote CPU mode before boot. Encoding:
+        bit 1: RK_AMP_FLAG_CPU_ARM64 (1=AArch64, 0=AArch32)
+        bit 2: RK_AMP_FLAG_CPU_EL2_HYP (1=EL2, 0=EL1)
+        bit 3: RK_AMP_FLAG_CPU_ARM32_T (1=Thumb, 0=ARM)
+      Typical value for AArch64 EL2: 6 (BIT(1) | BIT(2)).
+      Only used for "rockchip,rk3588-rproc-ap".
+
+required:
+  - compatible
+  - memory-region
+
+allOf:
+  - if:
+      properties:
+        compatible:
+          const: rockchip,rk3588-rproc-mcu
+    then:
+      required:
+        - resets
+
+additionalProperties: false
+
+examples:
+  - |
+    /* AP (Cortex-A55) scenario */
+    rproc_ap: remoteproc-ap {
+        compatible = "rockchip,rk3588-rproc-ap";
+        memory-region = <&firmware_reserved>, <&amp_shmem_reserved>, <&rpmsg_reserved>;
+        rockchip,cpu-id = <0x300>;
+        rockchip,pe-state = <6>;  /* RK_AMP_FLAG_CPU_ARM64 | RK_AMP_FLAG_CPU_EL2_HYP */
+    };
+
+  - |
+    #include <dt-bindings/clock/rk3588-cru.h>
+
+    /* MCU (PMU Cortex-M0) scenario */
+    rproc_mcu: remoteproc-mcu {
+        compatible = "rockchip,rk3588-rproc-mcu";
+        memory-region = <&firmware_reserved>;
+        resets = <&cru SRST_F_PMU_CM0_CORE>;
+        rockchip,grf = <&sys_grf>;
+    };
+...
