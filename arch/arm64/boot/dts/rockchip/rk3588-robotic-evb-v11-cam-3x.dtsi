@@ -49,6 +49,11 @@
 				remote-endpoint = <&imx586_out1>;
 				data-lanes = <1 2 3 4>;
 			};
+			csidcphy0_in_og02c10: endpoint@3 {
+				reg = <3>;
+				remote-endpoint = <&og02c10_out1>;
+				data-lanes = <1 2>;
+			};
 		};
 		port@1 {
 			reg = <1>;
@@ -81,6 +86,11 @@
 				reg = <2>;
 				remote-endpoint = <&imx586_out2>;
 				data-lanes = <1 2 3 4>;
+			};
+			csidcphy1_in_og02c10: endpoint@3 {
+				reg = <3>;
+				remote-endpoint = <&og02c10_out2>;
+				data-lanes = <1 2>;
 			};
 		};
 		port@1 {
@@ -119,6 +129,11 @@
 				reg = <2>;
 				remote-endpoint = <&imx586_out4>;
 				data-lanes = <1 2 3 4>;
+			};
+			csidphy3_in_og02c10: endpoint@3 {
+				reg = <3>;
+				remote-endpoint = <&og02c10_out4>;
+				data-lanes = <1 2>;
 			};
 		};
 		port@1 {
@@ -182,6 +197,29 @@
 			};
 		};
 	};
+
+	og02c10_4: og02c10-4@36 {
+		compatible = "ovti,og02c10";
+		reg = <0x36>;
+		clocks = <&cru CLK_MIPI_CAMARAOUT_M4>;
+		clock-names = "xvclk";
+		pinctrl-names = "default";
+		pinctrl-0 = <&mipim0_camera4_clk>;
+		power-domains = <&power RK3588_PD_VI>;
+		pwdn-gpios = <&i2c4_nca9539_gpio 3 GPIO_ACTIVE_HIGH>;
+		avdd-supply = <&vcc_mipicsi1>;
+		rockchip,camera-module-index = <0>;
+		rockchip,camera-module-facing = "back";
+		rockchip,camera-module-name = "default";
+		rockchip,camera-module-lens-name = "default";
+		rockchip,camera-module-sync-mode = "internal_master";
+		port {
+			og02c10_out4: endpoint {
+				remote-endpoint = <&csidphy3_in_og02c10>;
+				data-lanes = <1 2>;
+			};
+		};
+	};
 };
 
 &i2c4 {
@@ -232,6 +270,29 @@
 			};
 		};
 	};
+
+	og02c10_1: og02c10-1@36 {
+		compatible = "ovti,og02c10";
+		reg = <0x36>;
+		clocks = <&cru CLK_MIPI_CAMARAOUT_M1>;
+		clock-names = "xvclk";
+		pinctrl-names = "default";
+		pinctrl-0 = <&mipim0_camera1_clk>;
+		power-domains = <&power RK3588_PD_VI>;
+		pwdn-gpios = <&i2c4_nca9539_gpio 0 GPIO_ACTIVE_HIGH>;
+		avdd-supply = <&vcc_mipidcphy0>;
+		rockchip,camera-module-index = <0>;
+		rockchip,camera-module-facing = "back";
+		rockchip,camera-module-name = "default";
+		rockchip,camera-module-lens-name = "default";
+		rockchip,camera-module-sync-mode = "internal_master";
+		port {
+			og02c10_out1: endpoint {
+				remote-endpoint = <&csidcphy0_in_og02c10>;
+				data-lanes = <1 2>;
+			};
+		};
+	};
 };
 
 &i2c6 {
@@ -279,6 +340,29 @@
 			imx586_out2: endpoint {
 				remote-endpoint = <&csidcphy1_in_imx586>;
 				data-lanes = <1 2 3 4>;
+			};
+		};
+	};
+
+	og02c10_2: og02c10-2@36 {
+		compatible = "ovti,og02c10";
+		reg = <0x36>;
+		clocks = <&cru CLK_MIPI_CAMARAOUT_M2>;
+		clock-names = "xvclk";
+		pinctrl-names = "default";
+		pinctrl-0 = <&mipim0_camera2_clk>;
+		power-domains = <&power RK3588_PD_VI>;
+		pwdn-gpios = <&i2c4_nca9539_gpio 1 GPIO_ACTIVE_HIGH>;
+		avdd-supply = <&vcc_mipidcphy1>;
+		rockchip,camera-module-index = <0>;
+		rockchip,camera-module-facing = "back";
+		rockchip,camera-module-name = "default";
+		rockchip,camera-module-lens-name = "default";
+		rockchip,camera-module-sync-mode = "internal_master";
+		port {
+			og02c10_out2: endpoint {
+				remote-endpoint = <&csidcphy1_in_og02c10>;
+				data-lanes = <1 2>;
 			};
 		};
 	};
@@ -492,4 +576,3 @@
 		};
 	};
 };
-
