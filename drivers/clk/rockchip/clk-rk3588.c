@@ -2408,7 +2408,7 @@ static void dump_offset(const char *name, u32 offset, u32 len)
 	for (i = 0; i < cnt; i++) {
 		pr_warn("%-12s 0x%05x: ", name, offset + i * 32);
 		print_hex_dump(KERN_CONT, "", DUMP_PREFIX_NONE, 32, 4,
-			       rk3588_cru_base + offset + i * 0x10, 32, false);
+			       rk3588_cru_base + offset + i * 32, 32, false);
 	}
 }
 
