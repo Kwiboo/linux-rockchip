@@ -210,7 +210,7 @@
 		bt_port = "/dev/ttyS4";
 		uart_rts_gpios = <&gpio1 RK_PC2 GPIO_ACTIVE_LOW>;
 		pinctrl-names = "default", "rts_gpio";
-		pinctrl-0 = <&uart4m1_rtsn>;
+		pinctrl-0 = <&uart4m1_rtsn &bt_host_wake_irq>;
 		pinctrl-1 = <&uart4_gpios>;
 		BT,reset_gpio    = <&gpio1 RK_PC7 GPIO_ACTIVE_HIGH>;
 		BT,wake_gpio     = <&gpio1 RK_PD4 GPIO_ACTIVE_HIGH>;
@@ -723,6 +723,10 @@
 	};
 
 	wireless-bluetooth {
+		bt_host_wake_irq: bt-host-wake-irq {
+			rockchip,pins = <0 RK_PB1 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+
 		uart4_gpios: uart4-gpios {
 			rockchip,pins = <1 RK_PC2 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
