@@ -43,6 +43,7 @@ struct rk_gmac_ops {
 	void (*set_clock_selection)(struct rk_priv_data *bsp_priv, bool input,
 				    bool enable);
 	void (*integrated_phy_power)(struct rk_priv_data *bsp_priv, bool up);
+	bool php_grf_required;
 	bool regs_valid;
 	u32 regs[];
 };
@@ -3230,8 +3231,25 @@ static struct rk_priv_data *rk_gmac_setup(struct platform_device *pdev,
 
 	bsp_priv->grf = syscon_regmap_lookup_by_phandle(dev->of_node,
 							"rockchip,grf");
+	if (IS_ERR(bsp_priv->grf)) {
+		dev_err_probe(dev, PTR_ERR(bsp_priv->grf),
+			      "failed to lookup rockchip,grf\n");
+		return ERR_CAST(bsp_priv->grf);
+	}
+
 	bsp_priv->php_grf = syscon_regmap_lookup_by_phandle(dev->of_node,
 							    "rockchip,php_grf");
+	if (IS_ERR(bsp_priv->php_grf) && ops->php_grf_required) {
+		bsp_priv->php_grf =
+			syscon_regmap_lookup_by_phandle(dev->of_node,
+							"rockchip,php-grf");
+		if (IS_ERR(bsp_priv->php_grf)) {
+			dev_err_probe(dev, PTR_ERR(bsp_priv->php_grf),
+				      "failed to lookup rockchip,php-grf\n");
+			return ERR_CAST(bsp_priv->php_grf);
+		}
+	}
+
 	bsp_priv->xpcs = syscon_regmap_lookup_by_phandle(dev->of_node,
 							 "rockchip,xpcs");
 	if (!IS_ERR(bsp_priv->xpcs)) {
