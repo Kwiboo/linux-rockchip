@@ -1309,7 +1309,10 @@ static void rockchip_asrc_lrck_div_set(struct rockchip_asrc *asrc)
 
 	switch (asrc->src_link_dai_id) {
 	case DAI_ID_ASRC0 ... DAI_ID_ASRC15:
-		src_lrck_div = asrc->lrck_src_freq / asrc->sample_rate;
+		if (!asrc->sample_rate)
+			break;
+
+		src_lrck_div = DIV_ROUND_CLOSEST(asrc->lrck_src_freq, asrc->sample_rate);
 		break;
 	case DAI_ID_SPDIF_TX0 ... DAI_ID_SPDIF_RX7:
 		src_lrck_div = 128;
@@ -1320,7 +1323,10 @@ static void rockchip_asrc_lrck_div_set(struct rockchip_asrc *asrc)
 
 	switch (asrc->dst_link_dai_id) {
 	case DAI_ID_ASRC0 ... DAI_ID_ASRC15:
-		dst_lrck_div = asrc->lrck_dst_freq / asrc->resample_rate;
+		if (!asrc->resample_rate)
+			break;
+
+		dst_lrck_div = DIV_ROUND_CLOSEST(asrc->lrck_dst_freq, asrc->resample_rate);
 		break;
 	case DAI_ID_SPDIF_TX0 ... DAI_ID_SPDIF_RX7:
 		dst_lrck_div = 128;
