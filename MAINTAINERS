@@ -9449,6 +9449,7 @@ S:	Orphan
 F:	drivers/edac/i3000_edac.c
 
 EDAC-I5000
+R:	Andrew Luebke <andrew.luebke@gmail.com>
 L:	linux-edac@vger.kernel.org
 S:	Maintained
 F:	drivers/edac/i5000_edac.c
