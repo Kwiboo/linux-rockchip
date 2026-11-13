@@ -568,9 +568,19 @@ void memcg_reparent_list_lrus(struct mem_cgroup *memcg, struct mem_cgroup *paren
 static inline bool memcg_list_lru_allocated(struct mem_cgroup *memcg,
 					    struct list_lru *lru)
 {
+	struct list_lru_memcg *mlru;
+	bool allocated;
 	int idx = memcg->kmemcg_id;
 
-	return idx < 0 || xa_load(&lru->xa, idx);
+	if (idx < 0)
+		return true;
+
+	rcu_read_lock();
+	mlru = xa_load(&lru->xa, idx);
+	allocated = mlru && mlru->memcg == memcg;
+	rcu_read_unlock();
+
+	return allocated;
 }
 
 static int __memcg_list_lru_alloc(struct mem_cgroup *memcg,
