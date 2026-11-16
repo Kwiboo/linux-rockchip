@@ -3682,6 +3682,36 @@ const char *btf_find_decl_tag_value(const struct btf *btf, const struct btf_type
 	return value;
 }
 
+/*
+ * The value of the decl tag "<tag_key><value>" on a function of the kernel or of
+ * a module. The build sorts their BTF by name: the tags with one key are
+ * neighbours, and so are those with one value.
+ *
+ * Only the own types of btf are searched, not its base. With the BTF of a module
+ * func_id can be a FUNC of vmlinux: it stands for the function of that name in the
+ * module. What the build found in the code of vmlinux is not true for it.
+ */
+const char *btf_find_func_tag_value(const struct btf *btf, u32 func_id, const char *tag_key)
+{
+	int id, n = btf_nr_types(btf), len = strlen(tag_key);
+	const char *name = NULL;
+	u32 name_off = 0;
+
+	for (id = btf_find_by_name_kind_bsearch(btf, tag_key); id < n; id++) {
+		const struct btf_type *t = btf_type_by_id(btf, id);
+
+		if (t->name_off != name_off) {
+			name_off = t->name_off;
+			name = btf_name_by_offset(btf, name_off);
+			if (strncmp(name, tag_key, len))
+				break;
+		}
+		if (t->type == func_id && btf_type_is_decl_tag(t))
+			return name + len;
+	}
+	return NULL;
+}
+
 static int
 btf_find_graph_root(const struct btf *btf, const struct btf_type *pt,
 		    const struct btf_type *t, int comp_idx, u32 off,
@@ -8747,8 +8777,7 @@ static int btf_validate_return_type(struct bpf_verifier_env *env, struct btf *bt
 }
 
 static int btf_check_arg_slots(struct bpf_verifier_log *log, const char *tname,
-			       bool is_global, u32 slot_cnt,
-			       struct bpf_subprog_info *sub)
+			       bool is_global, u32 slot_cnt)
 {
 	if (slot_cnt <= MAX_BPF_FUNC_REG_ARGS)
 		return 0;
@@ -8760,12 +8789,7 @@ static int btf_check_arg_slots(struct bpf_verifier_log *log, const char *tname,
 			tname, slot_cnt, MAX_BPF_FUNC_REG_ARGS);
 		return -EINVAL;
 	}
-	if (!bpf_jit_supports_stack_args()) {
-		bpf_log(log, "JIT does not support function %s() with %d argument slots\n",
-			tname, slot_cnt);
-		return -EFAULT;
-	}
-	sub->stack_arg_cnt = slot_cnt - MAX_BPF_FUNC_REG_ARGS;
+	/* The code of a static function tells which stack arguments it takes */
 	return 0;
 }
 
@@ -8832,13 +8856,15 @@ int btf_prepare_func_args(struct bpf_verifier_env *env, int subprog)
 	}
 	args = (const struct btf_param *)(t + 1);
 	nargs = btf_type_vlen(t);
-	sub->arg_slot_cnt = nargs;
+	sub->arg_slot_cnt = min_t(u32, nargs, MAX_BPF_FUNC_ARGS);
 	if (nargs > MAX_BPF_FUNC_ARGS) {
+		if (!is_global) /* not fatal for static funcs */
+			return -EINVAL;
 		bpf_log(log, "kernel supports at most %d parameters, function %s has %d\n",
 			MAX_BPF_FUNC_ARGS, tname, nargs);
 		return -EFAULT;
 	}
-	err = btf_check_arg_slots(log, tname, is_global, nargs, sub);
+	err = btf_check_arg_slots(log, tname, is_global, nargs);
 	if (err)
 		return err;
 
@@ -9027,7 +9053,7 @@ skip_pointer:
 		return -EINVAL;
 	}
 
-	err = btf_check_arg_slots(log, tname, is_global, slots_used, sub);
+	err = btf_check_arg_slots(log, tname, is_global, slots_used);
 	if (err)
 		return err;
 	sub->arg_slot_cnt = slots_used;
