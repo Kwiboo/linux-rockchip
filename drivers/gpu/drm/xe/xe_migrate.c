@@ -272,9 +272,8 @@ static void xe_migrate_ulls_toggle_enable(struct xe_migrate *m, bool enabled)
 	m->ulls.enabled = enabled;
 }
 
-static void xe_migrate_fini(void *arg)
+static void xe_migrate_ulls_fini(struct xe_migrate *m)
 {
-	struct xe_migrate *m = arg;
 	struct xe_device *xe = tile_to_xe(m->tile);
 
 	disable_delayed_work_sync(&m->ulls.exit_work);
@@ -284,6 +283,13 @@ static void xe_migrate_fini(void *arg)
 			xe_migrate_ulls_toggle_enable(m, false);
 		}
 	}
+}
+
+static void xe_migrate_fini(void *arg)
+{
+	struct xe_migrate *m = arg;
+
+	xe_migrate_ulls_fini(m);
 
 	xe_vm_lock(m->q->vm, false);
 	xe_bo_unpin(m->pt_bo);
@@ -776,6 +782,42 @@ static void xe_migrate_ulls_exit(struct work_struct *work)
 	}
 
 	drm_dev_exit(idx);
+}
+
+/**
+ * xe_migrate_flr_prepare() - Prepare migrate context for FLR
+ * @m: The migration context
+ */
+void xe_migrate_flr_prepare(struct xe_migrate *m)
+{
+	struct xe_device *xe = tile_to_xe(m->tile);
+
+	if (xe->info.has_usm) {
+		flush_workqueue(xe->usm.prefetch_wq);
+		flush_workqueue(xe->usm.pagefault_wq);
+	}
+
+	xe_migrate_ulls_fini(m);
+}
+
+/**
+ * xe_migrate_reinit() - Re-initialize a migrate context
+ * @m: The migration context
+ *
+ * Returns: 0 on success, negative error code otherwise.
+ */
+int xe_migrate_reinit(struct xe_migrate *m)
+{
+	int err;
+
+	xe_migrate_prepare_vm(m->tile, m, m->q->vm, NULL);
+
+	err = xe_exec_queue_reinit(m->q);
+	if (err)
+		return err;
+
+	enable_delayed_work(&m->ulls.exit_work);
+	return 0;
 }
 
 /**
