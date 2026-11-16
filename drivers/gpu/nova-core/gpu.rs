@@ -12,10 +12,7 @@ use kernel::{
     pci,
     prelude::*,
     ptr::Alignment,
-    sizes::{
-        SizeConstants,
-        SZ_4K, //
-    },
+    sizes::SizeConstants,
     uapi, //
 };
 
@@ -35,7 +32,7 @@ use crate::{
     gsp::{
         self,
         cmdq::Cmdq,
-        commands::GetGspStaticInfoReply,
+        commands::rpc::GetGspStaticInfoReply,
         Gsp,
         GspBootContext, //
     },
@@ -52,6 +49,10 @@ use crate::{
         pagetable::MmuVersion,
         GpuMm,
         VramAddress, //
+    },
+    timer::{
+        Timer,
+        TimerState, //
     },
     vgpu::VgpuManager, //
 };
@@ -331,6 +332,8 @@ struct GspResources<'gpu> {
     // TODO: use different resource types for each boot method, and make the relevant Gsp methods
     // generic against them.
     fsp: Option<Fsp<'gpu>>,
+    /// Timer state - contains system timer offset
+    timer: TimerState,
     /// vGPU state detected before GSP boot.
     vgpu: VgpuManager,
     /// GSP runtime data.
@@ -497,6 +500,8 @@ impl<'gpu> Gpu<'gpu> {
 
                 fsp: Fsp::try_new(dev, bar, spec.chipset)?,
 
+                timer: Timer::setup(dev, bar, spec.chipset, fsp.as_ref())?,
+
                 vgpu: VgpuManager::new(pdev, spec.chipset, fsp.as_mut()),
 
                 gsp <- Gsp::new(pdev, bar),
@@ -568,7 +573,7 @@ impl<'gpu> Gpu<'gpu> {
                 let buddy_params = GpuBuddyParams {
                     base_offset: usable_vram.start,
                     size: usable_vram.end - usable_vram.start,
-                    chunk_size: Alignment::new::<SZ_4K>(),
+                    chunk_size: Alignment::SZ_4K,
                 };
 
                 GpuMm::new(
