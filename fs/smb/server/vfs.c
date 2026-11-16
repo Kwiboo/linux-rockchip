@@ -1630,13 +1630,15 @@ static struct xattr_smb_acl *ksmbd_vfs_make_xattr_posix_acl(const struct mnt_idm
 
 	posix_acls = get_inode_acl(inode, acl_type);
 	if (IS_ERR_OR_NULL(posix_acls))
-		return NULL;
+		return ERR_CAST(posix_acls);
 
 	smb_acl = kzalloc(sizeof(struct xattr_smb_acl) +
 			  sizeof(struct xattr_acl_entry) * posix_acls->a_count,
 			  KSMBD_DEFAULT_GFP);
-	if (!smb_acl)
+	if (!smb_acl) {
+		smb_acl = ERR_PTR(-ENOMEM);
 		goto out;
+	}
 
 	smb_acl->count = posix_acls->a_count;
 	pa_entry = posix_acls->a_entries;
@@ -1712,11 +1714,17 @@ int ksmbd_vfs_set_sd_xattr(struct ksmbd_conn *conn,
 
 	sha256(acl.sd_buf, acl.sd_size, acl.hash);
 
+	/* A POSIX ACL that cannot be read is hashed as none, as before */
 	smb_acl = ksmbd_vfs_make_xattr_posix_acl(idmap, inode,
 						 ACL_TYPE_ACCESS);
-	if (S_ISDIR(inode->i_mode))
+	if (IS_ERR(smb_acl))
+		smb_acl = NULL;
+	if (S_ISDIR(inode->i_mode)) {
 		def_smb_acl = ksmbd_vfs_make_xattr_posix_acl(idmap, inode,
 							     ACL_TYPE_DEFAULT);
+		if (IS_ERR(def_smb_acl))
+			def_smb_acl = NULL;
+	}
 
 	rc = ndr_encode_posix_acl(&acl_ndr, idmap, inode,
 				  smb_acl, def_smb_acl);
@@ -1770,11 +1778,23 @@ int ksmbd_vfs_get_sd_xattr(struct ksmbd_conn *conn,
 	if (rc)
 		goto out_free;
 
+	/* ACL read failures must not masquerade as a stale SD */
 	smb_acl = ksmbd_vfs_make_xattr_posix_acl(idmap, inode,
 						 ACL_TYPE_ACCESS);
-	if (S_ISDIR(inode->i_mode))
+	if (IS_ERR(smb_acl)) {
+		rc = PTR_ERR(smb_acl) == -ENOMEM ? -ENOMEM : -EIO;
+		smb_acl = NULL;
+		goto out_free;
+	}
+	if (S_ISDIR(inode->i_mode)) {
 		def_smb_acl = ksmbd_vfs_make_xattr_posix_acl(idmap, inode,
 							     ACL_TYPE_DEFAULT);
+		if (IS_ERR(def_smb_acl)) {
+			rc = PTR_ERR(def_smb_acl) == -ENOMEM ? -ENOMEM : -EIO;
+			def_smb_acl = NULL;
+			goto out_free;
+		}
+	}
 
 	rc = ndr_encode_posix_acl(&acl_ndr, idmap, inode, smb_acl,
 				  def_smb_acl);
@@ -1914,7 +1934,10 @@ int ksmbd_vfs_fill_dentry_attrs(struct ksmbd_work *work,
 	if (rc)
 		return rc;
 
-	time = ksmbd_UnixTimeToNT(ksmbd_kstat->kstat->ctime);
+	if (ksmbd_kstat->kstat->result_mask & STATX_BTIME)
+		time = ksmbd_UnixTimeToNT(ksmbd_kstat->kstat->btime);
+	else
+		time = ksmbd_UnixTimeToNT(ksmbd_kstat->kstat->ctime);
 	ksmbd_kstat->create_time = time;
 
 	/*
@@ -1933,7 +1956,13 @@ int ksmbd_vfs_fill_dentry_attrs(struct ksmbd_work *work,
 		rc = ksmbd_vfs_get_dos_attrib_xattr(idmap, dentry, &da);
 		if (rc > 0) {
 			ksmbd_kstat->file_attributes = cpu_to_le32(da.attr);
-			ksmbd_kstat->create_time = da.create_time;
+			/*
+			 * Older ksmbd writers cleared XATTR_DOSINFO_CREATE_TIME on sparse
+			 * or compression updates. Fall back to using a non-zero stored time
+			 * for backwards compatibility.
+			 */
+			if ((da.flags & XATTR_DOSINFO_CREATE_TIME) || da.create_time > 0)
+				ksmbd_kstat->create_time = da.create_time;
 		} else {
 			ksmbd_debug(VFS, "fail to load dos attribute.\n");
 		}
@@ -2331,6 +2360,10 @@ int ksmbd_vfs_set_init_posix_acl(const struct mnt_idmap *idmap,
 	}
 	posix_state_to_acl(&acl_state, acls->a_entries);
 
+	rc = mnt_want_write(path->mnt);
+	if (rc)
+		goto out;
+
 	rc = set_posix_acl(idmap, dentry, ACL_TYPE_ACCESS, acls);
 	if (rc < 0)
 		ksmbd_debug(SMB, "Set posix acl(ACL_TYPE_ACCESS) failed, rc : %d\n",
@@ -2342,7 +2375,9 @@ int ksmbd_vfs_set_init_posix_acl(const struct mnt_idmap *idmap,
 			ksmbd_debug(SMB, "Set posix acl(ACL_TYPE_DEFAULT) failed, rc : %d\n",
 				    rc);
 	}
+	mnt_drop_write(path->mnt);
 
+out:
 	free_acl_state(&acl_state);
 	posix_acl_release(acls);
 	return rc;
@@ -2472,10 +2507,15 @@ update_fattr:
 		rc = ksmbd_vfs_get_dos_attrib_xattr(idmap, dentry, &da);
 		if (rc <= 0) {
 			da.version = 4;
-			da.itime = fp->itime;
-			da.create_time = fp->create_time;
-			da.flags = XATTR_DOSINFO_CREATE_TIME |
-				XATTR_DOSINFO_ITIME;
+			da.flags = 0;
+		} else {
+			/*
+			 * Heal the xattr damaged by older ksmbd writers which
+			 * wrongly cleared XATTR_DOSINFO_CREATE_TIME on compression
+			 * updates.
+			 */
+			if (da.create_time > 0)
+				da.flags |= XATTR_DOSINFO_CREATE_TIME;
 		}
 
 		da.attr = le32_to_cpu(fp->f_ci->m_fattr);
