@@ -12,6 +12,7 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/mnt_idmapping.h>
+#include <linux/mount.h>
 
 #include "smbacl.h"
 #include "smb_common.h"
@@ -1442,7 +1443,7 @@ pass:
 			pntsd_size += sizeof(struct smb_acl) + nt_size;
 		}
 
-		ksmbd_vfs_set_sd_xattr(conn, idmap, path, pntsd, pntsd_size, false);
+		ksmbd_vfs_set_sd_xattr(conn, idmap, path, pntsd, pntsd_size, true);
 		kfree(pntsd);
 	}
 
@@ -1544,8 +1545,11 @@ int smb_check_perm_dacl(struct ksmbd_conn *conn, const struct path *path,
 	ksmbd_debug(SMB, "check permission using windows acl\n");
 	pntsd_size = ksmbd_vfs_get_sd_xattr(conn, idmap,
 					    path->dentry, &pntsd);
-	if (pntsd_size <= 0 || !pntsd)
+	if (pntsd_size <= 0 || !pntsd) {
+		if (pntsd_size < 0 && !smb_no_stored_sd(pntsd_size))
+			rc = pntsd_size == -ENOMEM ? -ENOMEM : -EACCES;
 		goto err_out;
+	}
 
 	dacl_offset = le32_to_cpu(pntsd->dacloffset);
 	if (!dacl_offset ||
@@ -1944,6 +1948,12 @@ int set_info_sec(struct ksmbd_conn *conn, struct ksmbd_tree_connect *tcon,
 				   (fattr.cf_mode & 0777);
 
 	ksmbd_vfs_remove_acl_xattrs(idmap, path);
+	if (get_write) {
+		rc = mnt_want_write(path->mnt);
+		if (rc)
+			goto out;
+	}
+
 	/* Update posix acls */
 	if (IS_ENABLED(CONFIG_FS_POSIX_ACL) && fattr.cf_dacls) {
 		rc = set_posix_acl(idmap, path->dentry,
@@ -1965,6 +1975,8 @@ int set_info_sec(struct ksmbd_conn *conn, struct ksmbd_tree_connect *tcon,
 	inode_lock(inode);
 	rc = notify_change(idmap, path->dentry, &newattrs, NULL);
 	inode_unlock(inode);
+	if (get_write)
+		mnt_drop_write(path->mnt);
 	if (rc)
 		goto out;
 
