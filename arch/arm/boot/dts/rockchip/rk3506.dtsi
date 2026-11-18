@@ -349,6 +349,39 @@
 			reg = <0xff288000 0x4000>;
 		};
 
+		usb2phy: usb2phy@ff2b0000 {
+			compatible = "rockchip,rk3506-usb2phy";
+			reg = <0xff2b0000 0x8000>;
+			clocks = <&cru CLK_REF_USBPHY_TOP>, <&cru PCLK_USBPHY>;
+			clock-names = "phyclk", "pclk";
+			#clock-cells = <0>;
+			clock-output-names = "clk_usbphy_480m";
+			rockchip,usbgrf = <&grf>;
+			status = "disabled";
+
+			usb2phy_otg0: otg-port {
+				interrupts = <GIC_SPI 75 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 76 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 77 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 78 IRQ_TYPE_LEVEL_HIGH>;
+				interrupt-names = "otg-bvalid", "otg-id",
+						  "linestate", "disconnect";
+				#phy-cells = <0>;
+				status = "disabled";
+			};
+
+			usb2phy_otg1: host-port {
+				interrupts = <GIC_SPI 80 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 81 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 82 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 83 IRQ_TYPE_LEVEL_HIGH>;
+				interrupt-names = "otg-bvalid", "otg-id",
+						  "linestate", "disconnect";
+				#phy-cells = <0>;
+				status = "disabled";
+			};
+		};
+
 		sdmmc: mmc@ff480000 {
 			compatible = "rockchip,rk3506-dw-mshc",
 				     "rockchip,rk3288-dw-mshc";
@@ -580,6 +613,38 @@
 			#phy-cells = <0>;
 			resets = <&cru SRST_P_DPHY>;
 			reset-names = "apb";
+			status = "disabled";
+		};
+
+		usb20_otg0: usb@ff740000 {
+			compatible = "rockchip,rk3506-usb",
+				     "rockchip,rk3066-usb", "snps,dwc2";
+			reg = <0xff740000 0x40000>;
+			clocks = <&cru HCLK_USBOTG0>;
+			clock-names = "otg";
+			dr_mode = "otg";
+			g-np-tx-fifo-size = <16>;
+			g-rx-fifo-size = <280>;
+			g-tx-fifo-size = <256 128 128 64 32 16>;
+			interrupts = <GIC_SPI 74 IRQ_TYPE_LEVEL_HIGH>;
+			phys = <&usb2phy_otg0>;
+			phy-names = "usb2-phy";
+			status = "disabled";
+		};
+
+		usb20_otg1: usb@ff780000 {
+			compatible = "rockchip,rk3506-usb",
+				     "rockchip,rk3066-usb", "snps,dwc2";
+			reg = <0xff780000 0x40000>;
+			clocks = <&cru HCLK_USBOTG1>;
+			clock-names = "otg";
+			dr_mode = "otg";
+			g-np-tx-fifo-size = <16>;
+			g-rx-fifo-size = <280>;
+			g-tx-fifo-size = <256 128 128 64 32 16>;
+			interrupts = <GIC_SPI 79 IRQ_TYPE_LEVEL_HIGH>;
+			phys = <&usb2phy_otg1>;
+			phy-names = "usb2-phy";
 			status = "disabled";
 		};
 
