@@ -20,6 +20,7 @@ properties:
       - rockchip,rk3328-usb2phy
       - rockchip,rk3366-usb2phy
       - rockchip,rk3399-usb2phy
+      - rockchip,rk3506-usb2phy
       - rockchip,rk3528-usb2phy
       - rockchip,rk3562-usb2phy
       - rockchip,rk3568-usb2phy
@@ -97,11 +98,16 @@ properties:
         const: 0
 
       interrupts:
-        description: host linestate interrupt
-        maxItems: 1
+        maxItems: 4
 
       interrupt-names:
-        const: linestate
+        oneOf:
+          - const: linestate
+          - items:
+              - const: otg-bvalid
+              - const: otg-id
+              - const: linestate
+              - const: disconnect
 
       phy-supply:
         description:
@@ -121,7 +127,7 @@ properties:
 
       interrupts:
         minItems: 1
-        maxItems: 3
+        maxItems: 4
 
       interrupt-names:
         oneOf:
@@ -131,6 +137,7 @@ properties:
               - const: otg-bvalid
               - const: otg-id
               - const: linestate
+              - const: disconnect
 
       phy-supply:
         description:
@@ -158,6 +165,7 @@ allOf:
         compatible:
           contains:
             enum:
+              - rockchip,rk3506-usb2phy
               - rockchip,rk3528-usb2phy
               - rockchip,rk3568-usb2phy
               - rockchip,rv1108-usb2phy
@@ -226,6 +234,24 @@ allOf:
           maxItems: 1
         clock-names:
           maxItems: 1
+
+  - if:
+      properties:
+        compatible:
+          contains:
+            enum:
+              - rockchip,rk3506-usb2phy
+    then:
+      properties:
+        host-port:
+          properties:
+            interrupts:
+              minItems: 4
+
+        otg-port:
+          properties:
+            interrupts:
+              minItems: 4
 
   - if:
       properties:
