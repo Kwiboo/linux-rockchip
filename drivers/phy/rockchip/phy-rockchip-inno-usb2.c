@@ -12,6 +12,7 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/gpio/consumer.h>
+#include <linux/hw_bitfield.h>
 #include <linux/jiffies.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -1443,6 +1444,29 @@ static int rk3128_usb2phy_tuning(struct rockchip_usb2phy *rphy)
 	return 0;
 }
 
+static int rk3506_usb2phy_tuning(struct rockchip_usb2phy *rphy)
+{
+	/* Turn off otg0 port differential receiver in suspend mode */
+	regmap_write(rphy->phy_base, 0x30, FIELD_PREP_WM16(BIT(2), 0));
+
+	/* Turn off otg1 port differential receiver in suspend mode */
+	regmap_write(rphy->phy_base, 0x430, FIELD_PREP_WM16(BIT(2), 0));
+
+	/* Set otg0 port HS eye height to 425mv (default is 450mv) */
+	regmap_write(rphy->phy_base, 0x30, FIELD_PREP_WM16(GENMASK(6, 4), 5));
+
+	/* Set otg1 port HS eye height to 425mv (default is 450mv) */
+	regmap_write(rphy->phy_base, 0x430, FIELD_PREP_WM16(GENMASK(6, 4), 5));
+
+	/* Choose the Tx fs/ls data as linestate from TX driver for otg0 port */
+	regmap_write(rphy->phy_base, 0x94, FIELD_PREP_WM16(GENMASK(6, 3), 3));
+
+	/* Choose the Tx fs/ls data as linestate from TX driver for otg1 port */
+	regmap_write(rphy->phy_base, 0x494, FIELD_PREP_WM16(GENMASK(6, 3), 3));
+
+	return 0;
+}
+
 static int rk3528_usb2phy_tuning(struct rockchip_usb2phy *rphy)
 {
 	/* Turn off otg port differential receiver in suspend mode */
@@ -1866,6 +1890,82 @@ static const struct rockchip_usb2phy_cfg rk3399_phy_cfgs[] = {
 	{ /* sentinel */ }
 };
 
+static const struct rockchip_usb2phy_cfg rk3506_phy_cfgs[] = {
+	{
+		.reg		= 0xff2b0000,
+		.num_ports	= 2,
+		.phy_tuning	= rk3506_usb2phy_tuning,
+		.clkout_ctl_phy = { 0x041c, 7, 2, 0, 0x27 },
+		.port_cfgs	= {
+			[USB2PHY_PORT_OTG] = {
+				.phy_sus	= { 0x0060, 8, 0, 0, 0x1d1 },
+				.bvalid_det_en	= { 0x0150, 3, 2, 0, 3 },
+				.bvalid_det_st	= { 0x0154, 3, 2, 0, 3 },
+				.bvalid_det_clr = { 0x0158, 3, 2, 0, 3 },
+				.idfall_det_en	= { 0x0150, 5, 5, 0, 1 },
+				.idfall_det_st	= { 0x0154, 5, 5, 0, 1 },
+				.idfall_det_clr = { 0x0158, 5, 5, 0, 1 },
+				.idrise_det_en	= { 0x0150, 4, 4, 0, 1 },
+				.idrise_det_st	= { 0x0154, 4, 4, 0, 1 },
+				.idrise_det_clr = { 0x0158, 4, 4, 0, 1 },
+				.ls_det_en	= { 0x0150, 0, 0, 0, 1 },
+				.ls_det_st	= { 0x0154, 0, 0, 0, 1 },
+				.ls_det_clr	= { 0x0158, 0, 0, 0, 1 },
+				.disfall_en	= { 0x0150, 7, 7, 0, 0 },
+				.disfall_st	= { 0x0154, 7, 7, 0, 1 },
+				.disfall_clr	= { 0x0158, 7, 7, 0, 1 },
+				.disrise_en	= { 0x0150, 6, 6, 0, 0 },
+				.disrise_st	= { 0x0154, 6, 6, 0, 1 },
+				.disrise_clr	= { 0x0158, 6, 6, 0, 1 },
+				.utmi_avalid	= { 0x0118, 1, 1, 0, 1 },
+				.utmi_bvalid	= { 0x0118, 0, 0, 0, 1 },
+				.utmi_id	= { 0x0118, 6, 6, 0, 1 },
+				.utmi_ls	= { 0x0118, 5, 4, 0, 1 },
+				.utmi_hstdet	= { 0x0118, 7, 7, 0, 1 },
+			},
+			[USB2PHY_PORT_HOST] = {
+				.phy_sus	= { 0x0070, 8, 0, 0, 0x1d1 },
+				.bvalid_det_en	= { 0x0170, 3, 2, 0, 3 },
+				.bvalid_det_st	= { 0x0174, 3, 2, 0, 3 },
+				.bvalid_det_clr = { 0x0178, 3, 2, 0, 3 },
+				.idfall_det_en	= { 0x0170, 5, 5, 0, 1 },
+				.idfall_det_st	= { 0x0174, 5, 5, 0, 1 },
+				.idfall_det_clr = { 0x0178, 5, 5, 0, 1 },
+				.idrise_det_en	= { 0x0170, 4, 4, 0, 1 },
+				.idrise_det_st	= { 0x0174, 4, 4, 0, 1 },
+				.idrise_det_clr = { 0x0178, 4, 4, 0, 1 },
+				.ls_det_en	= { 0x0170, 0, 0, 0, 1 },
+				.ls_det_st	= { 0x0174, 0, 0, 0, 1 },
+				.ls_det_clr	= { 0x0178, 0, 0, 0, 1 },
+				.disfall_en	= { 0x0170, 7, 7, 0, 0 },
+				.disfall_st	= { 0x0174, 7, 7, 0, 1 },
+				.disfall_clr	= { 0x0178, 7, 7, 0, 1 },
+				.disrise_en	= { 0x0170, 6, 6, 0, 0 },
+				.disrise_st	= { 0x0174, 6, 6, 0, 1 },
+				.disrise_clr	= { 0x0178, 6, 6, 0, 1 },
+				.utmi_avalid	= { 0x0118, 9, 9, 0, 1 },
+				.utmi_bvalid	= { 0x0118, 8, 8, 0, 1 },
+				.utmi_id	= { 0x0118, 14, 14, 0, 1 },
+				.utmi_ls	= { 0x0118, 13, 12, 0, 1 },
+				.utmi_hstdet	= { 0x0118, 15, 15, 0, 1 },
+			}
+		},
+		.chg_det = {
+			.opmode		= { 0x0060, 3, 0, 5, 1 },
+			.cp_det		= { 0x0118, 19, 19, 0, 1 },
+			.dcp_det	= { 0x0118, 18, 18, 0, 1 },
+			.dp_det		= { 0x0118, 20, 20, 0, 1 },
+			.idm_sink_en	= { 0x006c, 1, 1, 0, 1 },
+			.idp_sink_en	= { 0x006c, 0, 0, 0, 1 },
+			.idp_src_en	= { 0x006c, 2, 2, 0, 1 },
+			.rdm_pdwn_en	= { 0x006c, 3, 3, 0, 1 },
+			.vdm_src_en	= { 0x006c, 5, 5, 0, 1 },
+			.vdp_src_en	= { 0x006c, 4, 4, 0, 1 },
+		},
+	},
+	{ /* sentinel */ }
+};
+
 static const struct rockchip_usb2phy_cfg rk3528_phy_cfgs[] = {
 	{
 		.reg = 0xffdf0000,
@@ -2284,6 +2384,7 @@ static const struct of_device_id rockchip_usb2phy_dt_match[] = {
 	{ .compatible = "rockchip,rk3328-usb2phy", .data = &rk3328_phy_cfgs },
 	{ .compatible = "rockchip,rk3366-usb2phy", .data = &rk3366_phy_cfgs },
 	{ .compatible = "rockchip,rk3399-usb2phy", .data = &rk3399_phy_cfgs },
+	{ .compatible = "rockchip,rk3506-usb2phy", .data = &rk3506_phy_cfgs },
 	{ .compatible = "rockchip,rk3528-usb2phy", .data = &rk3528_phy_cfgs },
 	{ .compatible = "rockchip,rk3562-usb2phy", .data = &rk3562_phy_cfgs },
 	{ .compatible = "rockchip,rk3568-usb2phy", .data = &rk3568_phy_cfgs },
