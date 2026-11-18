@@ -221,3 +221,25 @@
 &uart0 {
 	status = "okay";
 };
+
+&usb20_otg0 {
+	status = "okay";
+};
+
+&usb20_otg1 {
+	dr_mode = "host";
+	status = "okay";
+};
+
+&usb2phy {
+	status = "okay";
+};
+
+&usb2phy_otg0 {
+	status = "okay";
+};
+
+&usb2phy_otg1 {
+	phy-supply = <&vcc5v0_usb20_otg1>;
+	status = "okay";
+};
