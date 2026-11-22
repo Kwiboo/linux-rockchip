@@ -113,6 +113,7 @@
 #define  SFC_VER_4			0x4
 #define  SFC_VER_5			0x5
 #define  SFC_VER_8			0x8
+#define  SFC_VER_10			0x10
 
 /* Delay line controller register */
 #define SFC_DLL_CTRL0			0x3C
@@ -220,7 +221,7 @@ static u32 rockchip_sfc_get_max_iosize(struct rockchip_sfc *sfc)
 
 static int rockchip_sfc_clk_set_rate(struct rockchip_sfc *sfc, unsigned long  speed)
 {
-	if (sfc->version >= SFC_VER_8)
+	if (sfc->version >= SFC_VER_10)
 		return clk_set_rate(sfc->clk, speed * 2);
 	else
 		return clk_set_rate(sfc->clk, speed);
@@ -228,7 +229,7 @@ static int rockchip_sfc_clk_set_rate(struct rockchip_sfc *sfc, unsigned long  sp
 
 static unsigned long rockchip_sfc_clk_get_rate(struct rockchip_sfc *sfc)
 {
-	if (sfc->version >= SFC_VER_8)
+	if (sfc->version >= SFC_VER_10)
 		return clk_get_rate(sfc->clk) / 2;
 	else
 		return clk_get_rate(sfc->clk);
